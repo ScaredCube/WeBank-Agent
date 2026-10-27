@@ -1,6 +1,8 @@
 import json
+import logging
 
 from app.agent.llm import LLMChunk
+from app.agent.registry import RiskLevel, ToolRegistry, ToolSpec
 
 
 def _sse_payloads(text: str) -> list[dict]:
@@ -183,3 +185,36 @@ def test_chat_does_not_display_model_bank_claim_without_tool(client, auth_header
     assert "一百万" not in content
     assert "转账已经成功" not in content
     assert "未能通过工具完成查询" in content
+
+
+def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, caplog):
+    executed = []
+
+    async def handler(**kwargs):
+        executed.append(True)
+        return {"ok": True, "data": None, "error": None}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="risky", description="测试", parameters={},
+                               risk=RiskLevel.YELLOW, handler=handler))
+
+    class FakeLLM:
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{"id": "call-1", "type": "function",
+                                            "function": {"name": "risky", "arguments": "{}"}}])
+            else:
+                yield LLMChunk(content="操作已成功")
+
+    monkeypatch.setattr("app.agent.loop.create_readonly_registry", lambda: registry)
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    caplog.set_level(logging.INFO, logger="app.agent.loop")
+    created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
+    response = client.post(f"/api/chat/conversations/{created['id']}/messages",
+                           json={"content": "执行操作"}, headers=auth_headers)
+    assert not executed
+    assert "操作需要进一步验证" in _sse_payloads(response.text)[-1]["message"]["content"]
+    assert any("risk_decision tool=risky" in record.message for record in caplog.records)

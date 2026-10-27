@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -28,11 +29,20 @@ class Settings(BaseSettings):
     demo_password: str = "demo123"
     demo_display_name: str = "演示用户"
 
+    risk_night_start_hour: int = Field(default=0, ge=0, le=23)
+    risk_night_end_hour: int = Field(default=6, ge=0, le=23)
+
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
     llm_timeout: float = 60.0
     llm_max_history: int = 20
+
+    @model_validator(mode="after")
+    def validate_night_hours(self) -> "Settings":
+        if self.risk_night_start_hour == self.risk_night_end_hour:
+            raise ValueError("夜间风控开始和结束时间不能相同")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

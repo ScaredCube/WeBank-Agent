@@ -52,3 +52,16 @@ class Transaction(SQLModel, table=True):
     category: str
     note: str = ""
     occurred_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class PendingAction(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    action_type: str
+    details_json: str
+    risk_level: str
+    status: str = "pending"
+    token_hash: str
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    confirmed_at: datetime | None = None

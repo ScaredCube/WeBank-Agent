@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -7,11 +8,13 @@ from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
+from app.risk.engine import assess_tool
 from app.tools.register import create_readonly_registry
 from app.tools.presentation import render_tool_result
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,11 +79,17 @@ class AgentLoop:
                     except (ValueError, TypeError):
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
-                        if spec is None or spec.risk != RiskLevel.GREEN or spec.handler is None:
+                        if spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
                         else:
-                            with session_scope() as session:
-                                result = await spec.handler(session=session, user_id=user_id, **args)
+                            decision = assess_tool(spec)
+                            logger.info("risk_decision tool=%s user_id=%s level=%s reasons=%s",
+                                        spec.name, user_id, decision.level.value, decision.reasons)
+                            if decision.level != RiskLevel.GREEN:
+                                result = {"ok": False, "data": None, "error": "操作需要进一步验证"}
+                            else:
+                                with session_scope() as session:
+                                    result = await spec.handler(session=session, user_id=user_id, **args)
                     messages.append({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
