@@ -113,7 +113,7 @@ async def send_message(
                     collected.append(text)
                     yield _sse({"type": "delta", "text": text})
                 elif event.type == "action_required":
-                    yield _sse({"type": "action_required", "tool_calls": event.data["tool_calls"]})
+                    yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
                     yield _sse({"type": "error", "message": event.data["message"]})
                     return
@@ -129,5 +129,5 @@ async def send_message(
     return EventSourceResponse(
         event_stream(),
         ping=15,
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )

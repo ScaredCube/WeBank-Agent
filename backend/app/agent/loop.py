@@ -9,7 +9,7 @@ from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
 from app.risk.engine import assess_tool
-from app.tools.register import create_readonly_registry
+from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
 
 MAX_TOOL_ROUNDS = 3
@@ -30,7 +30,7 @@ class AgentLoop:
     async def stream(self, history: list[dict[str, str]], user_id: int) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
-        registry = create_readonly_registry()
+        registry = create_agent_registry()
         tool_results: list[tuple[str, dict]] = []
 
         try:
@@ -53,7 +53,7 @@ class AgentLoop:
                         if getattr(self.llm, "mode", None) == "mock":
                             text = "当前是演示模式，离线 Mock 不会调用银行工具。"
                         else:
-                            text = "未能通过工具完成查询。请尝试查询模拟账户余额或最近交易；其他银行业务暂未开放。"
+                            text = "未能通过工具完成查询或准备模拟转账。请检查请求后重试；其他银行业务暂未开放。"
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
@@ -81,6 +81,17 @@ class AgentLoop:
                     else:
                         if spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
+                        elif spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW:
+                            prepared = await spec.handler(user_id=user_id, **args)
+                            if prepared.get("ok"):
+                                # Never put the confirmation token into model messages or logs.
+                                yield AgentEvent("action_required", {
+                                    "action": prepared["action"],
+                                    "transfer_id": prepared["transfer_id"],
+                                    "confirmation_token": prepared["confirmation_token"],
+                                })
+                                return
+                            result = {"ok": False, "data": None, "error": prepared["error"]}
                         else:
                             decision = assess_tool(spec)
                             logger.info("risk_decision tool=%s user_id=%s level=%s reasons=%s",

@@ -14,7 +14,7 @@ from app.risk.engine import RiskDecision
 
 def create_pending_action(
     session: Session, *, user_id: int, action_type: str, details: dict,
-    decision: RiskDecision, expires_in_seconds: int = 300,
+    decision: RiskDecision, expires_in_seconds: int = 300, commit: bool = True,
 ) -> tuple[PendingAction, str]:
     """Internal server-side entry point; only yellow decisions can be confirmed here."""
     if decision.level != RiskLevel.YELLOW:
@@ -30,8 +30,37 @@ def create_pending_action(
         expires_at=utcnow() + timedelta(seconds=expires_in_seconds),
     )
     session.add(action)
-    session.commit()
-    session.refresh(action)
+    session.flush()
+    if commit:
+        session.commit()
+        session.refresh(action)
+    return action, token
+
+
+def create_simulated_red_action(
+    session: Session, *, user_id: int, action_type: str, details: dict,
+    decision: RiskDecision, expires_in_seconds: int = 300, commit: bool = True,
+) -> tuple[PendingAction, str]:
+    """Create a red action only for isolated demo verification; never executes it."""
+    from app.core.config import settings
+
+    if not settings.debug or decision.level != RiskLevel.RED:
+        raise ValueError("模拟强验证不可用")
+    if (not action_type or not isinstance(details, dict) or type(expires_in_seconds) is not int
+            or not 1 <= expires_in_seconds <= 3600):
+        raise ValueError("待验证动作参数无效")
+    token = secrets.token_urlsafe(32)
+    action = PendingAction(
+        user_id=user_id, action_type=action_type,
+        details_json=json.dumps(details, ensure_ascii=False), risk_level=RiskLevel.RED.value,
+        token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        expires_at=utcnow() + timedelta(seconds=expires_in_seconds),
+    )
+    session.add(action)
+    session.flush()
+    if commit:
+        session.commit()
+        session.refresh(action)
     return action, token
 
 

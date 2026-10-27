@@ -66,7 +66,7 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
         async def stream(self, messages, tools=None):
             self.calls += 1
             assert {item["function"]["name"] for item in tools} == {
-                "get_account_balance", "list_recent_transactions"
+                "get_account_balance", "list_recent_transactions", "prepare_transfer"
             }
             if self.calls == 1:
                 yield LLMChunk(tool_calls=[{
@@ -209,7 +209,7 @@ def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, ca
             else:
                 yield LLMChunk(content="操作已成功")
 
-    monkeypatch.setattr("app.agent.loop.create_readonly_registry", lambda: registry)
+    monkeypatch.setattr("app.agent.loop.create_agent_registry", lambda: registry)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     caplog.set_level(logging.INFO, logger="app.agent.loop")
     created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()

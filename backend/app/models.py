@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlmodel import Field, SQLModel
+from sqlalchemy import UniqueConstraint
 
 from app.core.time import utcnow
 
@@ -65,3 +66,34 @@ class PendingAction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime
     confirmed_at: datetime | None = None
+
+
+class VerificationSession(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    code_digest: str
+    attempts: int = 0
+    status: str = "pending"
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    verified_at: datetime | None = None
+
+
+class TransferRequest(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    account_id: int = Field(foreign_key="account.id", index=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    idempotency_key: str
+    recipient_name: str
+    recipient_phone_masked: str | None = None
+    recipient_phone_digest: str | None = None
+    amount_fen: int
+    note: str = ""
+    status: str = "pending"
+    transaction_id: int | None = Field(default=None, foreign_key="transaction.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None

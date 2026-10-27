@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     risk_night_start_hour: int = Field(default=0, ge=0, le=23)
     risk_night_end_hour: int = Field(default=6, ge=0, le=23)
 
+    # Fixed code is solely for local demonstration; verification is disabled unless DEBUG=true.
+    demo_verification_code: str = Field(default="123456", pattern=r"^[0-9]{6}$")
+
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"

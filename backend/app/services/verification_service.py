@@ -1,0 +1,95 @@
+import hashlib
+import hmac
+from datetime import timedelta, timezone
+
+from sqlalchemy import text
+from sqlmodel import Session, select
+
+from app.agent.registry import RiskLevel
+from app.core.config import settings
+from app.core.time import utcnow
+from app.db.session import get_engine
+from app.models import PendingAction, VerificationSession
+
+MAX_ATTEMPTS = 3
+
+
+class VerificationError(Exception):
+    pass
+
+
+def _begin(session: Session) -> None:
+    if not settings.debug or session.get_bind().dialect.name != "sqlite":
+        raise VerificationError("模拟验证不可用")
+    session.execute(text("BEGIN IMMEDIATE"))
+
+
+def _action(session: Session, user_id: int, action_id: int, token: str) -> PendingAction:
+    action = session.exec(select(PendingAction).where(
+        PendingAction.id == action_id, PendingAction.user_id == user_id,
+        PendingAction.risk_level == RiskLevel.RED.value, PendingAction.status == "pending",
+        PendingAction.expires_at > utcnow(),
+    )).first()
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if action is None or not hmac.compare_digest(action.token_hash, digest):
+        raise VerificationError("验证失败：动作无效、已处理或已过期")
+    return action
+
+
+def _code_digest(action_id: int, code: str) -> str:
+    message = f"{action_id}:{code}".encode("utf-8")
+    return hmac.new(settings.jwt_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def start_verification(user_id: int, action_id: int, token: str) -> None:
+    with Session(get_engine()) as session:
+        _begin(session)
+        action = _action(session, user_id, action_id, token)
+        existing = session.exec(select(VerificationSession).where(
+            VerificationSession.action_id == action_id,
+        )).first()
+        if existing is not None:
+            expiry = existing.expires_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if existing.status != "pending" or expiry <= utcnow():
+                raise VerificationError("验证不可用，请重新发起操作")
+            return
+        action_expiry = action.expires_at
+        if action_expiry.tzinfo is None:
+            action_expiry = action_expiry.replace(tzinfo=timezone.utc)
+        verification = VerificationSession(
+            action_id=action_id, user_id=user_id,
+            code_digest=_code_digest(action_id, settings.demo_verification_code),
+            expires_at=min(action_expiry, utcnow() + timedelta(minutes=5)),
+        )
+        session.add(verification)
+        session.commit()
+
+
+def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
+    """Check demo code atomically, limiting attempts across concurrent requests."""
+    with Session(get_engine()) as session:
+        _begin(session)
+        action = _action(session, user_id, action_id, token)
+        verification = session.exec(select(VerificationSession).where(
+            VerificationSession.action_id == action_id, VerificationSession.user_id == user_id,
+            VerificationSession.status == "pending", VerificationSession.expires_at > utcnow(),
+        )).first()
+        if verification is None:
+            raise VerificationError("验证不可用，请重新发起操作")
+        if not hmac.compare_digest(verification.code_digest, _code_digest(action_id, code)):
+            verification.attempts += 1
+            if verification.attempts >= MAX_ATTEMPTS:
+                verification.status = "locked"
+            session.add(verification)
+            session.commit()
+            return False
+        now = utcnow()
+        verification.status = "verified"
+        verification.verified_at = now
+        action.status = "verified"
+        session.add(verification)
+        session.add(action)
+        session.commit()
+        return True

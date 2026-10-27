@@ -7,6 +7,8 @@ def _money(fen: int) -> str:
 
 def render_tool_result(name: str, result: dict) -> str:
     if not result["ok"]:
+        if name == "prepare_transfer":
+            return f"模拟转账未准备：{result['error']}。"
         return f"查询未完成：{result['error']}。"
     data = result["data"]
     if name == "get_account_balance":

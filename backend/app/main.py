@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import actions, auth, chat, health
+from app.api.routes import actions, auth, chat, health, transfers
 from app.core.config import settings
 from app.db.seed import seed_demo_accounts, seed_demo_user
 from app.db.session import init_db, session_scope
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(actions.router, prefix=settings.api_prefix)
+app.include_router(transfers.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 
 
