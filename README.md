@@ -88,6 +88,7 @@ npm run build
 - [docs/TODO.md](docs/TODO.md)：任务编号、优先级、验收标准与里程碑
 - [docs/赛题解析.md](docs/赛题解析.md)：赛题背景与强制要求
 - [docs/设计思路.md](docs/设计思路.md)：零信任架构与产品设计
+- [docs/设计细化.md](docs/设计细化.md)：双屏交互与数据令牌化设计稿（尚未实现）
 
 ## 已实现
 
