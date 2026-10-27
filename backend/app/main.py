@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import auth, chat, health
 from app.core.config import settings
-from app.db.seed import seed_demo_user
+from app.db.seed import seed_demo_accounts, seed_demo_user
 from app.db.session import init_db, session_scope
 
 
@@ -13,7 +13,8 @@ from app.db.session import init_db, session_scope
 async def lifespan(app: FastAPI):
     init_db()
     with session_scope() as session:
-        seed_demo_user(session)
+        user = seed_demo_user(session)
+        seed_demo_accounts(session, user)
     yield
 
 

@@ -105,7 +105,7 @@ async def send_message(
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
         try:
-            async for event in loop.stream(history):
+            async for event in loop.stream(history, user_id=user.id):
                 if await request.is_disconnected():
                     break
                 if event.type == "delta":
@@ -116,7 +116,7 @@ async def send_message(
                     yield _sse({"type": "action_required", "tool_calls": event.data["tool_calls"]})
                 elif event.type == "error":
                     yield _sse({"type": "error", "message": event.data["message"]})
-                    break
+                    return
 
             message = _persist_assistant(conversation_id, "".join(collected))
             yield _sse({"type": "done", "message": message})
