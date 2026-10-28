@@ -11,6 +11,8 @@ from app.db.session import session_scope
 from app.risk.engine import assess_tool
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
+from app.services.audit_service import TOOLS, record, record_separately
+from app.services.redaction import mask_text, mask_value
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
@@ -67,14 +69,17 @@ class AgentLoop:
                        for call in tool_calls):
                     yield AgentEvent("error", {"message": "模型返回的工具调用格式无效。"})
                     return
-                messages.append({"role": "assistant", "content": "".join(content) or None,
-                                 "tool_calls": tool_calls})
+                messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
+                                 "tool_calls": mask_value(tool_calls)})
                 for call in tool_calls:
                     function = call["function"]
                     spec = registry.get(function["name"])
+                    audit_tool = spec.name if spec is not None and spec.name in TOOLS else None
+                    record_separately(user_id=user_id, event_type="tool_called", tool=audit_tool, result="success")
                     try:
                         args = json.loads(function["arguments"])
-                        if not isinstance(args, dict) or "session" in args or "user_id" in args:
+                        if (not isinstance(args, dict) or "session" in args or "user_id" in args
+                                or mask_value(args) != args or mask_text(call["id"]) != call["id"]):
                             raise ValueError("invalid arguments")
                     except (ValueError, TypeError):
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
@@ -84,9 +89,11 @@ class AgentLoop:
                         elif spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW:
                             prepared = await spec.handler(user_id=user_id, **args)
                             if prepared.get("ok"):
+                                record_separately(user_id=user_id, event_type="tool_result", tool=spec.name,
+                                                  transfer_id=prepared["transfer_id"], result="success")
                                 # Never put the confirmation token into model messages or logs.
                                 yield AgentEvent("action_required", {
-                                    "action": prepared["action"],
+                                    "action": mask_value(prepared["action"]),
                                     "transfer_id": prepared["transfer_id"],
                                     "confirmation_token": prepared["confirmation_token"],
                                 })
@@ -97,11 +104,31 @@ class AgentLoop:
                             logger.info("risk_decision tool=%s user_id=%s level=%s reasons=%s",
                                         spec.name, user_id, decision.level.value, decision.reasons)
                             if decision.level != RiskLevel.GREEN:
+                                record_separately(user_id=user_id, event_type="risk_assessed", tool=audit_tool,
+                                                  risk_level=decision.level.value, reasons=decision.reasons, result="denied")
                                 result = {"ok": False, "data": None, "error": "操作需要进一步验证"}
                             else:
-                                with session_scope() as session:
-                                    result = await spec.handler(session=session, user_id=user_id, **args)
-                    messages.append({"role": "tool", "tool_call_id": call["id"],
+                                try:
+                                    with session_scope() as session:
+                                        result = await spec.handler(session=session, user_id=user_id, **args)
+                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
+                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
+                                        if result.get("ok"):
+                                            record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
+                                                   result="success")
+                                        session.commit()
+                                except Exception:
+                                    with session_scope() as session:
+                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
+                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
+                                        record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
+                                               result="failed", reason_code="internal_error")
+                                        session.commit()
+                                    raise
+                    if not result.get("ok"):
+                        record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool, result="denied")
+                    result = mask_value(result)
+                    messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
         except Exception:

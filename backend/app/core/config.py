@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24
 
+    data_encryption_key: str = ""
+    data_encryption_key_version: str = "v1"
+    data_encryption_previous_keys: str = "{}"
+    data_hmac_key: str = ""
+
     demo_username: str = "demo"
     demo_password: str = "demo123"
     demo_display_name: str = "演示用户"

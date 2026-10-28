@@ -10,6 +10,7 @@ from app.agent.registry import RiskLevel
 from app.core.time import utcnow
 from app.models import PendingAction
 from app.risk.engine import RiskDecision
+from app.services.audit_service import record
 
 
 def create_pending_action(
@@ -78,8 +79,12 @@ def confirm_pending_action(session: Session, *, user_id: int, action_id: int, to
             PendingAction.token_hash == token_hash,
         ).values(status="confirmed", confirmed_at=now)
     )
+    success = result.rowcount == 1
+    record(session, user_id=user_id, action_id=action_id,
+           event_type="action_confirmed" if success else "action_confirm_denied",
+           result="success" if success else "denied")
     session.commit()
-    return result.rowcount == 1
+    return success
 
 
 def get_pending_action(session: Session, *, user_id: int, action_id: int) -> dict | None:
@@ -110,5 +115,9 @@ def cancel_pending_action(session: Session, *, user_id: int, action_id: int) -> 
         PendingAction.status == "pending",
         PendingAction.expires_at > utcnow(),
     ).values(status="cancelled"))
+    success = result.rowcount == 1
+    record(session, user_id=user_id, action_id=action_id,
+           event_type="action_cancelled" if success else "action_cancel_denied",
+           result="success" if success else "denied")
     session.commit()
-    return result.rowcount == 1
+    return success

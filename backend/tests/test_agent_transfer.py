@@ -1,3 +1,5 @@
+import re
+from datetime import datetime
 import json
 from datetime import timedelta, timezone
 
@@ -40,20 +42,21 @@ def test_agent_prepares_transfer_without_revealing_token_to_model(client, auth_h
             yield LLMChunk(content="转账已经成功。")
             yield LLMChunk(tool_calls=[{"id": "call-1", "type": "function", "function": {
                 "name": "prepare_transfer", "arguments": json.dumps({
-                    "recipient_name": "模拟收款人", "recipient_phone": "13812345678", "amount_fen": 50000,
+                    "recipient_name": "模拟收款人", "target_token": re.search(r"<PHONE_TMP_[^>]+>", messages[-1]["content"]).group(), "amount_fen": 50000,
                 }, ensure_ascii=False),
             }}])
 
     llm = FakeLLM()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
-    response = send(client, auth_headers, conversation["id"], "给模拟收款人转账500元")
+    response = send(client, auth_headers, conversation["id"], "给模拟收款人 13812345678 转账500元")
     assert response.headers["cache-control"] == "no-store"
     received = events(response)
     assert [item["type"] for item in received] == ["action_required", "done"]
     action = received[0]
     token = action["confirmation_token"]
     assert action["action"]["details"]["amount_fen"] == 50000
+    datetime.fromisoformat(action["action"]["created_at"].replace("Z", "+00:00"))
     assert action["action"]["details"]["recipient_phone_masked"] == "138****5678"
     assert "转账已经成功" not in response.text
     assert token not in llm.messages_seen and llm.calls == 1
