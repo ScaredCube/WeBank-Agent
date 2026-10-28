@@ -4,7 +4,9 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models import Account, Card, Transaction, User
+from app.models import (
+    Account, Card, Transaction, User, WealthHolding, WealthProduct, WealthRiskProfile,
+)
 
 
 def seed_demo_user(session: Session) -> User:
@@ -57,4 +59,36 @@ def seed_demo_cards(session: Session, user: User) -> None:
     for account in accounts:
         if session.exec(select(Card).where(Card.account_id == account.id)).first() is None:
             session.add(Card(account_id=account.id))
+    session.commit()
+
+
+DEMO_WEALTH_PRODUCTS = (
+    ("稳稳盈 90 天", "稳健理财", "R1", 280, 90, 10_000),
+    ("安心债券 A", "债券基金", "R2", 320, 0, 10_000),
+    ("成长混合 C", "混合基金", "R3", 450, 0, 10_000),
+)
+
+
+def seed_demo_wealth(session: Session, user: User) -> None:
+    """Create fictional products and one holding without touching account balances."""
+    if user.id is None:
+        raise ValueError("演示用户尚未保存")
+    products: list[WealthProduct] = []
+    for name, category, risk_level, rate_bps, term_days, min_amount_fen in DEMO_WEALTH_PRODUCTS:
+        product = session.exec(select(WealthProduct).where(WealthProduct.name == name)).first()
+        if product is None:
+            product = WealthProduct(name=name, category=category, risk_level=risk_level,
+                                    expected_rate_bps=rate_bps, term_days=term_days,
+                                    min_amount_fen=min_amount_fen)
+            session.add(product)
+            session.flush()
+        products.append(product)
+    first = products[0]
+    existing = session.exec(select(WealthHolding).where(
+        WealthHolding.user_id == user.id, WealthHolding.product_id == first.id)).first()
+    if existing is None:
+        session.add(WealthHolding(user_id=user.id, product_id=first.id,
+                                  amount_fen=100_000, yesterday_earnings_fen=80))
+    if session.get(WealthRiskProfile, user.id) is None:
+        session.add(WealthRiskProfile(user_id=user.id, risk_level="R2", score=4))
     session.commit()

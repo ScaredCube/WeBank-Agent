@@ -23,9 +23,14 @@ EVENTS = frozenset({
     # Reserved for T-207; no current code emits them.
     "token_resolved", "token_resolve_denied", "token_revoked",
     "card_loss_prepared", "card_loss_completed", "card_loss_denied", "card_loss_failed",
+    "wealth_order_prepared", "wealth_order_prepare_retried", "wealth_order_prepare_denied",
+    "wealth_order_prepare_failed", "wealth_order_completed", "wealth_order_retried",
+    "wealth_order_denied", "wealth_order_failed", "wealth_risk_assessed",
 })
 TOOLS = frozenset({"get_account_balance", "list_recent_transactions", "get_monthly_bill", "calculate",
-                   "prepare_transfer", "transfer", "get_card_status", "prepare_card_loss", "card_loss"})
+                   "prepare_transfer", "transfer", "get_card_status", "prepare_card_loss", "card_loss",
+                   "get_wealth_products", "get_wealth_holdings", "get_wealth_risk_profile",
+                   "prepare_wealth_subscribe", "prepare_wealth_redeem", "wealth_subscribe", "wealth_redeem"})
 RESULTS = frozenset({"success", "denied", "failed", "retry", "locked"})
 REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "daily_limit",
            "转账需要确认": "confirmation_required", "夜间操作升级": "night_upgrade"}
@@ -33,7 +38,8 @@ FAILURE_REASONS = {"insufficient_balance", "risk_upgrade", "not_authorized", "un
                    "duplicate_mismatch", "verification_unavailable", "invalid_risk", "internal_error",
                    "reference_unavailable", "guard_rejected", "guard_unavailable",
                    "invalid_arguments", "prompt_injection", "failure", "failure_threshold",
-                   "account_locked", "rate_limit", "lock_expired", "manual_unlock"}
+                   "account_locked", "rate_limit", "lock_expired", "manual_unlock",
+                   "product_unavailable", "insufficient_holding", "amount_invalid"}
 
 
 def record(session: Session, *, user_id: int, event_type: str, action_id: int | None = None,

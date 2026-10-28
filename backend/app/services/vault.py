@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time import utcnow
-from app.models import Account, AuditTokenContext, DataToken
+from app.models import Account, AuditTokenContext, DataToken, WealthProduct
 from app.services.audit_service import record
 
 
@@ -86,6 +86,19 @@ def create_account_token(session: Session, user_id: int, account_id: int) -> str
     return row.token
 
 
+def create_product_token(session: Session, user_id: int, product_id: int) -> str:
+    product = session.get(WealthProduct, product_id)
+    if product is None or product.status != "available":
+        raise VaultError()
+    row = session.exec(select(DataToken).where(DataToken.user_id == user_id, DataToken.kind == "product",
+                            DataToken.entity_id == product_id, DataToken.revoked_at.is_(None))).first()
+    if row is None:
+        row = DataToken(user_id=user_id, kind="product", entity_id=product_id,
+                        token=f"<PRODUCT_{_random_reference()}>")
+        session.add(row); session.flush()
+    return row.token
+
+
 def resolve(session: Session, user_id: int, token: str, expected_kind: str, scope: str) -> int | str:
     row = session.exec(select(DataToken).where(DataToken.token == token, DataToken.user_id == user_id)).first()
     now = utcnow()
@@ -104,6 +117,12 @@ def resolve(session: Session, user_id: int, token: str, expected_kind: str, scop
             _audit(session, user_id, "token_resolve_denied", None, "denied")
             raise VaultError()
         value = account.id
+    elif row.kind == "product":
+        product = session.get(WealthProduct, row.entity_id)
+        if product is None or product.status != "available":
+            _audit(session, user_id, "token_resolve_denied", None, "denied")
+            raise VaultError()
+        value = product.id
     else:
         try:
             keys, _ = _keys()

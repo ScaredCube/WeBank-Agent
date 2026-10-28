@@ -5,6 +5,10 @@ def _money(fen: int) -> str:
     return f"{fen // 100:,}.{fen % 100:02d}"
 
 
+def _rate(bps: int) -> str:
+    return f"{bps // 100}.{bps % 100:02d}%"
+
+
 def render_tool_result(name: str, result: dict) -> str:
     if not result["ok"]:
         if name == "calculate":
@@ -13,6 +17,10 @@ def render_tool_result(name: str, result: dict) -> str:
             return f"模拟转账未准备：{result['error']}。"
         if name == "prepare_card_loss":
             return f"模拟挂失未准备：{result['error']}。"
+        if name == "prepare_wealth_subscribe":
+            return f"理财申购未准备：{result['error']}。"
+        if name == "prepare_wealth_redeem":
+            return f"理财赎回未准备：{result['error']}。"
         return f"查询未完成：{result['error']}。"
     data = result["data"]
     if name == "get_card_status":
@@ -45,6 +53,28 @@ def render_tool_result(name: str, result: dict) -> str:
         if type(value) is float:
             return f"计算结果：{value:.12g}"
         return "计算未完成。"
+    if name == "get_wealth_products":
+        if not data:
+            return "暂无可申购的模拟理财产品。"
+        lines = ["模拟理财产品："]
+        for item in data:
+            term = f"期限 {item['term_days']} 天" if item["term_days"] else "随时可赎回"
+            lines.append(f"- {item['name']}：风险 {item['risk_level']}，"
+                         f"参考年化 {_rate(item['expected_rate_bps'])}，"
+                         f"起购 {_money(item['min_amount_fen'])} 元，{term}")
+        return "\n".join(lines)
+    if name == "get_wealth_holdings":
+        if not data:
+            return "暂无模拟理财持仓。"
+        lines = ["模拟理财持仓："]
+        for item in data:
+            lines.append(f"- {item['product_name']}：持仓 {_money(item['amount_fen'])} 元，"
+                         f"昨日收益 {_money(item['yesterday_earnings_fen'])} 元")
+        return "\n".join(lines)
+    if name == "get_wealth_risk_profile":
+        if data.get("risk_level") == "未评估":
+            return "尚未完成模拟理财风险测评。"
+        return f"模拟理财风险等级：{data['risk_level']}；测评分数：{data['score']}/9。"
     if name == "get_monthly_bill":
         lines = [f"{data['month']} 月度账单（北京时间）",
                  f"{data['account_name']}（{data['masked_number']}）",

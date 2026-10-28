@@ -19,6 +19,12 @@ from app.services.security_service import record_failure
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
+_PREPARE_TOOLS = {
+    "prepare_transfer": RiskLevel.YELLOW,
+    "prepare_card_loss": RiskLevel.RED,
+    "prepare_wealth_subscribe": RiskLevel.RED,
+    "prepare_wealth_redeem": RiskLevel.RED,
+}
 logger = logging.getLogger(__name__)
 
 
@@ -124,18 +130,23 @@ class AgentLoop:
                             result = {"ok": False, "data": None, "error": guard_blocked}
                         elif spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
-                        elif ((spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW)
-                              or (spec.name == "prepare_card_loss" and spec.risk == RiskLevel.RED)):
+                        elif _PREPARE_TOOLS.get(spec.name) == spec.risk:
                             prepared = await spec.handler(user_id=user_id, **args)
                             if prepared.get("ok"):
+                                prepared_action = prepared.get("action")
+                                action_id = (prepared_action.get("id")
+                                             if isinstance(prepared_action, dict) else None)
                                 record_separately(user_id=user_id, event_type="tool_result", tool=spec.name,
-                                                  transfer_id=prepared.get("transfer_id"), result="success")
+                                                  action_id=action_id, transfer_id=prepared.get("transfer_id"),
+                                                  result="success")
+                                payload = {"action": mask_value(prepared_action)}
+                                if "transfer_id" in prepared:
+                                    payload["transfer_id"] = prepared["transfer_id"]
+                                if "order_id" in prepared:
+                                    payload["order_id"] = prepared["order_id"]
                                 # Never put the confirmation token into model messages or logs.
-                                yield AgentEvent("action_required", {
-                                    "action": mask_value(prepared["action"]),
-                                    **({"transfer_id": prepared["transfer_id"]} if "transfer_id" in prepared else {}),
-                                    "confirmation_token": prepared["confirmation_token"],
-                                })
+                                payload["confirmation_token"] = prepared["confirmation_token"]
+                                yield AgentEvent("action_required", payload)
                                 return
                             result = {"ok": False, "data": None, "error": prepared["error"]}
                         else:

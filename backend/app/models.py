@@ -114,6 +114,62 @@ class TransferRequest(SQLModel, table=True):
     completed_at: datetime | None = None
 
 
+class WealthProduct(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    category: str
+    risk_level: str
+    expected_rate_bps: int = Field(ge=0)
+    term_days: int = Field(default=0, ge=0)
+    min_amount_fen: int = Field(gt=0)
+    status: str = "available"
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class WealthHolding(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "product_id"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    product_id: int = Field(foreign_key="wealthproduct.id", index=True)
+    amount_fen: int = Field(default=0, ge=0)
+    yesterday_earnings_fen: int = Field(default=0, ge=0)
+    status: str = "active"
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class WealthOrder(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    account_id: int = Field(foreign_key="account.id", index=True)
+    product_id: int = Field(foreign_key="wealthproduct.id", index=True)
+    holding_id: int | None = Field(default=None, foreign_key="wealthholding.id")
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    idempotency_key: str
+    order_type: str
+    amount_fen: int = Field(gt=0)
+    note: str = ""
+    status: str = "pending"
+    transaction_id: int | None = Field(default=None, foreign_key="transaction.id")
+    balance_after_fen: int | None = None
+    holding_after_fen: int | None = None
+    account_token_id: int = Field(foreign_key="datatoken.id")
+    product_token_id: int = Field(foreign_key="datatoken.id")
+    request_scope: str
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+class WealthRiskProfile(SQLModel, table=True):
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    risk_level: str = "R1"
+    score: int = Field(default=0, ge=0, le=9)
+    assessed_at: datetime = Field(default_factory=utcnow)
+
+
 class SecurityState(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", primary_key=True)
     failure_count: int = 0
