@@ -3,6 +3,7 @@ from app.tools.account_tools import (
     BalanceArguments, TransactionArguments, get_account_balance, list_recent_transactions,
 )
 from app.tools.transfer_tools import TransferArguments, prepare_transfer_tool
+from app.tools.bill_tools import MonthlyBillArguments, get_monthly_bill
 
 
 def create_readonly_registry() -> ToolRegistry:
@@ -11,6 +12,7 @@ def create_readonly_registry() -> ToolRegistry:
     for name, description, args, handler in (
         ("get_account_balance", "查询当前用户的模拟账户余额", BalanceArguments, get_account_balance),
         ("list_recent_transactions", "查询当前用户模拟账户的最近交易", TransactionArguments, list_recent_transactions),
+        ("get_monthly_bill", "分析当前用户模拟账户的月度收支、消费分类及需核对的重复消费；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
     ):
         result.register(ToolSpec(name=name, description=description, parameters=args.model_json_schema(),
                                  risk=RiskLevel.GREEN, handler=handler))

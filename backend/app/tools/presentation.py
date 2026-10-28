@@ -27,4 +27,17 @@ def render_tool_result(name: str, result: dict) -> str:
             lines.append(f"- {item['occurred_at'][:10]} {direction} {_money(item['amount_fen'])} 元"
                          f"，{item['category']}，{item['counterparty']}")
         return "\n".join(lines)
+    if name == "get_monthly_bill":
+        lines = [f"{data['month']} 月度账单（北京时间）",
+                 f"{data['account_name']}（{data['masked_number']}）",
+                 f"总收入：{_money(data['income_fen'])} 元；总支出：{_money(data['expense_fen'])} 元",
+                 f"消费：{_money(data['consumption_fen'])} 元，共 {data['consumption_count']} 笔",
+                 f"转出：{_money(data['transfer_out_fen'])} 元，共 {data['transfer_out_count']} 笔；转入：{_money(data['transfer_in_fen'])} 元，共 {data['transfer_in_count']} 笔"]
+        for category in data["categories"]:
+            lines.append(f"- {category['category']}：{_money(category['amount_fen'])} 元，{category['count']} 笔")
+        for anomaly in data["anomalies"]:
+            lines.append(f"需核对：{anomaly['reason']}，{anomaly['counterparty']}，{_money(anomaly['amount_fen'])} 元，{anomaly['previous_occurred_at']} / {anomaly['occurred_at']}")
+        if data["ignored_count"]:
+            lines.append(f"另有 {data['ignored_count']} 笔方向不明的流水未计入统计。")
+        return "\n".join(lines)
     return "查询未完成：工具不可用。"

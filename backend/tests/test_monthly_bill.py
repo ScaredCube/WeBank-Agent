@@ -1,0 +1,182 @@
+import asyncio
+import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from sqlmodel import Session, select
+
+from app.agent.llm import LLMChunk
+from app.agent.registry import RiskLevel
+from app.core.security import create_access_token
+from app.db.session import get_engine
+from app.models import Account, Transaction, User
+from app.services.vault import create_account_token
+from app.tools.register import create_readonly_registry
+
+
+def add_entry(session, account_id, reference, when, amount=100, direction="expense", category="餐饮", counterparty="餐厅"):
+    session.add(Transaction(account_id=account_id, reference=reference, occurred_at=when, direction=direction,
+        amount_fen=amount, balance_after_fen=500000, category=category, counterparty=counterparty))
+
+
+def test_month_boundary_full_data_and_transfer_classification(client, auth_headers):
+    with Session(get_engine()) as session:
+        account = session.exec(select(Account)).one()
+        # Beijing February begins at 16:00 UTC January 31, and ends at 16:00 UTC February 28.
+        start = datetime(2026, 1, 31, 16, tzinfo=timezone.utc)
+        add_entry(session, account.id, "before", start - timedelta(seconds=1), 9999)
+        for i in range(55):
+            add_entry(session, account.id, f"bill-{i}", start + timedelta(minutes=20 * i), 100)
+        add_entry(session, account.id, "duplicate", start + timedelta(minutes=1), 100)
+        add_entry(session, account.id, "salary", start, 30000, "income", "工资", "公司")
+        add_entry(session, account.id, "transfer", start, 9000, "expense", "模拟转账", "某人")
+        add_entry(session, account.id, "transfer-in", start, 2000, "income", "模拟转账", "某人")
+        add_entry(session, account.id, "end", datetime(2026, 2, 28, 16, tzinfo=timezone.utc), 9999)
+        session.commit()
+    response = client.get("/api/bills/monthly", params={"month": "2026-02"}, headers=auth_headers)
+    assert response.status_code == 200
+    bill = response.json()
+    assert bill["income_fen"] == 32000 and bill["expense_fen"] == 14600
+    assert bill["consumption_fen"] == 5600 and bill["consumption_count"] == 56
+    assert bill["categories"] == [{"category": "餐饮", "amount_fen": 5600, "count": 56}]
+    assert bill["transfer_out_fen"] == 9000 and bill["transfer_in_fen"] == 2000
+    assert len(bill["anomalies"]) == 1 and bill["anomalies"][0]["status"] == "需核对"
+    assert response.headers["cache-control"] == "no-store"
+    audit = client.get("/api/audit", headers=auth_headers).json()
+    assert any(e["tool"] == "get_monthly_bill" and e["event_type"] == "tool_result" and e["result"] == "success" for e in audit)
+
+
+def test_empty_invalid_month_and_account_isolation(client, auth_headers):
+    empty = client.get("/api/bills/monthly", params={"month": "2025-12"}, headers=auth_headers)
+    assert empty.status_code == 200 and empty.json()["expense_fen"] == 0 and empty.json()["categories"] == []
+    for month in ("2026-13", "2026-2", "bad", "0000-01"):
+        assert client.get("/api/bills/monthly", params={"month": month}, headers=auth_headers).status_code == 400
+    with Session(get_engine()) as session:
+        owner = session.exec(select(User).where(User.username == "demo")).one()
+        account = session.exec(select(Account).where(Account.user_id == owner.id)).one()
+        token = create_account_token(session, owner.id, account.id)
+        other = User(username="bill_other", password_hash="test", display_name="其他用户")
+        session.add(other)
+        session.commit()
+        session.refresh(other)
+        other_headers = {"Authorization": f"Bearer {create_access_token(str(other.id))}"}
+        account_id, other_id = account.id, other.id
+    assert client.get("/api/bills/monthly", params={"month": "2026-01", "account_id": account_id}, headers=other_headers).status_code == 400
+    handler = create_readonly_registry().get("get_monthly_bill")
+    assert handler.risk == RiskLevel.GREEN
+    with Session(get_engine()) as session:
+        result = asyncio.run(handler.handler(session, other_id, month="2026-01", account_token=token))
+        assert not result["ok"]
+        account = session.get(Account, account_id)
+        account.status = "frozen"
+        session.add(account)
+        session.commit()
+    assert client.get("/api/bills/monthly", params={"month": "2026-01", "account_id": account_id}, headers=auth_headers).status_code == 400
+
+
+def test_chat_bill_tool_fixed_rendering_and_audit(client, auth_headers, monkeypatch):
+    class FakeLLM:
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{"id": "bill", "type": "function", "function": {
+                    "name": "get_monthly_bill", "arguments": json.dumps({"month": "2026-01"})}}])
+            else:
+                assert json.loads(messages[-1]["content"])["data"]["expense_fen"] == 100000
+                yield LLMChunk(content="虚构金额999999元")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    response = client.post(f"/api/chat/conversations/{conversation_id}/messages", headers=auth_headers,
+                           json={"content": "分析2026年1月的消费"})
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    content = events[-1]["message"]["content"]
+    assert "1,000.00 元" in content and "999999" not in content
+    audit = client.get("/api/audit", headers=auth_headers).json()
+    assert any(e["tool"] == "get_monthly_bill" and e["conversation_id"] == conversation_id
+               and e["event_type"] == "tool_result" for e in audit)
+
+
+@pytest.mark.parametrize("now,expected_month,expected_amount", [
+    (datetime(2026, 12, 31, 15, 59, 59, tzinfo=timezone.utc), "2026-12", 110),
+    (datetime(2026, 12, 31, 16, 0, tzinfo=timezone.utc), "2027-01", 220),
+])
+def test_default_month_uses_beijing_year_boundary(client, auth_headers, monkeypatch, now, expected_month, expected_amount):
+    monkeypatch.setattr("app.services.bill_service.utcnow", lambda: now)
+    with Session(get_engine()) as session:
+        account = session.exec(select(Account)).one()
+        boundary = datetime(2026, 12, 31, 16, tzinfo=timezone.utc)
+        add_entry(session, account.id, "last-second-of-december", boundary - timedelta(seconds=1), 110)
+        add_entry(session, account.id, "first-second-of-january", boundary, 220)
+        session.commit()
+    response = client.get("/api/bills/monthly", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["month"] == expected_month
+    assert response.json()["expense_fen"] == expected_amount
+    handler = create_readonly_registry().get("get_monthly_bill")
+    with Session(get_engine()) as session:
+        user = session.exec(select(User).where(User.username == "demo")).one()
+        result = asyncio.run(handler.handler(session, user.id))
+    assert result["ok"] and result["data"]["month"] == expected_month
+    assert result["data"]["expense_fen"] == expected_amount
+
+
+def test_bill_masks_sensitive_fields_in_api_model_and_chat(client, auth_headers, monkeypatch):
+    phone = "13812345678"
+    card = "4111111111111111"  # Synthetic test number, not an account.
+    private_note = "PRIVATE_NOTE_NOT_FOR_OUTPUT"
+    with Session(get_engine()) as session:
+        account = session.exec(select(Account)).one()
+        account.name = f"账户 {phone}"
+        account.masked_number = f"卡号 {card}"
+        session.add(account)
+        when = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        for i in range(2):
+            add_entry(session, account.id, f"privacy-{i}", when + timedelta(minutes=i),
+                      1200, category=f"分类 {card}", counterparty=f"商户 {phone}")
+            row = session.exec(select(Transaction).where(Transaction.reference == f"privacy-{i}")).one()
+            row.note = private_note
+            session.add(row)
+        session.commit()
+
+    def assert_private(text):
+        assert phone not in text and card not in text and private_note not in text
+        assert "[敏感号码已隐藏]" in text
+
+    response = client.get("/api/bills/monthly", params={"month": "2026-02"}, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["expense_fen"] == 2400 and len(data["anomalies"]) == 1
+    assert_private(json.dumps(data, ensure_ascii=False))
+    for value in (data["account_name"], data["masked_number"], data["categories"][0]["category"],
+                  data["anomalies"][0]["counterparty"]):
+        assert "[敏感号码已隐藏]" in value
+
+    class FakeLLM:
+        calls = 0
+        tool_result = None
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{"id": "bill-privacy", "type": "function", "function": {
+                    "name": "get_monthly_bill", "arguments": json.dumps({"month": "2026-02"})}}])
+            else:
+                self.tool_result = messages[-1]["content"]
+                yield LLMChunk(content="不会采用模型生成的账单文本")
+
+    llm = FakeLLM()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    chat = client.post(f"/api/chat/conversations/{conversation_id}/messages", headers=auth_headers,
+                       json={"content": "分析2026年2月的消费"})
+    assert chat.status_code == 200
+    events = [json.loads(line[6:]) for line in chat.text.splitlines() if line.startswith("data: ")]
+    assert events[-1]["type"] == "done"
+    assert llm.tool_result is not None
+    assert_private(llm.tool_result)
+    assert_private(events[-1]["message"]["content"])
+    assert "需核对" in events[-1]["message"]["content"]
+    assert_private(chat.text)

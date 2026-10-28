@@ -20,7 +20,7 @@ EVENTS = frozenset({
     # Reserved for T-207; no current code emits them.
     "token_resolved", "token_resolve_denied", "token_revoked",
 })
-TOOLS = frozenset({"get_account_balance", "list_recent_transactions", "prepare_transfer", "transfer"})
+TOOLS = frozenset({"get_account_balance", "list_recent_transactions", "get_monthly_bill", "prepare_transfer", "transfer"})
 RESULTS = frozenset({"success", "denied", "failed", "retry", "locked"})
 REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "daily_limit",
            "转账需要确认": "confirmation_required", "夜间操作升级": "night_upgrade"}

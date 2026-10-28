@@ -66,7 +66,7 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
         async def stream(self, messages, tools=None):
             self.calls += 1
             assert {item["function"]["name"] for item in tools} == {
-                "get_account_balance", "list_recent_transactions", "prepare_transfer"
+                "get_account_balance", "list_recent_transactions", "get_monthly_bill", "prepare_transfer"
             }
             if self.calls == 1:
                 yield LLMChunk(tool_calls=[{

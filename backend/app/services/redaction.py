@@ -45,7 +45,7 @@ def mask_value(value):
         result = {}
         for key, item in value.items():
             safe_key = mask_text(key) if isinstance(key, str) else key
-            if (key in {"created_at", "updated_at", "expires_at", "confirmed_at", "occurred_at", "completed_at"}
+            if (key in {"created_at", "updated_at", "expires_at", "confirmed_at", "occurred_at", "previous_occurred_at", "completed_at"}
                     and isinstance(item, str) and re.fullmatch(
                         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?", item)):
                 try:
