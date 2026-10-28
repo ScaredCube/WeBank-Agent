@@ -26,6 +26,7 @@ from app.services.chat_service import (
     list_messages,
     recent_messages,
 )
+from app.services.audit_service import conversation_context
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -104,6 +105,7 @@ async def send_message(
 
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
+        audit_token = conversation_context.set(conversation_id)
         try:
             async for event in loop.stream(history, user_id=user.id):
                 if await request.is_disconnected():
@@ -125,6 +127,8 @@ async def send_message(
             raise
         except Exception:
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})
+        finally:
+            conversation_context.reset(audit_token)
 
     return EventSourceResponse(
         event_stream(),

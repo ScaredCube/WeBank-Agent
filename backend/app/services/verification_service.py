@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.db.session import get_engine
 from app.models import PendingAction, VerificationSession
+from app.services.audit_service import record, record_separately
 
 MAX_ATTEMPTS = 3
 
@@ -41,7 +42,7 @@ def _code_digest(action_id: int, code: str) -> str:
     return hmac.new(settings.jwt_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
-def start_verification(user_id: int, action_id: int, token: str) -> None:
+def _start_verification(user_id: int, action_id: int, token: str) -> None:
     with Session(get_engine()) as session:
         _begin(session)
         action = _action(session, user_id, action_id, token)
@@ -54,6 +55,8 @@ def start_verification(user_id: int, action_id: int, token: str) -> None:
                 expiry = expiry.replace(tzinfo=timezone.utc)
             if existing.status != "pending" or expiry <= utcnow():
                 raise VerificationError("验证不可用，请重新发起操作")
+            record(session, user_id=user_id, action_id=action_id, event_type="verification_started", result="retry")
+            session.commit()
             return
         action_expiry = action.expires_at
         if action_expiry.tzinfo is None:
@@ -64,10 +67,11 @@ def start_verification(user_id: int, action_id: int, token: str) -> None:
             expires_at=min(action_expiry, utcnow() + timedelta(minutes=5)),
         )
         session.add(verification)
+        record(session, user_id=user_id, action_id=action_id, event_type="verification_started", result="success")
         session.commit()
 
 
-def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
+def _verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
     """Check demo code atomically, limiting attempts across concurrent requests."""
     with Session(get_engine()) as session:
         _begin(session)
@@ -83,6 +87,10 @@ def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
             if verification.attempts >= MAX_ATTEMPTS:
                 verification.status = "locked"
             session.add(verification)
+            locked = verification.status == "locked"
+            record(session, user_id=user_id, action_id=action_id,
+                   event_type="verification_locked" if locked else "verification_failed",
+                   result="locked" if locked else "failed")
             session.commit()
             return False
         now = utcnow()
@@ -91,5 +99,28 @@ def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
         action.status = "verified"
         session.add(verification)
         session.add(action)
+        record(session, user_id=user_id, action_id=action_id, event_type="verification_succeeded", result="success")
         session.commit()
         return True
+
+
+def start_verification(user_id: int, action_id: int, token: str) -> None:
+    try:
+        return _start_verification(user_id, action_id, token)
+    except Exception as exc:
+        denied = isinstance(exc, VerificationError)
+        record_separately(user_id=user_id, action_id=action_id,
+                          event_type="verification_start_denied" if denied else "verification_start_failed",
+                          result="denied" if denied else "failed")
+        raise
+
+
+def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
+    try:
+        return _verify_code(user_id, action_id, token, code)
+    except Exception as exc:
+        denied = isinstance(exc, VerificationError)
+        record_separately(user_id=user_id, action_id=action_id,
+                          event_type="verification_denied" if denied else "verification_error",
+                          result="denied" if denied else "failed")
+        raise

@@ -3,10 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import actions, auth, chat, health, transfers
+from app.api.routes import actions, audit, auth, chat, health, transfers
 from app.core.config import settings
 from app.db.seed import seed_demo_accounts, seed_demo_user
 from app.db.session import init_db, session_scope
+from app.services.audit_service import request_context
+from uuid import uuid4
 
 
 @asynccontextmanager
@@ -25,6 +27,15 @@ app = FastAPI(
     docs_url="/docs",
 )
 
+
+@app.middleware("http")
+async def assign_audit_request(request, call_next):
+    token = request_context.set(uuid4().hex)
+    try:
+        return await call_next(request)
+    finally:
+        request_context.reset(token)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -36,6 +47,7 @@ app.add_middleware(
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(actions.router, prefix=settings.api_prefix)
+app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(transfers.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 

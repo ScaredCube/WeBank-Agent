@@ -97,3 +97,19 @@ class TransferRequest(SQLModel, table=True):
     transaction_id: int | None = Field(default=None, foreign_key="transaction.id")
     created_at: datetime = Field(default_factory=utcnow)
     completed_at: datetime | None = None
+
+
+class AuditLog(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    request_id: str = Field(index=True)
+    conversation_id: int | None = Field(default=None, foreign_key="conversation.id", index=True)
+    action_id: int | None = Field(default=None, index=True)
+    transfer_id: int | None = Field(default=None, index=True)
+    transaction_id: int | None = None
+    event_type: str = Field(index=True)
+    tool: str | None = None
+    risk_level: str | None = None
+    reason_codes: str | None = None
+    result: str | None = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
