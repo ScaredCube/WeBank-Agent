@@ -26,11 +26,16 @@ EVENTS = frozenset({
     "wealth_order_prepared", "wealth_order_prepare_retried", "wealth_order_prepare_denied",
     "wealth_order_prepare_failed", "wealth_order_completed", "wealth_order_retried",
     "wealth_order_denied", "wealth_order_failed", "wealth_risk_assessed",
+    "subscription_cancel_prepared", "subscription_cancel_prepare_denied",
+    "subscription_cancel_prepare_failed", "subscription_cancelled",
+    "subscription_cancel_retried", "subscription_cancel_denied", "subscription_cancel_failed",
 })
 TOOLS = frozenset({"get_account_balance", "list_recent_transactions", "get_monthly_bill", "calculate",
                    "prepare_transfer", "transfer", "get_card_status", "prepare_card_loss", "card_loss",
                    "get_wealth_products", "get_wealth_holdings", "get_wealth_risk_profile",
-                   "prepare_wealth_subscribe", "prepare_wealth_redeem", "wealth_subscribe", "wealth_redeem"})
+                   "prepare_wealth_subscribe", "prepare_wealth_redeem", "wealth_subscribe", "wealth_redeem",
+                   "get_subscriptions", "detect_subscriptions", "prepare_cancel_subscription",
+                   "subscription_cancel"})
 RESULTS = frozenset({"success", "denied", "failed", "retry", "locked"})
 REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "daily_limit",
            "转账需要确认": "confirmation_required", "夜间操作升级": "night_upgrade"}
@@ -39,7 +44,8 @@ FAILURE_REASONS = {"insufficient_balance", "risk_upgrade", "not_authorized", "un
                    "reference_unavailable", "guard_rejected", "guard_unavailable",
                    "invalid_arguments", "prompt_injection", "failure", "failure_threshold",
                    "account_locked", "rate_limit", "lock_expired", "manual_unlock",
-                   "product_unavailable", "insufficient_holding", "amount_invalid"}
+                   "product_unavailable", "insufficient_holding", "amount_invalid",
+                   "subscription_unavailable"}
 
 
 def record(session: Session, *, user_id: int, event_type: str, action_id: int | None = None,

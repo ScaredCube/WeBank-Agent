@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlmodel import Field, SQLModel
 from sqlalchemy import Index, UniqueConstraint, text
@@ -179,6 +179,26 @@ class WealthRiskProfile(SQLModel, table=True):
     risk_level: str = "R1"
     score: int = Field(default=0, ge=0, le=9)
     assessed_at: datetime = Field(default_factory=utcnow)
+
+
+class Subscription(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    merchant: str = Field(index=True)
+    amount_fen: int = Field(gt=0)
+    cycle: str = "monthly"
+    next_charge_date: date
+    status: str = "active"
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SubscriptionCancelRequest(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    subscription_id: int = Field(foreign_key="subscription.id", index=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    status: str = "pending"
 
 
 class SecurityState(SQLModel, table=True):

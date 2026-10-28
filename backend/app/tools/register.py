@@ -11,6 +11,10 @@ from app.tools.wealth_tools import (
     get_wealth_holdings, get_wealth_products, get_wealth_risk_profile,
     prepare_wealth_redeem, prepare_wealth_subscribe,
 )
+from app.tools.subscription_tools import (
+    SubscriptionArguments, SubscriptionCancelArguments, detect_subscriptions,
+    get_subscriptions, prepare_cancel_subscription,
+)
 
 
 def create_readonly_registry() -> ToolRegistry:
@@ -24,6 +28,8 @@ def create_readonly_registry() -> ToolRegistry:
         ("get_wealth_products", "查询可申购的模拟理财产品及参考年化、风险等级和起购金额", WealthProductArguments, get_wealth_products),
         ("get_wealth_holdings", "查询本人模拟理财持仓和昨日收益", WealthHoldingArguments, get_wealth_holdings),
         ("get_wealth_risk_profile", "查询本人模拟理财风险测评等级", WealthRiskArguments, get_wealth_risk_profile),
+        ("get_subscriptions", "查询本人模拟订阅、下次扣费日期和续费提醒", SubscriptionArguments, get_subscriptions),
+        ("detect_subscriptions", "从最近模拟消费流水中识别可能的重复订阅", SubscriptionArguments, detect_subscriptions),
     ):
         result.register(ToolSpec(name=name, description=description, parameters=args.model_json_schema(),
                                  risk=RiskLevel.GREEN, handler=handler))
@@ -48,4 +54,7 @@ def create_agent_registry() -> ToolRegistry:
         parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_subscribe))
     registry.register(ToolSpec(name="prepare_wealth_redeem", description="准备模拟理财赎回，必须由用户完成红色模拟验证后单独执行",
         parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_redeem))
+    registry.register(ToolSpec(name="prepare_cancel_subscription", description="准备取消模拟订阅，等待用户确认后单独执行",
+        parameters=SubscriptionCancelArguments.model_json_schema(), risk=RiskLevel.YELLOW,
+        handler=prepare_cancel_subscription))
     return registry

@@ -1,11 +1,13 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.core.time import utcnow
 from app.models import (
-    Account, Card, Contact, Transaction, User, WealthHolding, WealthProduct, WealthRiskProfile,
+    Account, Card, Contact, Subscription, Transaction, User, WealthHolding, WealthProduct,
+    WealthRiskProfile,
 )
 
 
@@ -76,6 +78,24 @@ def seed_demo_contacts(session: Session, user: User) -> None:
         if existing is None:
             session.add(Contact(user_id=user.id, name=name, bank_name=bank_name,
                                 masked_phone=masked_phone))
+    session.commit()
+
+
+DEMO_SUBSCRIPTIONS = (
+    ("视频会员", 2_500, "monthly", 3),
+    ("云存储", 1_200, "monthly", 20),
+)
+
+
+def seed_demo_subscriptions(session: Session, user: User) -> None:
+    """Create fictional read-only subscriptions without changing balances."""
+    today = utcnow().astimezone(timezone(timedelta(hours=8))).date()
+    for merchant, amount_fen, cycle, days_ahead in DEMO_SUBSCRIPTIONS:
+        existing = session.exec(select(Subscription).where(
+            Subscription.user_id == user.id, Subscription.merchant == merchant)).first()
+        if existing is None:
+            session.add(Subscription(user_id=user.id, merchant=merchant, amount_fen=amount_fen,
+                                     cycle=cycle, next_charge_date=today + timedelta(days=days_ahead)))
     session.commit()
 
 

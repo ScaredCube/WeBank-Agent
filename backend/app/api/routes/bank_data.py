@@ -3,8 +3,10 @@ from fastapi import APIRouter, Depends, Response
 
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.schemas.bank_data import BankAccountData, BankContactData, BankDashboardData
+from app.schemas.subscriptions import SubscriptionCandidateData, SubscriptionData
 from app.schemas.wealth import WealthHoldingData, WealthProductData, WealthRiskProfileData
 from app.services.bank_data_service import dashboard, list_account_overview, list_contact_overview
+from app.services.subscription_service import detect_candidates, list_subscriptions
 from app.services.wealth_service import get_risk_profile, list_holdings, list_products
 
 router = APIRouter(prefix="/bank", tags=["bank-data"], dependencies=[Depends(security_gate)])
@@ -32,6 +34,23 @@ def read_dashboard(
 ) -> BankDashboardData:
     response.headers["Cache-Control"] = "no-store"
     return BankDashboardData.model_validate(dashboard(session, user.id))
+
+
+@router.get("/subscriptions", response_model=list[SubscriptionData])
+def read_subscriptions(
+    response: Response, session: SessionDep, user: CurrentUser,
+) -> list[SubscriptionData]:
+    response.headers["Cache-Control"] = "no-store"
+    return [SubscriptionData.model_validate(item) for item in list_subscriptions(session, user.id)]
+
+
+@router.get("/subscriptions/candidates", response_model=list[SubscriptionCandidateData])
+def read_subscription_candidates(
+    response: Response, session: SessionDep, user: CurrentUser,
+) -> list[SubscriptionCandidateData]:
+    response.headers["Cache-Control"] = "no-store"
+    return [SubscriptionCandidateData.model_validate(item)
+            for item in detect_candidates(session, user.id)]
 
 
 @router.get("/wealth/products", response_model=list[WealthProductData])

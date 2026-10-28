@@ -6,11 +6,13 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
-    actions, audit, auth, bank_data, bills, cards, chat, health, security, transfers, wealth,
+    actions, audit, auth, bank_data, bills, cards, chat, health, security, subscriptions,
+    transfers, wealth,
 )
 from app.core.config import settings
 from app.db.seed import (
-    seed_demo_accounts, seed_demo_cards, seed_demo_contacts, seed_demo_user, seed_demo_wealth,
+    seed_demo_accounts, seed_demo_cards, seed_demo_contacts, seed_demo_subscriptions,
+    seed_demo_user, seed_demo_wealth,
 )
 from app.db.session import init_db, session_scope
 from app.services.audit_service import request_context
@@ -25,6 +27,7 @@ async def lifespan(app: FastAPI):
         seed_demo_accounts(session, user)
         seed_demo_cards(session, user)
         seed_demo_contacts(session, user)
+        seed_demo_subscriptions(session, user)
         seed_demo_wealth(session, user)
     yield
 
@@ -64,6 +67,7 @@ app.include_router(actions.router, prefix=settings.api_prefix)
 app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(bank_data.router, prefix=settings.api_prefix)
 app.include_router(wealth.router, prefix=settings.api_prefix)
+app.include_router(subscriptions.router, prefix=settings.api_prefix)
 app.include_router(bills.router, prefix=settings.api_prefix)
 app.include_router(cards.router, prefix=settings.api_prefix)
 app.include_router(security.router, prefix=settings.api_prefix)

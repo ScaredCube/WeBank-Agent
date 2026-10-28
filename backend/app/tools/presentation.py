@@ -21,6 +21,8 @@ def render_tool_result(name: str, result: dict) -> str:
             return f"理财申购未准备：{result['error']}。"
         if name == "prepare_wealth_redeem":
             return f"理财赎回未准备：{result['error']}。"
+        if name == "prepare_cancel_subscription":
+            return f"取消订阅未准备：{result['error']}。"
         return f"查询未完成：{result['error']}。"
     data = result["data"]
     if name == "get_card_status":
@@ -70,6 +72,26 @@ def render_tool_result(name: str, result: dict) -> str:
         for item in data:
             lines.append(f"- {item['product_name']}：持仓 {_money(item['amount_fen'])} 元，"
                          f"昨日收益 {_money(item['yesterday_earnings_fen'])} 元")
+        return "\n".join(lines)
+    if name == "get_subscriptions":
+        if not data:
+            return "没有查询到模拟订阅。"
+        cycle = {"monthly": "每月", "quarterly": "每季度", "yearly": "每年"}
+        lines = ["模拟订阅："]
+        for item in data:
+            status = "已取消" if item["status"] == "cancelled" else "生效中"
+            soon = "，即将续费" if item["renewal_soon"] else ""
+            lines.append(f"- {item['merchant']}：{_money(item['amount_fen'])} 元，"
+                         f"{cycle.get(item['cycle'], item['cycle'])}，下次扣费 {item['next_charge_date']}，"
+                         f"还有 {item['days_until_charge']} 天{soon}，状态：{status}")
+        return "\n".join(lines)
+    if name == "detect_subscriptions":
+        if not data:
+            return "未从最近模拟流水中识别到可能的重复订阅。"
+        lines = ["可能存在的订阅："]
+        for item in data:
+            lines.append(f"- {item['merchant']}：{_money(item['amount_fen'])} 元，"
+                         f"出现 {item['occurrences']} 次，最近一次 {item['last_occurred_at'][:10]}")
         return "\n".join(lines)
     if name == "get_wealth_risk_profile":
         if data.get("risk_level") == "未评估":

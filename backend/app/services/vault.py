@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time import utcnow
-from app.models import Account, AuditTokenContext, DataToken, WealthProduct
+from app.models import Account, AuditTokenContext, DataToken, Subscription, WealthProduct
 from app.services.audit_service import record
 
 
@@ -99,6 +99,22 @@ def create_product_token(session: Session, user_id: int, product_id: int) -> str
     return row.token
 
 
+def create_subscription_token(session: Session, user_id: int, subscription_id: int) -> str:
+    subscription = session.exec(select(Subscription).where(
+        Subscription.id == subscription_id, Subscription.user_id == user_id,
+        Subscription.status == "active")).first()
+    if subscription is None:
+        raise VaultError()
+    row = session.exec(select(DataToken).where(
+        DataToken.user_id == user_id, DataToken.kind == "subscription",
+        DataToken.entity_id == subscription_id, DataToken.revoked_at.is_(None))).first()
+    if row is None:
+        row = DataToken(user_id=user_id, kind="subscription", entity_id=subscription_id,
+                        token=f"<SUBSCRIPTION_{_random_reference()}>")
+        session.add(row); session.flush()
+    return row.token
+
+
 def resolve(session: Session, user_id: int, token: str, expected_kind: str, scope: str) -> int | str:
     row = session.exec(select(DataToken).where(DataToken.token == token, DataToken.user_id == user_id)).first()
     now = utcnow()
@@ -123,6 +139,13 @@ def resolve(session: Session, user_id: int, token: str, expected_kind: str, scop
             _audit(session, user_id, "token_resolve_denied", None, "denied")
             raise VaultError()
         value = product.id
+    elif row.kind == "subscription":
+        subscription = session.get(Subscription, row.entity_id)
+        if (subscription is None or subscription.user_id != user_id
+                or subscription.status != "active"):
+            _audit(session, user_id, "token_resolve_denied", None, "denied")
+            raise VaultError()
+        value = subscription.id
     else:
         try:
             keys, _ = _keys()

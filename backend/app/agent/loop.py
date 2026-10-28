@@ -24,6 +24,7 @@ _PREPARE_TOOLS = {
     "prepare_card_loss": RiskLevel.RED,
     "prepare_wealth_subscribe": RiskLevel.RED,
     "prepare_wealth_redeem": RiskLevel.RED,
+    "prepare_cancel_subscription": RiskLevel.YELLOW,
 }
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,8 @@ class AgentLoop:
                                     payload["transfer_id"] = prepared["transfer_id"]
                                 if "order_id" in prepared:
                                     payload["order_id"] = prepared["order_id"]
+                                if "subscription_id" in prepared:
+                                    payload["subscription_id"] = prepared["subscription_id"]
                                 # Never put the confirmation token into model messages or logs.
                                 payload["confirmation_token"] = prepared["confirmation_token"]
                                 yield AgentEvent("action_required", payload)
