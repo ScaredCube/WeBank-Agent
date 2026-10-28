@@ -187,3 +187,24 @@ def test_red_verification_and_transfer_success_are_recorded(client, auth_headers
     chain = [e for e in logs(client, auth_headers) if e["transfer_id"] == item["transfer_id"]]
     assert {e["event_type"] for e in chain} >= {"verification_started", "verification_succeeded", "transfer_completed"}
     assert settings.demo_verification_code not in json.dumps(chain)
+
+
+def test_query_tool_exception_records_failure_without_exception_text(client, auth_headers, monkeypatch):
+    from app.agent.registry import RiskLevel, ToolRegistry, ToolSpec
+    async def fail(**kwargs):
+        raise RuntimeError("private-exception-13812345678")
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="get_account_balance", description="查询", parameters={},
+                               risk=RiskLevel.GREEN, handler=fail))
+    class FakeLLM:
+        async def stream(self, messages, tools=None):
+            yield LLMChunk(tool_calls=[{"id": "one", "type": "function", "function": {
+                "name": "get_account_balance", "arguments": "{}"}}])
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    monkeypatch.setattr("app.agent.loop.create_agent_registry", lambda: registry)
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    client.post(f"/api/chat/conversations/{conversation_id}/messages", json={"content": "查询"}, headers=auth_headers)
+    entries = logs(client, auth_headers)
+    assert any(e["event_type"] == "tool_result" and e["result"] == "failed"
+               and e["conversation_id"] == conversation_id for e in entries)
+    assert "private-exception" not in json.dumps(entries)

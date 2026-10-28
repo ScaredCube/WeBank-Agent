@@ -106,14 +106,23 @@ class AgentLoop:
                                                   risk_level=decision.level.value, reasons=decision.reasons, result="denied")
                                 result = {"ok": False, "data": None, "error": "操作需要进一步验证"}
                             else:
-                                with session_scope() as session:
-                                    result = await spec.handler(session=session, user_id=user_id, **args)
-                                    record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
-                                           risk_level=decision.level.value, reasons=decision.reasons, result="success")
-                                    if result.get("ok"):
+                                try:
+                                    with session_scope() as session:
+                                        result = await spec.handler(session=session, user_id=user_id, **args)
+                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
+                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
+                                        if result.get("ok"):
+                                            record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
+                                                   result="success")
+                                        session.commit()
+                                except Exception:
+                                    with session_scope() as session:
+                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
+                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
                                         record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
-                                               result="success")
-                                    session.commit()
+                                               result="failed", reason_code="internal_error")
+                                        session.commit()
+                                    raise
                     if not result.get("ok"):
                         record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool, result="denied")
                     messages.append({"role": "tool", "tool_call_id": call["id"],
