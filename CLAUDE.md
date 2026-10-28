@@ -112,12 +112,11 @@ npm run build
 
 ## 6. 前端规范
 
-- UI 文案使用中文，语气简洁、克制。
-- **用布局、间距、层级表达页面结构，不添加解释界面元素的冗余标签**。
-- 设计令牌集中在 `src/index.css` 的 `@theme`，不要在页面里散落魔法颜色。
+- 前端以移动端为主，优化触控、竖屏使用体验。
+- UI 文案使用中文。
+- **Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.**。
 - 确认弹窗、验证弹窗必须是固定组件，禁止由模型生成。
 - 不做“假成功”：后端未返回结果时，不得前端伪造交易成功状态。
-- 新增页面需兼容 390px 移动端宽度与桌面端，确保无横向滚动。
 - 保持 `npm run lint` 与 `npm run build` 零错误。
 
 ## 7. Git 与改动纪律
