@@ -26,7 +26,8 @@ from app.services.chat_service import (
     list_messages,
     recent_messages,
 )
-from app.services.audit_service import conversation_context, request_context
+from app.risk.injection import detect_injection
+from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.vault import VaultError
 
@@ -100,24 +101,34 @@ async def send_message(
     except VaultError:
         session.rollback()
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
+    injection = detect_injection(display_content)
     append_message(session, conversation, "user", display_content)
     if conversation.title == "新对话":
-        conversation.title = derive_title(display_content)
+        conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content)
         session.add(conversation)
         session.commit()
 
-    history = [
-        {"role": message.role, "content": mask_text(message.content)}
-        for message in recent_messages(session, conversation_id, settings.llm_max_history)
-    ]
+    history = []
+    for message in recent_messages(session, conversation_id, settings.llm_max_history):
+        content = mask_text(message.content)
+        if detect_injection(content).blocked:
+            content = "[已拦截的可疑输入]"
+        history.append({"role": message.role, "content": content})
     if history:
-        history[-1]["content"] = model_content
+        history[-1]["content"] = "[已拦截的可疑输入]" if injection.blocked else model_content
     loop = AgentLoop()
 
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
         audit_token = conversation_context.set(conversation_id)
         try:
+            if injection.blocked:
+                record_separately(user_id=user.id, event_type="input_blocked", result="denied",
+                                  reason_code="prompt_injection")
+                text = "检测到试图绕过安全规则的请求，已拒绝。"
+                yield _sse({"type": "delta", "text": text})
+                yield _sse({"type": "done", "message": _persist_assistant(conversation_id, text)})
+                return
             if uncertain:
                 yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
                 yield _sse({"type": "done", "message": None})

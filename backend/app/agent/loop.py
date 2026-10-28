@@ -10,6 +10,7 @@ from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
 from app.risk.engine import assess_tool
+from app.risk.injection import validate_tool_arguments
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
 from app.services.audit_service import TOOLS, record, record_separately
@@ -79,16 +80,20 @@ class AgentLoop:
                     spec = registry.get(function["name"])
                     audit_tool = spec.name if spec is not None and spec.name in TOOLS else None
                     record_separately(user_id=user_id, event_type="tool_called", tool=audit_tool, result="success")
+                    rejection_reason = None
                     try:
                         args = json.loads(function["arguments"])
                         if (not isinstance(args, dict) or "session" in args or "user_id" in args
                                 or mask_value(args) != args or mask_text(call["id"]) != call["id"]):
                             raise ValueError("invalid arguments")
                     except (ValueError, TypeError):
+                        rejection_reason = "invalid_arguments"
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
+                        argument_error = validate_tool_arguments(spec, args)
                         guard_blocked = None
-                        if spec is not None and spec.handler is not None and self.guard is not None:
+                        if (argument_error is None and spec is not None and spec.handler is not None
+                                and self.guard is not None):
                             try:
                                 verdict = await self.guard.review(
                                     build_guard_call(spec, args, prior_calls)
@@ -108,7 +113,11 @@ class AgentLoop:
                                     reason_code="guard_unavailable" if failed else "guard_rejected",
                                 )
                                 guard_blocked = "安全检查暂不可用" if failed else "操作未通过安全检查"
-                        if guard_blocked is not None:
+                                rejection_reason = "guard_unavailable" if failed else "guard_rejected"
+                        if argument_error is not None:
+                            result = {"ok": False, "data": None, "error": argument_error}
+                            rejection_reason = "invalid_arguments"
+                        elif guard_blocked is not None:
                             result = {"ok": False, "data": None, "error": guard_blocked}
                         elif spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
@@ -153,7 +162,8 @@ class AgentLoop:
                                         session.commit()
                                     raise
                     if not result.get("ok"):
-                        record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool, result="denied")
+                        record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool,
+                                          result="denied", reason_code=rejection_reason)
                     result = mask_value(result)
                     messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
