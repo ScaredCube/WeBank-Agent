@@ -7,6 +7,8 @@ def _money(fen: int) -> str:
 
 def render_tool_result(name: str, result: dict) -> str:
     if not result["ok"]:
+        if name == "calculate":
+            return f"计算未完成：{result['error']}。"
         if name == "prepare_transfer":
             return f"模拟转账未准备：{result['error']}。"
         if name == "prepare_card_loss":
@@ -36,6 +38,13 @@ def render_tool_result(name: str, result: dict) -> str:
             lines.append(f"- {item['occurred_at'][:10]} {direction} {_money(item['amount_fen'])} 元"
                          f"，{item['category']}，{item['counterparty']}")
         return "\n".join(lines)
+    if name == "calculate":
+        value = data.get("result") if isinstance(data, dict) else None
+        if type(value) is int:
+            return f"计算结果：{value:,}"
+        if type(value) is float:
+            return f"计算结果：{value:.12g}"
+        return "计算未完成。"
     if name == "get_monthly_bill":
         lines = [f"{data['month']} 月度账单（北京时间）",
                  f"{data['account_name']}（{data['masked_number']}）",

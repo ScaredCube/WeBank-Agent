@@ -4,6 +4,7 @@ from app.tools.account_tools import (
 )
 from app.tools.transfer_tools import TransferArguments, prepare_transfer_tool
 from app.tools.bill_tools import MonthlyBillArguments, get_monthly_bill
+from app.tools.calculator_tools import CalculateArguments, calculate
 from app.tools.card_tools import CardArguments, get_card_status, prepare_card_loss
 
 
@@ -23,6 +24,11 @@ def create_readonly_registry() -> ToolRegistry:
 
 def create_agent_registry() -> ToolRegistry:
     registry = create_readonly_registry()
+    registry.register(ToolSpec(
+        name="calculate",
+        description="执行受限纯数学计算；仅支持数字、括号和 + - * / // % **，不执行变量、函数、属性或代码",
+        parameters=CalculateArguments.model_json_schema(), risk=RiskLevel.GREEN, handler=calculate,
+    ))
     registry.register(ToolSpec(
         name="prepare_transfer", description="准备模拟转账，等待用户确认或演示验证，不会直接执行或扣款",
         parameters=TransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
