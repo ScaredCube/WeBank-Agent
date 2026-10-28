@@ -11,7 +11,7 @@ from app.agent.registry import RiskLevel, ToolSpec
 from app.core.config import settings
 from app.core.time import utcnow
 from app.db.session import get_engine
-from app.models import Account, DataToken, PendingAction, Transaction, TransferRequest, TransferTokenBinding, VerificationSession
+from app.models import Account, Card, DataToken, PendingAction, Transaction, TransferRequest, TransferTokenBinding, VerificationSession
 from app.risk.engine import assess_tool
 from app.schemas.transfers import PrepareTransferRequest
 from app.services.action_service import create_pending_action, create_simulated_red_action, get_pending_action
@@ -50,6 +50,12 @@ def _phone_digest(phone: str | None) -> str | None:
         return None
     _, encoded_key = _keys()
     return hmac.new(base64.urlsafe_b64decode(encoded_key), phone.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _require_card_available(session: Session, account_id: int) -> None:
+    card = session.exec(select(Card).where(Card.account_id == account_id)).first()
+    if card is None or card.status != "active":
+        raise TransferError("关联卡片不可用，无法转账")
 
 
 def _prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_token: str | None = None,
@@ -100,6 +106,7 @@ def _prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_t
         )).first()
         if account is None or account.status != "active":
             raise TransferError("账户不存在或不可用")
+        _require_card_available(session, account.id)
         if account.currency != "CNY" or account.balance_fen < payload.amount_fen:
             raise TransferError("账户币种不支持或余额不足")
         now = utcnow()
@@ -199,6 +206,7 @@ def _execute_transfer(user_id: int, transfer_id: int) -> dict:
         )).first()
         if account is None or account.status != "active" or account.currency != "CNY":
             raise TransferError("账户不存在或不可用")
+        _require_card_available(session, account.id)
         if account.balance_fen < transfer.amount_fen:
             raise TransferError("账户余额不足")
         decision = assess_tool(_TRANSFER_SPEC, now=now, amount_fen=transfer.amount_fen,

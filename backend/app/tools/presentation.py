@@ -9,8 +9,17 @@ def render_tool_result(name: str, result: dict) -> str:
     if not result["ok"]:
         if name == "prepare_transfer":
             return f"模拟转账未准备：{result['error']}。"
+        if name == "prepare_card_loss":
+            return f"模拟挂失未准备：{result['error']}。"
         return f"查询未完成：{result['error']}。"
     data = result["data"]
+    if name == "get_card_status":
+        if not data:
+            return "未找到模拟卡片。"
+        card_status = {"active": "正常", "lost": "已挂失"}
+        account_status = {"active": "正常", "frozen": "已冻结"}
+        return "\n".join(f"{item['account_name']}（{item['masked_number']}）：卡片状态：{card_status.get(item['status'], '不可用')}；账户状态：{account_status.get(item['account_status'], '不可用')}"
+                         for item in data)
     if name == "get_account_balance":
         if not data:
             return "未找到模拟账户。"

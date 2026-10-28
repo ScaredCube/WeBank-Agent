@@ -19,7 +19,7 @@ class PendingActionResponse(BaseModel):
     action_type: str
     details: dict[str, Any]
     risk_level: str
-    status: Literal["pending", "confirmed", "cancelled", "expired", "verified"]
+    status: Literal["pending", "confirmed", "cancelled", "expired", "verified", "completed"]
     created_at: datetime
     expires_at: datetime
     confirmed_at: datetime | None

@@ -4,7 +4,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models import Account, Transaction, User
+from app.models import Account, Card, Transaction, User
 
 
 def seed_demo_user(session: Session) -> User:
@@ -48,4 +48,13 @@ def seed_demo_accounts(session: Session, user: User) -> None:
             amount_fen=amount, balance_after_fen=balance, counterparty=counterparty,
             category=category, note="模拟交易", occurred_at=occurred_at,
         ))
+    session.commit()
+
+
+def seed_demo_cards(session: Session, user: User) -> None:
+    """Add one simulated card for each existing demo account without changing it."""
+    accounts = session.exec(select(Account).where(Account.user_id == user.id)).all()
+    for account in accounts:
+        if session.exec(select(Card).where(Card.account_id == account.id)).first() is None:
+            session.add(Card(account_id=account.id))
     session.commit()

@@ -42,6 +42,21 @@ class Account(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class Card(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    account_id: int = Field(foreign_key="account.id", unique=True, index=True)
+    status: str = "active"
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class CardLossRequest(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    card_id: int = Field(foreign_key="card.id", index=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    status: str = "pending"
+
+
 class Transaction(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     account_id: int = Field(foreign_key="account.id", index=True)

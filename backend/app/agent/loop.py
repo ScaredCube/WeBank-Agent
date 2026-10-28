@@ -86,15 +86,16 @@ class AgentLoop:
                     else:
                         if spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
-                        elif spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW:
+                        elif ((spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW)
+                              or (spec.name == "prepare_card_loss" and spec.risk == RiskLevel.RED)):
                             prepared = await spec.handler(user_id=user_id, **args)
                             if prepared.get("ok"):
                                 record_separately(user_id=user_id, event_type="tool_result", tool=spec.name,
-                                                  transfer_id=prepared["transfer_id"], result="success")
+                                                  transfer_id=prepared.get("transfer_id"), result="success")
                                 # Never put the confirmation token into model messages or logs.
                                 yield AgentEvent("action_required", {
                                     "action": mask_value(prepared["action"]),
-                                    "transfer_id": prepared["transfer_id"],
+                                    **({"transfer_id": prepared["transfer_id"]} if "transfer_id" in prepared else {}),
                                     "confirmation_token": prepared["confirmation_token"],
                                 })
                                 return
