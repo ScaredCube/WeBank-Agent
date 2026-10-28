@@ -17,3 +17,5 @@ class AuditOut(BaseModel):
     reason_codes: str | None
     result: str | None
     created_at: datetime
+    reference_id: int | None = None
+    entity_kind: str | None = None

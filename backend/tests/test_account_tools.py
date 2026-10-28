@@ -34,13 +34,14 @@ def test_readonly_tools_validate_and_isolate_accounts(client):
         account = session.exec(select(Account).where(Account.user_id == user.id)).one()
         found = asyncio.run(balance.handler(session, user.id))
         assert found["ok"] and found["data"][0]["balance_fen"] == 500000
-        entries = asyncio.run(transactions.handler(session, user.id, account_id=account.id, limit=2))
+        account_token = found["data"][0]["account_token"]
+        entries = asyncio.run(transactions.handler(session, user.id, account_token=account_token, limit=2))
         assert [entry["category"] for entry in entries["data"]] == ["购物", "餐饮"]
         default_entries = asyncio.run(transactions.handler(session, user.id))
         assert default_entries["ok"] and len(default_entries["data"]) == 3
-        assert not asyncio.run(balance.handler(session, other.id, account_id=account.id))["ok"]
-        assert not asyncio.run(transactions.handler(session, other.id, account_id=account.id))["ok"]
-        assert not asyncio.run(transactions.handler(session, user.id, account_id=account.id, limit=51))["ok"]
+        assert not asyncio.run(balance.handler(session, other.id, account_token=account_token))["ok"]
+        assert not asyncio.run(transactions.handler(session, other.id, account_token=account_token))["ok"]
+        assert not asyncio.run(transactions.handler(session, user.id, account_token=account_token, limit=51))["ok"]
         assert not asyncio.run(balance.handler(session, user.id, user_id_override=other.id))["ok"]
         session.refresh(account)
         assert account.balance_fen == 500000

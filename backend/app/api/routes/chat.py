@@ -26,7 +26,9 @@ from app.services.chat_service import (
     list_messages,
     recent_messages,
 )
-from app.services.audit_service import conversation_context
+from app.services.audit_service import conversation_context, request_context
+from app.services.redaction import mask_text, redact_input
+from app.services.vault import VaultError
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -56,7 +58,7 @@ def _persist_assistant(conversation_id: int, content: str) -> dict | None:
 @router.get("/conversations", response_model=list[ConversationOut])
 def read_conversations(session: SessionDep, user: CurrentUser) -> list[ConversationOut]:
     return [
-        ConversationOut.model_validate(conversation)
+        ConversationOut.model_validate(conversation).model_copy(update={"title": mask_text(conversation.title)})
         for conversation in list_conversations(session, user)
     ]
 
@@ -67,7 +69,7 @@ def new_conversation(
     session: SessionDep,
     user: CurrentUser,
 ) -> ConversationOut:
-    conversation = create_conversation(session, user, payload.title)
+    conversation = create_conversation(session, user, mask_text(payload.title))
     return ConversationOut.model_validate(conversation)
 
 
@@ -78,7 +80,8 @@ def read_messages(
     user: CurrentUser,
 ) -> list[MessageOut]:
     _require_conversation(session, user, conversation_id)
-    return [MessageOut.model_validate(message) for message in list_messages(session, conversation_id)]
+    return [MessageOut.model_validate(message).model_copy(update={"content": mask_text(message.content)})
+            for message in list_messages(session, conversation_id)]
 
 
 @router.post("/conversations/{conversation_id}/messages")
@@ -91,22 +94,34 @@ async def send_message(
 ) -> EventSourceResponse:
     conversation = _require_conversation(session, user, conversation_id)
 
-    append_message(session, conversation, "user", payload.content)
+    try:
+        display_content, model_content, uncertain = redact_input(
+            session, user.id, payload.content, request_context.get() or "")
+    except VaultError:
+        session.rollback()
+        raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
+    append_message(session, conversation, "user", display_content)
     if conversation.title == "新对话":
-        conversation.title = derive_title(payload.content)
+        conversation.title = derive_title(display_content)
         session.add(conversation)
         session.commit()
 
     history = [
-        {"role": message.role, "content": message.content}
+        {"role": message.role, "content": mask_text(message.content)}
         for message in recent_messages(session, conversation_id, settings.llm_max_history)
     ]
+    if history:
+        history[-1]["content"] = model_content
     loop = AgentLoop()
 
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
         audit_token = conversation_context.set(conversation_id)
         try:
+            if uncertain:
+                yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
+                yield _sse({"type": "done", "message": None})
+                return
             async for event in loop.stream(history, user_id=user.id):
                 if await request.is_disconnected():
                     break

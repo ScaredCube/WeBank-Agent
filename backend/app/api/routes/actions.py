@@ -7,6 +7,7 @@ from app.schemas.actions import (
 from app.schemas.verification import StartVerificationRequest, VerificationResponse, VerifyCodeRequest
 from app.services.action_service import cancel_pending_action, confirm_pending_action, get_pending_action
 from app.services.verification_service import VerificationError, start_verification, verify_code
+from app.services.redaction import mask_value
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
@@ -19,7 +20,7 @@ def read_action(
     if action is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="动作不存在")
     response.headers["Cache-Control"] = "no-store"
-    return PendingActionResponse.model_validate(action)
+    return PendingActionResponse.model_validate(mask_value(action))
 
 
 @router.post("/{action_id}/cancel", response_model=CancelActionResponse)

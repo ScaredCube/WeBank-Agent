@@ -130,7 +130,7 @@ def test_chat_renders_transactions_from_tool_not_model(client, auth_headers, mon
                 yield LLMChunk(tool_calls=[{
                     "id": "call-1", "type": "function",
                     "function": {"name": "list_recent_transactions",
-                                 "arguments": '{"account_id": 1, "limit": 2}'},
+                                 "arguments": '{"limit": 2}'},
                 }])
             else:
                 yield LLMChunk(content="交易金额为 123456 元。")

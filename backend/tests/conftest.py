@@ -1,4 +1,5 @@
 ﻿import os
+import base64
 import tempfile
 from pathlib import Path
 
@@ -9,6 +10,8 @@ if db_path.exists():
 os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
 os.environ["LLM_API_KEY"] = ""
 os.environ["JWT_SECRET"] = "test-secret-with-enough-length-123456"
+os.environ["DATA_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(b"a" * 32).decode()
+os.environ["DATA_HMAC_KEY"] = base64.urlsafe_b64encode(b"b" * 32).decode()
 os.environ["DEMO_USERNAME"] = "demo"
 os.environ["DEMO_PASSWORD"] = "demo123"
 

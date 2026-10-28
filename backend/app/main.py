@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import actions, audit, auth, chat, health, transfers
@@ -26,6 +28,11 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": "请求参数无效"})
 
 
 @app.middleware("http")

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 
 from app.core.time import utcnow
 
@@ -113,3 +113,34 @@ class AuditLog(SQLModel, table=True):
     reason_codes: str | None = None
     result: str | None = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class DataToken(SQLModel, table=True):
+    __table_args__ = (Index("uq_active_account_reference", "user_id", "entity_id", unique=True,
+                            sqlite_where=text("kind = 'account' AND revoked_at IS NULL"),
+                            postgresql_where=text("kind = 'account' AND revoked_at IS NULL")),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    token: str = Field(index=True, unique=True)
+    kind: str
+    entity_id: int | None = None
+    ciphertext: str | None = None
+    key_version: str | None = None
+    digest: str | None = None
+    request_scope: str | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class AuditTokenContext(SQLModel, table=True):
+    audit_id: int = Field(foreign_key="auditlog.id", primary_key=True)
+    reference_id: int | None = None
+    entity_kind: str | None = None
+
+
+class TransferTokenBinding(SQLModel, table=True):
+    transfer_id: int = Field(foreign_key="transferrequest.id", primary_key=True)
+    source_token_id: int = Field(foreign_key="datatoken.id")
+    target_token_id: int | None = Field(default=None, foreign_key="datatoken.id")
+    request_scope: str

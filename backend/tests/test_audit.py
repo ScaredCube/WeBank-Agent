@@ -1,3 +1,4 @@
+import re
 import json
 from datetime import timedelta, timezone
 
@@ -41,7 +42,7 @@ def test_chat_transfer_audit_chain_and_retry(client, auth_headers, monkeypatch):
         async def stream(self, messages, tools=None):
             yield LLMChunk(tool_calls=[{"id": "call-1", "type": "function", "function": {
                 "name": "prepare_transfer", "arguments": json.dumps({
-                    "recipient_name": "模拟收款人", "recipient_phone": "13812345678",
+                    "recipient_name": "模拟收款人", "target_token": re.search(r"<PHONE_TMP_[^>]+>", messages[-1]["content"]).group(),
                     "amount_fen": 50000, "note": "private-note-xyz",
                 })}}])
 

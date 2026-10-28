@@ -12,6 +12,7 @@ from app.risk.engine import assess_tool
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
 from app.services.audit_service import TOOLS, record, record_separately
+from app.services.redaction import mask_text, mask_value
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
@@ -68,8 +69,8 @@ class AgentLoop:
                        for call in tool_calls):
                     yield AgentEvent("error", {"message": "模型返回的工具调用格式无效。"})
                     return
-                messages.append({"role": "assistant", "content": "".join(content) or None,
-                                 "tool_calls": tool_calls})
+                messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
+                                 "tool_calls": mask_value(tool_calls)})
                 for call in tool_calls:
                     function = call["function"]
                     spec = registry.get(function["name"])
@@ -77,7 +78,8 @@ class AgentLoop:
                     record_separately(user_id=user_id, event_type="tool_called", tool=audit_tool, result="success")
                     try:
                         args = json.loads(function["arguments"])
-                        if not isinstance(args, dict) or "session" in args or "user_id" in args:
+                        if (not isinstance(args, dict) or "session" in args or "user_id" in args
+                                or mask_value(args) != args or mask_text(call["id"]) != call["id"]):
                             raise ValueError("invalid arguments")
                     except (ValueError, TypeError):
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
@@ -91,7 +93,7 @@ class AgentLoop:
                                                   transfer_id=prepared["transfer_id"], result="success")
                                 # Never put the confirmation token into model messages or logs.
                                 yield AgentEvent("action_required", {
-                                    "action": prepared["action"],
+                                    "action": mask_value(prepared["action"]),
                                     "transfer_id": prepared["transfer_id"],
                                     "confirmation_token": prepared["confirmation_token"],
                                 })
@@ -125,7 +127,8 @@ class AgentLoop:
                                     raise
                     if not result.get("ok"):
                         record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool, result="denied")
-                    messages.append({"role": "tool", "tool_call_id": call["id"],
+                    result = mask_value(result)
+                    messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
         except Exception:

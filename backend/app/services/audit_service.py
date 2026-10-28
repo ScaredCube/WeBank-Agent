@@ -25,7 +25,8 @@ RESULTS = frozenset({"success", "denied", "failed", "retry", "locked"})
 REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "daily_limit",
            "转账需要确认": "confirmation_required", "夜间操作升级": "night_upgrade"}
 FAILURE_REASONS = {"insufficient_balance", "risk_upgrade", "not_authorized", "unavailable",
-                   "duplicate_mismatch", "verification_unavailable", "invalid_risk", "internal_error"}
+                   "duplicate_mismatch", "verification_unavailable", "invalid_risk", "internal_error",
+                   "reference_unavailable"}
 
 
 def record(session: Session, *, user_id: int, event_type: str, action_id: int | None = None,
