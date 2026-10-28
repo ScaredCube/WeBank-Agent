@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent.guard import GuardProvider, GuardVerdict, build_guard_call, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.registry import RiskLevel
@@ -26,14 +27,16 @@ class AgentEvent:
 
 
 class AgentLoop:
-    def __init__(self, llm: LLMProvider | None = None) -> None:
+    def __init__(self, llm: LLMProvider | None = None, guard: GuardProvider | None = None) -> None:
         self.llm = llm or get_llm()
+        self.guard = guard if guard is not None else get_guard()
 
     async def stream(self, history: list[dict[str, str]], user_id: int) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
         tool_results: list[tuple[str, dict]] = []
+        prior_calls: list[str] = []
 
         try:
             for round_index in range(MAX_TOOL_ROUNDS + 1):
@@ -84,7 +87,30 @@ class AgentLoop:
                     except (ValueError, TypeError):
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
-                        if spec is None or spec.handler is None:
+                        guard_blocked = None
+                        if spec is not None and spec.handler is not None and self.guard is not None:
+                            try:
+                                verdict = await self.guard.review(
+                                    build_guard_call(spec, args, prior_calls)
+                                )
+                            except Exception:
+                                verdict = GuardVerdict(False, "unavailable")
+                            if verdict.allowed:
+                                record_separately(user_id=user_id, event_type="guard_allowed",
+                                                  tool=audit_tool, result="success")
+                            else:
+                                failed = verdict.reason in {"unavailable", "invalid_response"}
+                                record_separately(
+                                    user_id=user_id,
+                                    event_type="guard_failed" if failed else "guard_denied",
+                                    tool=audit_tool,
+                                    result="failed" if failed else "denied",
+                                    reason_code="guard_unavailable" if failed else "guard_rejected",
+                                )
+                                guard_blocked = "安全检查暂不可用" if failed else "操作未通过安全检查"
+                        if guard_blocked is not None:
+                            result = {"ok": False, "data": None, "error": guard_blocked}
+                        elif spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
                         elif ((spec.name == "prepare_transfer" and spec.risk == RiskLevel.YELLOW)
                               or (spec.name == "prepare_card_loss" and spec.risk == RiskLevel.RED)):
@@ -132,6 +158,7 @@ class AgentLoop:
                     messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
+                    prior_calls.append(f"{function['name']}:{'success' if result.get('ok') else 'denied'}")
         except Exception:
             yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
             return

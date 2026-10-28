@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     risk_night_start_hour: int = Field(default=0, ge=0, le=23)
     risk_night_end_hour: int = Field(default=6, ge=0, le=23)
+    guard_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
 
     # Fixed code is solely for local demonstration; verification is disabled unless DEBUG=true.
     demo_verification_code: str = Field(default="123456", pattern=r"^[0-9]{6}$")
