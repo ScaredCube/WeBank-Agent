@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     risk_night_end_hour: int = Field(default=6, ge=0, le=23)
     guard_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
 
+    security_failure_threshold: int = Field(default=5, ge=1, le=100)
+    security_failure_window_seconds: int = Field(default=600, ge=1, le=86400)
+    security_lock_seconds: int = Field(default=900, ge=1, le=604800)
+    security_rate_limit_requests: int = Field(default=60, ge=1, le=10000)
+    security_rate_window_seconds: int = Field(default=60, ge=1, le=86400)
+    security_unlock_code: str = Field(default="246810", pattern=r"^[0-9]{6}$")
+
     # Fixed code is solely for local demonstration; verification is disabled unless DEBUG=true.
     demo_verification_code: str = Field(default="123456", pattern=r"^[0-9]{6}$")
 

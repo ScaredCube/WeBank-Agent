@@ -114,6 +114,16 @@ class TransferRequest(SQLModel, table=True):
     completed_at: datetime | None = None
 
 
+class SecurityState(SQLModel, table=True):
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    failure_count: int = 0
+    failure_window_started_at: datetime = Field(default_factory=utcnow)
+    locked_until: datetime | None = None
+    request_count: int = 0
+    request_window_started_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class AuditLog(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)

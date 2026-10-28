@@ -18,6 +18,8 @@ EVENTS = frozenset({
     "verification_start_failed", "verification_error",
     "transfer_completed", "transfer_retried", "transfer_denied", "transfer_failed",
     "guard_allowed", "guard_denied", "guard_failed", "input_blocked",
+    "security_failure", "security_locked", "security_lock_denied", "security_rate_limited",
+    "security_unlocked",
     # Reserved for T-207; no current code emits them.
     "token_resolved", "token_resolve_denied", "token_revoked",
     "card_loss_prepared", "card_loss_completed", "card_loss_denied", "card_loss_failed",
@@ -30,7 +32,8 @@ REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "d
 FAILURE_REASONS = {"insufficient_balance", "risk_upgrade", "not_authorized", "unavailable",
                    "duplicate_mismatch", "verification_unavailable", "invalid_risk", "internal_error",
                    "reference_unavailable", "guard_rejected", "guard_unavailable",
-                   "invalid_arguments", "prompt_injection"}
+                   "invalid_arguments", "prompt_injection", "failure", "failure_threshold",
+                   "account_locked", "rate_limit", "lock_expired", "manual_unlock"}
 
 
 def record(session: Session, *, user_id: int, event_type: str, action_id: int | None = None,

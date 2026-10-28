@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, security_gate
 from app.schemas.transfers import ExecuteTransferResponse, PrepareTransferRequest, PrepareTransferResponse
 from app.services.transfer_service import TransferError, execute_transfer, prepare_transfer
 
-router = APIRouter(prefix="/transfers", tags=["transfers"])
+router = APIRouter(prefix="/transfers", tags=["transfers"], dependencies=[Depends(security_gate)])
 
 
 @router.post("/prepare", response_model=PrepareTransferResponse)

@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.schemas.cards import CardLossPrepared, CardLossResult, CardStatus
 from app.services.audit_service import record
 from app.services.card_service import CardError, execute_loss, list_cards, prepare_loss
 
-router = APIRouter(prefix="/cards", tags=["cards"])
+router = APIRouter(prefix="/cards", tags=["cards"], dependencies=[Depends(security_gate)])
 
 
 @router.get("", response_model=list[CardStatus])

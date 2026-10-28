@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import actions, audit, auth, bills, cards, chat, health, transfers
+from app.api.routes import actions, audit, auth, bills, cards, chat, health, security, transfers
 from app.core.config import settings
 from app.db.seed import seed_demo_accounts, seed_demo_cards, seed_demo_user
 from app.db.session import init_db, session_scope
@@ -58,6 +58,7 @@ app.include_router(actions.router, prefix=settings.api_prefix)
 app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(bills.router, prefix=settings.api_prefix)
 app.include_router(cards.router, prefix=settings.api_prefix)
+app.include_router(security.router, prefix=settings.api_prefix)
 app.include_router(transfers.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 

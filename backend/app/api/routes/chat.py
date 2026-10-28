@@ -2,12 +2,12 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from sqlmodel import Session
 
 from app.agent.loop import AgentLoop
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
 from app.models import Conversation
@@ -29,9 +29,10 @@ from app.services.chat_service import (
 from app.risk.injection import detect_injection
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
+from app.services.security_service import record_failure
 from app.services.vault import VaultError
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
 
 
 def _sse(payload: dict) -> ServerSentEvent:
@@ -125,6 +126,7 @@ async def send_message(
             if injection.blocked:
                 record_separately(user_id=user.id, event_type="input_blocked", result="denied",
                                   reason_code="prompt_injection")
+                record_failure(user.id)
                 text = "检测到试图绕过安全规则的请求，已拒绝。"
                 yield _sse({"type": "delta", "text": text})
                 yield _sse({"type": "done", "message": _persist_assistant(conversation_id, text)})

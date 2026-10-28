@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.schemas.actions import (
     CancelActionResponse, ConfirmActionRequest, ConfirmActionResponse, PendingActionResponse,
 )
@@ -9,7 +9,7 @@ from app.services.action_service import cancel_pending_action, confirm_pending_a
 from app.services.verification_service import VerificationError, start_verification, verify_code
 from app.services.redaction import mask_value
 
-router = APIRouter(prefix="/actions", tags=["actions"])
+router = APIRouter(prefix="/actions", tags=["actions"], dependencies=[Depends(security_gate)])
 
 
 @router.get("/{action_id}", response_model=PendingActionResponse)

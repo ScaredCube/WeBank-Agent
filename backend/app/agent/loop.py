@@ -15,6 +15,7 @@ from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
 from app.services.audit_service import TOOLS, record, record_separately
 from app.services.redaction import mask_text, mask_value
+from app.services.security_service import record_failure
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
@@ -114,6 +115,8 @@ class AgentLoop:
                                 )
                                 guard_blocked = "安全检查暂不可用" if failed else "操作未通过安全检查"
                                 rejection_reason = "guard_unavailable" if failed else "guard_rejected"
+                                if not failed:
+                                    record_failure(user_id)
                         if argument_error is not None:
                             result = {"ok": False, "data": None, "error": argument_error}
                             rejection_reason = "invalid_arguments"

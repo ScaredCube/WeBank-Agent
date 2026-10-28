@@ -11,6 +11,7 @@ from app.core.time import utcnow
 from app.models import PendingAction
 from app.risk.engine import RiskDecision
 from app.services.audit_service import record
+from app.services.security_service import record_failure
 
 
 def create_pending_action(
@@ -84,6 +85,8 @@ def confirm_pending_action(session: Session, *, user_id: int, action_id: int, to
            event_type="action_confirmed" if success else "action_confirm_denied",
            result="success" if success else "denied")
     session.commit()
+    if not success:
+        record_failure(user_id)
     return success
 
 

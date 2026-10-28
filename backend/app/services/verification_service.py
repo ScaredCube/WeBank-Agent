@@ -11,6 +11,7 @@ from app.core.time import utcnow
 from app.db.session import get_engine
 from app.models import PendingAction, VerificationSession
 from app.services.audit_service import record, record_separately
+from app.services.security_service import record_failure
 
 MAX_ATTEMPTS = 3
 
@@ -117,10 +118,13 @@ def start_verification(user_id: int, action_id: int, token: str) -> None:
 
 def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
     try:
-        return _verify_code(user_id, action_id, token, code)
+        success = _verify_code(user_id, action_id, token, code)
     except Exception as exc:
         denied = isinstance(exc, VerificationError)
         record_separately(user_id=user_id, action_id=action_id,
                           event_type="verification_denied" if denied else "verification_error",
                           result="denied" if denied else "failed")
         raise
+    if not success:
+        record_failure(user_id)
+    return success

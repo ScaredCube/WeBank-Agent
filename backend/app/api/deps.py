@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.core.security import decode_access_token
 from app.db.session import get_session
 from app.models import User
+from app.services.security_service import SecurityLocked, SecurityRateLimited, check_request
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -36,3 +37,12 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def security_gate(user: CurrentUser) -> None:
+    try:
+        check_request(user.id)
+    except SecurityLocked as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except SecurityRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
