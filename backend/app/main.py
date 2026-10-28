@@ -9,7 +9,9 @@ from app.api.routes import (
     actions, audit, auth, bank_data, bills, cards, chat, health, security, transfers, wealth,
 )
 from app.core.config import settings
-from app.db.seed import seed_demo_accounts, seed_demo_cards, seed_demo_user, seed_demo_wealth
+from app.db.seed import (
+    seed_demo_accounts, seed_demo_cards, seed_demo_contacts, seed_demo_user, seed_demo_wealth,
+)
 from app.db.session import init_db, session_scope
 from app.services.audit_service import request_context
 from uuid import uuid4
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
         user = seed_demo_user(session)
         seed_demo_accounts(session, user)
         seed_demo_cards(session, user)
+        seed_demo_contacts(session, user)
         seed_demo_wealth(session, user)
     yield
 

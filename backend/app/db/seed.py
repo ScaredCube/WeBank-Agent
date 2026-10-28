@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.security import hash_password
 from app.models import (
-    Account, Card, Transaction, User, WealthHolding, WealthProduct, WealthRiskProfile,
+    Account, Card, Contact, Transaction, User, WealthHolding, WealthProduct, WealthRiskProfile,
 )
 
 
@@ -59,6 +59,23 @@ def seed_demo_cards(session: Session, user: User) -> None:
     for account in accounts:
         if session.exec(select(Card).where(Card.account_id == account.id)).first() is None:
             session.add(Card(account_id=account.id))
+    session.commit()
+
+
+DEMO_CONTACTS = (
+    ("张三", "招商银行", "138****0001"),
+    ("李四", "工商银行", "139****0002"),
+)
+
+
+def seed_demo_contacts(session: Session, user: User) -> None:
+    """Read-only fictional contacts; no phone plaintext is stored or exposed."""
+    for name, bank_name, masked_phone in DEMO_CONTACTS:
+        existing = session.exec(select(Contact).where(
+            Contact.user_id == user.id, Contact.name == name)).first()
+        if existing is None:
+            session.add(Contact(user_id=user.id, name=name, bank_name=bank_name,
+                                masked_phone=masked_phone))
     session.commit()
 
 

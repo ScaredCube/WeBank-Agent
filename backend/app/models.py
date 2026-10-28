@@ -42,6 +42,17 @@ class Account(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class Contact(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    name: str
+    bank_name: str
+    masked_phone: str
+    status: str = "active"
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Card(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     account_id: int = Field(foreign_key="account.id", unique=True, index=True)
