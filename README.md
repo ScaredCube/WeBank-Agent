@@ -18,7 +18,7 @@
 bank_agent/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ api/routes/        # health / auth / chat / actions / transfers / bills / cards / audit
+│  │  ├─ api/routes/        # health / auth / chat / actions / transfers / bills / cards / audit / security
 │  │  ├─ agent/             # LLM 适配层、AgentLoop、子 Agent 护栏、工具注册表、提示词
 │  │  ├─ core/              # 配置、安全（JWT / 密码哈希）
 │  │  ├─ db/                # 引擎、初始化、演示数据
