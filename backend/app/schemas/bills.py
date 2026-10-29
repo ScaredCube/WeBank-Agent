@@ -29,6 +29,10 @@ class MonthlyBill(BaseModel):
     transfer_out_count: int
     transfer_in_fen: int
     transfer_in_count: int
+    investment_out_fen: int = 0
+    investment_out_count: int = 0
+    investment_in_fen: int = 0
+    investment_in_count: int = 0
     categories: list[BillCategory]
     anomalies: list[BillAnomaly]
     ignored_count: int

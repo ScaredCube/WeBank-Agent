@@ -2,7 +2,6 @@
 import uuid
 from datetime import timezone
 
-from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.agent.registry import RiskLevel, ToolSpec
@@ -18,6 +17,7 @@ from app.schemas.wealth import PrepareWealthRedeemRequest, PrepareWealthSubscrib
 from app.services.action_service import create_simulated_red_action, get_pending_action
 from app.services.audit_service import record, record_separately, request_context
 from app.services.redaction import mask_text
+from app.services.operation_service import begin_write
 from app.services.vault import VaultError, create_account_token, create_product_token, resolve
 
 _SUBSCRIBE_SPEC = ToolSpec(name="wealth_subscribe", description="模拟理财申购", parameters={}, risk=RiskLevel.RED)
@@ -43,9 +43,7 @@ class WealthError(Exception):
 
 
 def _begin_locked(session: Session) -> None:
-    if session.get_bind().dialect.name != "sqlite":
-        raise WealthError("当前理财演示仅支持 SQLite")
-    session.execute(text("BEGIN IMMEDIATE"))
+    begin_write(session, WealthError, "当前理财演示仅支持 SQLite")
 
 
 def _account_for(session: Session, user_id: int, account_id: int | None) -> Account:
@@ -234,6 +232,8 @@ def _execute_order(user_id: int, order_id: int) -> dict:
             WealthOrder.id == order_id, WealthOrder.user_id == user_id)).first()
         if order is None:
             raise WealthError("理财操作不存在")
+        if order.order_type not in {"subscribe", "redeem"}:
+            raise WealthError("理财操作不存在")
         spec = _SUBSCRIBE_SPEC if order.order_type == "subscribe" else _REDEEM_SPEC
         if order.status == "completed":
             if (order.transaction_id is None or order.balance_after_fen is None
@@ -251,6 +251,7 @@ def _execute_order(user_id: int, order_id: int) -> dict:
         now = utcnow()
         action = session.exec(select(PendingAction).where(
             PendingAction.id == order.action_id, PendingAction.user_id == user_id,
+            PendingAction.action_type == f"wealth_{order.order_type}",
             PendingAction.risk_level == RiskLevel.RED.value,
             PendingAction.status == "verified", PendingAction.expires_at > now)).first()
         verification = session.exec(select(VerificationSession).where(

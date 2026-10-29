@@ -102,7 +102,9 @@ def render_tool_result(name: str, result: dict) -> str:
                  f"{data['account_name']}（{data['masked_number']}）",
                  f"总收入：{_money(data['income_fen'])} 元；总支出：{_money(data['expense_fen'])} 元",
                  f"消费：{_money(data['consumption_fen'])} 元，共 {data['consumption_count']} 笔",
-                 f"转出：{_money(data['transfer_out_fen'])} 元，共 {data['transfer_out_count']} 笔；转入：{_money(data['transfer_in_fen'])} 元，共 {data['transfer_in_count']} 笔"]
+                 f"转出：{_money(data['transfer_out_fen'])} 元，共 {data['transfer_out_count']} 笔；转入：{_money(data['transfer_in_fen'])} 元，共 {data['transfer_in_count']} 笔",
+                 f"理财资金转出：{_money(data['investment_out_fen'])} 元，共 {data['investment_out_count']} 笔；"
+                 f"理财资金转入：{_money(data['investment_in_fen'])} 元，共 {data['investment_in_count']} 笔（不代表投资收益）"]
         for category in data["categories"]:
             lines.append(f"- {category['category']}：{_money(category['amount_fen'])} 元，{category['count']} 笔")
         for anomaly in data["anomalies"]:

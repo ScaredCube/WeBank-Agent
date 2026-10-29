@@ -2,7 +2,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.agent.registry import RiskLevel, ToolSpec
@@ -15,7 +14,9 @@ from app.risk.engine import RiskDecision
 from app.services.action_service import create_pending_action
 from app.services.audit_service import record, record_separately, request_context
 from app.services.redaction import mask_text
-from app.services.vault import VaultError, resolve
+from app.services.vault import VaultError, resolve, create_subscription_token
+from app.services.operation_service import (begin_write, bind_preparation, check_prepared_reference,
+                                            find_preparation)
 
 _CHINA = timezone(timedelta(hours=8))
 _CANCEL_SPEC = ToolSpec(name="subscription_cancel", description="模拟取消订阅", parameters={},
@@ -38,9 +39,7 @@ def _today():
 
 
 def _begin_locked(session: Session) -> None:
-    if session.get_bind().dialect.name != "sqlite":
-        raise SubscriptionError("当前订阅演示仅支持 SQLite")
-    session.execute(text("BEGIN IMMEDIATE"))
+    begin_write(session, SubscriptionError, "当前订阅演示仅支持 SQLite")
 
 
 def list_subscriptions(session: Session, user_id: int) -> list[dict]:
@@ -91,7 +90,8 @@ def _subscription(session: Session, user_id: int, subscription_id: int) -> Subsc
 
 
 def _prepare_cancel(user_id: int, *, subscription_id: int | None = None,
-                    subscription_token: str | None = None, model_request: bool = False) -> dict:
+                    subscription_token: str | None = None, model_request: bool = False,
+                    idempotency_key: str | None = None) -> dict:
     with Session(get_engine()) as session:
         _begin_locked(session)
         scope = request_context.get() or uuid.uuid4().hex
@@ -101,7 +101,14 @@ def _prepare_cancel(user_id: int, *, subscription_id: int | None = None,
             subscription_id = resolve(session, user_id, subscription_token, "subscription", scope)
         if subscription_id is None:
             raise SubscriptionError("订阅不可用")
+        existing = find_preparation(session, user_id, "subscription_cancel", idempotency_key,
+                                     subscription_id, SubscriptionError)
+        if existing is not None:
+            session.commit()
+            return {**existing, "subscription_id": subscription_id, "risk_level": "yellow",
+                    "message": "请求已存在；确认令牌只在首次创建时返回。"}
         item = _subscription(session, user_id, subscription_id)
+        subscription_token = subscription_token or create_subscription_token(session, user_id, item.id)
         decision = RiskDecision(RiskLevel.YELLOW, ("工具基础风险等级",))
         details = {"subscription_id": item.id, "merchant": mask_text(item.merchant),
                    "amount_fen": item.amount_fen, "cycle": item.cycle,
@@ -111,6 +118,8 @@ def _prepare_cancel(user_id: int, *, subscription_id: int | None = None,
             decision=decision, commit=False)
         session.add(SubscriptionCancelRequest(user_id=user_id, subscription_id=item.id,
                                               action_id=action.id))
+        bind_preparation(session, user_id, "subscription_cancel", idempotency_key,
+                         item.id, action.id, subscription_token, scope)
         record(session, user_id=user_id, action_id=action.id, event_type="risk_assessed",
                tool=_CANCEL_SPEC.name, risk_level=decision.level.value,
                reasons=decision.reasons, result="success")
@@ -149,6 +158,8 @@ def _execute_cancel(user_id: int, action_id: int) -> dict:
             PendingAction.status == "confirmed", PendingAction.expires_at > now)).first()
         if action is None:
             raise SubscriptionError("取消订阅未确认、已取消或已过期")
+        check_prepared_reference(session, user_id, "subscription_cancel", action_id,
+                                 item.id, "subscription", item.id)
         item.status = "cancelled"
         item.updated_at = now
         request.status = "completed"
@@ -172,10 +183,12 @@ def _record_failure(user_id: int, event_type: str, exc: Exception, *,
 
 
 def prepare_cancel(user_id: int, *, subscription_id: int | None = None,
-                   subscription_token: str | None = None, model_request: bool = False) -> dict:
+                   subscription_token: str | None = None, model_request: bool = False,
+                   idempotency_key: str | None = None) -> dict:
     try:
         return _prepare_cancel(user_id, subscription_id=subscription_id,
-                               subscription_token=subscription_token, model_request=model_request)
+                               subscription_token=subscription_token, model_request=model_request,
+                               idempotency_key=idempotency_key)
     except VaultError:
         record_separately(user_id=user_id, event_type="token_resolve_denied", result="denied",
                           reason_code="reference_unavailable")

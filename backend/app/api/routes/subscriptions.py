@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.api.deps import CurrentUser, security_gate
 from app.schemas.subscriptions import CancelSubscriptionPrepared, CancelSubscriptionResult
+from app.schemas.operations import PrepareOperationRequest
 from app.services.subscription_service import SubscriptionError, execute_cancel, prepare_cancel
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"],
@@ -11,9 +12,11 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"],
 @router.post("/{subscription_id}/cancel/prepare", response_model=CancelSubscriptionPrepared)
 def prepare_cancel_action(
     subscription_id: int, response: Response, user: CurrentUser,
+    payload: PrepareOperationRequest | None = None,
 ) -> CancelSubscriptionPrepared:
     try:
-        result = prepare_cancel(user.id, subscription_id=subscription_id)
+        result = prepare_cancel(user.id, subscription_id=subscription_id,
+                                idempotency_key=payload.idempotency_key if payload else None)
     except SubscriptionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     response.headers["Cache-Control"] = "no-store"

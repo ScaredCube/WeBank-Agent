@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, col, select
 
 from app.core.time import utcnow
-from app.models import Account, Transaction, TransferRequest
+from app.models import Account, Transaction, TransferRequest, WealthOrder
 from app.schemas.bills import BillAnomaly, BillCategory, MonthlyBill
 from app.services.redaction import mask_text
 
@@ -49,21 +49,34 @@ def monthly_bill(session: Session, user_id: int, month: str | None, account_id: 
         TransferRequest.transaction_id.is_not(None),
     )).all())
     income = expense = consumption = count = out = out_count = incoming = incoming_count = ignored = 0
+    investment_out = investment_out_count = investment_in = investment_in_count = 0
+    investment_ids = set(session.exec(select(WealthOrder.transaction_id).where(
+        WealthOrder.user_id == user_id, WealthOrder.account_id == account.id,
+        WealthOrder.status == "completed", WealthOrder.transaction_id.is_not(None),
+    )).all())
     categories: dict[str, list[int]] = {}
     previous: dict[tuple[str, int], datetime] = {}
     anomalies: list[BillAnomaly] = []
     for row in rows:
         is_transfer = row.id in transfer_ids or row.category == "模拟转账"
+        is_investment = row.id in investment_ids or row.category in {"理财申购", "理财赎回"}
         if row.direction == "income":
             income += row.amount_fen
             if is_transfer:
                 incoming += row.amount_fen
                 incoming_count += 1
+            elif is_investment:
+                investment_in += row.amount_fen
+                investment_in_count += 1
         elif row.direction == "expense":
             expense += row.amount_fen
             if is_transfer:
                 out += row.amount_fen
                 out_count += 1
+                continue
+            if is_investment:
+                investment_out += row.amount_fen
+                investment_out_count += 1
                 continue
             consumption += row.amount_fen
             count += 1
@@ -88,5 +101,7 @@ def monthly_bill(session: Session, user_id: int, month: str | None, account_id: 
         currency=account.currency, income_fen=income, expense_fen=expense, consumption_fen=consumption,
         consumption_count=count, transfer_out_fen=out, transfer_out_count=out_count,
         transfer_in_fen=incoming, transfer_in_count=incoming_count,
+        investment_out_fen=investment_out, investment_out_count=investment_out_count,
+        investment_in_fen=investment_in, investment_in_count=investment_in_count,
         categories=[BillCategory(category=k, amount_fen=v[0], count=v[1]) for k, v in sorted(categories.items())],
         anomalies=anomalies, ignored_count=ignored)

@@ -1,5 +1,5 @@
 """Simulated card status and red-verified loss reporting."""
-from sqlalchemy import text
+import uuid
 from sqlmodel import Session, select
 
 from app.agent.registry import RiskLevel
@@ -10,6 +10,8 @@ from app.models import Account, Card, CardLossRequest, PendingAction, Verificati
 from app.risk.engine import RiskDecision
 from app.services.action_service import create_simulated_red_action
 from app.services.audit_service import record, record_separately, request_context
+from app.services.operation_service import (begin_write, bind_preparation, check_prepared_reference,
+                                            find_preparation)
 from app.services.redaction import mask_text
 from app.services.vault import VaultError, create_account_token, resolve
 
@@ -34,9 +36,9 @@ def list_cards(session: Session, user_id: int, account_token: str | None = None)
 
 
 def _begin(session: Session) -> None:
-    if not settings.debug or session.get_bind().dialect.name != "sqlite":
+    if not settings.debug:
         raise CardError("模拟挂失验证不可用")
-    session.execute(text("BEGIN IMMEDIATE"))
+    begin_write(session, CardError, "模拟挂失验证不可用")
 
 
 def _owned_card(session: Session, user_id: int, card_id: int | None, account_token: str | None) -> tuple[Card, Account]:
@@ -55,16 +57,34 @@ def _owned_card(session: Session, user_id: int, card_id: int | None, account_tok
     return card, account
 
 
-def prepare_loss(user_id: int, card_id: int | None = None, account_token: str | None = None) -> dict:
+def prepare_loss(user_id: int, card_id: int | None = None, account_token: str | None = None,
+                 *, idempotency_key: str | None = None) -> dict:
     try:
         with Session(get_engine()) as session:
             _begin(session)
+            scope = request_context.get() or uuid.uuid4().hex
+            # REST retries can retrieve a completed receipt even after the card
+            # became unavailable. This returns no new authorization secret.
+            if card_id is not None:
+                existing = find_preparation(session, user_id, "card_loss", idempotency_key,
+                                             card_id, CardError)
+                if existing is not None:
+                    session.commit()
+                    return existing
             card, account = _owned_card(session, user_id, card_id, account_token)
+            existing = find_preparation(session, user_id, "card_loss", idempotency_key,
+                                         card.id, CardError)
+            if existing is not None:
+                session.commit()
+                return existing
+            account_token = account_token or create_account_token(session, user_id, account.id)
             decision = RiskDecision(RiskLevel.RED, ("工具基础风险等级",))
             action, token = create_simulated_red_action(session, user_id=user_id, action_type="card_loss",
                 details={"card_id": card.id, "account_name": mask_text(account.name),
                          "masked_number": mask_text(account.masked_number)}, decision=decision, commit=False)
             session.add(CardLossRequest(user_id=user_id, card_id=card.id, action_id=action.id))
+            bind_preparation(session, user_id, "card_loss", idempotency_key, card.id,
+                             action.id, account_token, scope)
             record(session, user_id=user_id, action_id=action.id, event_type="risk_assessed", tool="card_loss",
                    risk_level="red", reasons=decision.reasons, result="success")
             record(session, user_id=user_id, action_id=action.id, event_type="card_loss_prepared",
@@ -74,6 +94,9 @@ def prepare_loss(user_id: int, card_id: int | None = None, account_token: str | 
     except (CardError, VaultError) as exc:
         record_separately(user_id=user_id, event_type="card_loss_denied", tool="prepare_card_loss", result="denied")
         raise CardError("卡片不可用或模拟验证未启用") from exc
+    except Exception:
+        record_separately(user_id=user_id, event_type="card_loss_failed", tool="prepare_card_loss", result="failed")
+        raise
 
 
 def execute_loss(user_id: int, action_id: int) -> dict:
@@ -104,6 +127,8 @@ def execute_loss(user_id: int, action_id: int) -> dict:
                 raise CardError("挂失尚未通过有效的模拟验证")
             if account.status != "active" or card.status != "active":
                 raise CardError("卡片已挂失或不可用")
+            check_prepared_reference(session, user_id, "card_loss", action_id, card.id,
+                                     "account", account.id)
             card.status = "lost"
             card.updated_at = now
             request.status = "completed"
@@ -113,6 +138,12 @@ def execute_loss(user_id: int, action_id: int) -> dict:
                    tool="card_loss", risk_level="red", result="success")
             session.commit()
             return {"card_id": card.id, "status": "lost"}
+    except VaultError:
+        record_separately(user_id=user_id, action_id=action_id, event_type="token_resolve_denied",
+                          result="denied", reason_code="reference_unavailable")
+        record_separately(user_id=user_id, action_id=action_id, event_type="card_loss_denied",
+                          tool="card_loss", result="denied", reason_code="reference_unavailable")
+        raise CardError("引用不可用，请重新发起挂失") from None
     except CardError:
         record_separately(user_id=user_id, action_id=action_id, event_type="card_loss_denied",
                           tool="card_loss", result="denied")

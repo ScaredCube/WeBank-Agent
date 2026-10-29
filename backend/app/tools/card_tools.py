@@ -6,6 +6,7 @@ from app.schemas.actions import PendingActionResponse
 from app.services.action_service import get_pending_action
 from app.services.card_service import CardError, list_cards, prepare_loss
 from app.services.vault import VaultError
+from app.services.operation_service import agent_preparation_key
 
 
 class CardArguments(BaseModel):
@@ -26,10 +27,11 @@ async def get_card_status(session: Session, user_id: int, **arguments: object) -
 async def prepare_card_loss(*, user_id: int, **arguments: object) -> dict:
     try:
         args = CardArguments.model_validate(arguments)
-        result = prepare_loss(user_id, account_token=args.account_token)
+        result = prepare_loss(user_id, account_token=args.account_token,
+                              idempotency_key=agent_preparation_key("card_loss"))
         with session_scope() as session:
             action = get_pending_action(session, user_id=user_id, action_id=result["action_id"])
-        if action is None:
+        if action is None or result["confirmation_token"] is None:
             return {"ok": False, "error": "挂失动作不可用"}
         return {"ok": True, "action": PendingActionResponse.model_validate(action).model_dump(mode="json"),
                 "confirmation_token": result["confirmation_token"]}

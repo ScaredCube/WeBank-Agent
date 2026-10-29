@@ -256,3 +256,17 @@ class TransferTokenBinding(SQLModel, table=True):
     source_token_id: int = Field(foreign_key="datatoken.id")
     target_token_id: int | None = Field(default=None, foreign_key="datatoken.id")
     request_scope: str
+
+
+class OperationPreparation(SQLModel, table=True):
+    """Additive receipt/binding for card loss and subscription cancellation."""
+    __table_args__ = (UniqueConstraint("user_id", "operation", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    operation: str
+    idempotency_key: str
+    entity_id: int
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    reference_id: int = Field(foreign_key="datatoken.id")
+    request_scope: str

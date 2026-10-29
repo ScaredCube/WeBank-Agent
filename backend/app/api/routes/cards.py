@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.schemas.cards import CardLossPrepared, CardLossResult, CardStatus
+from app.schemas.operations import PrepareOperationRequest
 from app.services.audit_service import record
 from app.services.card_service import CardError, execute_loss, list_cards, prepare_loss
 
@@ -21,9 +22,11 @@ def get_cards(response: Response, session: SessionDep, user: CurrentUser) -> lis
 
 
 @router.post("/{card_id}/loss/prepare", response_model=CardLossPrepared)
-def prepare(card_id: int, response: Response, user: CurrentUser) -> CardLossPrepared:
+def prepare(card_id: int, response: Response, user: CurrentUser,
+            payload: PrepareOperationRequest | None = None) -> CardLossPrepared:
     try:
-        result = prepare_loss(user.id, card_id=card_id)
+        result = prepare_loss(user.id, card_id=card_id,
+                              idempotency_key=payload.idempotency_key if payload else None)
     except CardError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     response.headers["Cache-Control"] = "no-store"

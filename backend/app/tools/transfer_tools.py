@@ -1,4 +1,3 @@
-import secrets
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -7,6 +6,7 @@ from app.schemas.actions import PendingActionResponse
 from app.schemas.transfers import PrepareTransferRequest
 from app.services.action_service import get_pending_action
 from app.services.transfer_service import TransferError, prepare_transfer
+from app.services.operation_service import agent_preparation_key
 
 
 class TransferArguments(BaseModel):
@@ -25,7 +25,7 @@ async def prepare_transfer_tool(*, user_id: int, **arguments: object) -> dict:
         payload = PrepareTransferRequest.model_validate({
             "account_id": 1, "recipient_name": args.recipient_name,
             "amount_fen": args.amount_fen, "note": args.note,
-            "idempotency_key": secrets.token_urlsafe(24),
+            "idempotency_key": agent_preparation_key("transfer"),
         })
         result = prepare_transfer(user_id, payload, source_token=args.source_token,
                                   target_token=args.target_token, model_request=True)

@@ -4,7 +4,7 @@ import base64
 import uuid
 from datetime import datetime, time, timedelta, timezone
 
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.agent.registry import RiskLevel, ToolSpec
@@ -17,6 +17,7 @@ from app.schemas.transfers import PrepareTransferRequest
 from app.services.action_service import create_pending_action, create_simulated_red_action, get_pending_action
 from app.services.audit_service import record, request_context
 from app.services.redaction import mask_text
+from app.services.operation_service import begin_write
 from app.services.vault import VaultError, _keys, create_account_token, create_temporary, resolve
 
 _TRANSFER_SPEC = ToolSpec(name="transfer", description="模拟转账", parameters={}, risk=RiskLevel.YELLOW)
@@ -30,9 +31,7 @@ class TransferError(Exception):
 
 
 def _begin_locked(session: Session) -> None:
-    if session.get_bind().dialect.name != "sqlite":
-        raise TransferError("当前转账演示仅支持 SQLite")
-    session.execute(text("BEGIN IMMEDIATE"))
+    begin_write(session, TransferError, "当前转账演示仅支持 SQLite")
 
 
 def _daily_total(session: Session, user_id: int, now: datetime) -> int:
@@ -229,6 +228,8 @@ def _execute_transfer(user_id: int, transfer_id: int) -> dict:
         transfer.status = "completed"
         transfer.transaction_id = transaction.id
         transfer.completed_at = now
+        action.status = "completed"
+        session.add(action)
         session.add(transfer)
         record(session, user_id=user_id, event_type="transfer_completed", transfer_id=transfer.id,
                transaction_id=transaction.id, tool="transfer", risk_level=decision.level.value, result="success")

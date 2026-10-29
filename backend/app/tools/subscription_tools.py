@@ -8,6 +8,7 @@ from app.services.subscription_service import (
     SubscriptionError, detect_candidates, list_subscriptions, prepare_cancel,
 )
 from app.services.vault import VaultError, create_subscription_token
+from app.services.operation_service import agent_preparation_key
 
 
 class SubscriptionArguments(BaseModel):
@@ -46,7 +47,8 @@ async def prepare_cancel_subscription(*, user_id: int, **arguments: object) -> d
     try:
         args = SubscriptionCancelArguments.model_validate(arguments)
         result = prepare_cancel(user_id, subscription_token=args.subscription_token,
-                                model_request=True)
+                                model_request=True,
+                                idempotency_key=agent_preparation_key("subscription_cancel"))
         with session_scope() as session:
             action = get_pending_action(session, user_id=user_id, action_id=result["action_id"])
         if action is None or result["confirmation_token"] is None:

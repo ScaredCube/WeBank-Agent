@@ -1,4 +1,4 @@
-import secrets
+from app.services.operation_service import agent_preparation_key
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import Session
@@ -76,10 +76,10 @@ async def get_wealth_risk_profile(session: Session, user_id: int, **arguments: o
         return {"ok": False, "data": None, "error": "查询参数无效"}
 
 
-def _prepare_payload(arguments: dict) -> dict:
+def _prepare_payload(arguments: dict, operation: str) -> dict:
     return {"product_id": 1, "account_id": None, "amount_fen": arguments["amount_fen"],
             "note": arguments.get("note", ""),
-            "idempotency_key": secrets.token_urlsafe(24)}
+            "idempotency_key": agent_preparation_key(operation)}
 
 
 async def _prepare_result(user_id: int, result: dict) -> dict:
@@ -95,7 +95,7 @@ async def _prepare_result(user_id: int, result: dict) -> dict:
 async def prepare_wealth_subscribe(*, user_id: int, **arguments: object) -> dict:
     try:
         args = WealthPrepareArguments.model_validate(arguments)
-        payload = PrepareWealthSubscribeRequest.model_validate(_prepare_payload(args.model_dump()))
+        payload = PrepareWealthSubscribeRequest.model_validate(_prepare_payload(args.model_dump(), "wealth_subscribe"))
         result = prepare_subscribe(user_id, payload, product_token=args.product_token,
                                    account_token=args.account_token, model_request=True)
         return await _prepare_result(user_id, result)
@@ -108,7 +108,7 @@ async def prepare_wealth_subscribe(*, user_id: int, **arguments: object) -> dict
 async def prepare_wealth_redeem(*, user_id: int, **arguments: object) -> dict:
     try:
         args = WealthPrepareArguments.model_validate(arguments)
-        payload = PrepareWealthRedeemRequest.model_validate(_prepare_payload(args.model_dump()))
+        payload = PrepareWealthRedeemRequest.model_validate(_prepare_payload(args.model_dump(), "wealth_redeem"))
         result = prepare_redeem(user_id, payload, product_token=args.product_token,
                                 account_token=args.account_token, model_request=True)
         return await _prepare_result(user_id, result)

@@ -11,7 +11,7 @@ class CardStatus(BaseModel):
 
 class CardLossPrepared(BaseModel):
     action_id: int
-    confirmation_token: str
+    confirmation_token: str | None
 
 
 class CardLossResult(BaseModel):
