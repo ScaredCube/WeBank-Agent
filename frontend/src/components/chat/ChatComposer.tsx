@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 
@@ -18,7 +18,7 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
   const composingRef = useRef(false)
   const prefersReducedMotion = useReducedMotion()
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = '0px'
@@ -43,7 +43,8 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
           rows={1}
           value={value}
           placeholder="说说你想办的事"
-          className="scroll-thin max-h-[168px] min-h-10 py-2 pr-2"
+          aria-label="输入消息"
+          className="chat-composer-input max-h-[168px] min-h-10 overflow-y-auto py-2 pr-2"
           onChange={(event) => onChange(event.target.value)}
           onCompositionStart={() => {
             composingRef.current = true

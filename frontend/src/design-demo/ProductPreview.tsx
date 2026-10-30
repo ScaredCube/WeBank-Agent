@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from 'react'
-import { BookmarkPlus } from 'lucide-react'
+import { ArrowLeftRight, BookmarkPlus, CalendarDays, CreditCard } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 import { BankWorkspace, WorkspaceHeader } from '@/app/BankWorkspace'
 import { initialWorkspacePanel } from '@/app/workspace-state'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
-import { ChatHome } from '@/components/chat/ChatHome'
+import { ChatHome, type ChatStarterPrompt } from '@/components/chat/ChatHome'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { MessageList } from '@/components/chat/MessageList'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
@@ -26,6 +26,12 @@ import { createPreviewActionTransport, makePreviewAction, previewActivity, previ
 const previewDatabase = 'webank-ui-preview-snapshots'
 const emptyMessages: Message[] = []
 type PreviewScenario = 'normal' | 'empty' | 'error' | 'loading'
+
+const previewSuggestions = [
+  { label: '查一下我的账户余额', prompt: '查一下我的账户余额', icon: CreditCard },
+  { label: '看看这个月的消费', prompt: '看看这个月的消费', icon: CalendarDays },
+  { label: '准备给朋友转账', prompt: '准备给朋友转账', icon: ArrowLeftRight },
+] satisfies readonly ChatStarterPrompt[]
 
 interface InitialPreviewState {
   scenario: PreviewScenario
@@ -102,6 +108,7 @@ export default function ProductPreview() {
   const [messages, setMessages] = useState<Record<number, Message[]>>(previewMessages)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
   const [panel, setPanel] = useState(initialWorkspacePanel)
   const [hidden, setHidden] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -207,6 +214,7 @@ export default function ProductPreview() {
     activeId={activeId}
     user={{ id: 1, username: 'preview', display_name: '预览用户' }}
     open={sidebarOpen}
+    desktopVisible={desktopSidebarVisible}
     activePanel={panel}
     hideActiveConversation={isHome && conversations.find((item) => item.id === activeId)?.title === '新对话'}
     onSelect={(id) => { setSourceTarget(null); setActiveId(id); resetScroll(); setNotice(''); setSourceError(''); setSidebarOpen(false) }}
@@ -222,8 +230,16 @@ export default function ProductPreview() {
     {panel === 'collections' && <><p className="mb-5 text-xs text-muted">合成预览使用独立收藏空间。</p>{sourceError && <p role="alert" className="mb-4 text-sm text-red-700">{sourceError}</p>}<CollectionPanel userId={1} hidden={hidden} databaseName={previewDatabase} onOpenSource={openPreviewSource} /></>}
     {panel === 'activity' && <ActivityList entries={previewActivity} />}
   </WorkspacePanelFrame>
-  return <BankWorkspace sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="合成预览，操作及金额仅为样例。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
-    <WorkspaceHeader title={conversations.find((item) => item.id === activeId)?.title ?? '新对话'} isHome={isHome} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} status={<PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />} />
+  return <BankWorkspace sidebarVisible={desktopSidebarVisible} sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="合成预览，操作及金额仅为样例。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
+    <WorkspaceHeader
+      title={conversations.find((item) => item.id === activeId)?.title ?? '新对话'}
+      isHome={isHome}
+      sidebarOpen={sidebarOpen}
+      sidebarVisible={desktopSidebarVisible}
+      onOpenSidebar={() => setSidebarOpen(true)}
+      onToggleSidebar={() => setDesktopSidebarVisible((visible) => !visible)}
+      status={<PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
+    />
     <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />
     <LayoutGroup id="bank-agent-product-preview">
     <motion.div ref={scrollRef} layoutScroll onScroll={onScroll} role={isHome ? undefined : 'log'} aria-label={isHome ? undefined : '对话消息'} aria-live="off" className="scroll-thin flex-1 overflow-y-auto">
@@ -239,6 +255,7 @@ export default function ProductPreview() {
       ) : isHome ? (
         <ChatHome
           composer={composer}
+          suggestions={previewSuggestions}
           onPick={(prompt) => setDrafts((current) => ({ ...current, [activeId]: prompt }))}
           disclaimer="AI 生成内容仅供参考，重要信息请以银行正式记录为准"
         />

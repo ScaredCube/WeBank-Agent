@@ -31,6 +31,7 @@ export function ChatPage() {
 
   const [actionWarning, setActionWarning] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
   const [workspacePanel, setWorkspacePanel] = useState(initialWorkspacePanel)
   const [pendingAction, setPendingAction] = useState<Extract<StreamEvent, { type: 'action_required' }> | null>(null)
   const [actionOpen, setActionOpen] = useState(false)
@@ -55,7 +56,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { conversations, activeId, messages, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange })
+  const { conversations, activeId, messages, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange })
 
   const openSavedSource = useCallback((origin: CardOrigin) => {
     const sourceConversation = conversations.find((item) => item.id === origin.conversationId)
@@ -129,11 +130,12 @@ export function ChatPage() {
   }
 
   return (
-    <BankWorkspace sidebar={<ConversationSidebar
+    <BankWorkspace sidebarVisible={desktopSidebarVisible} sidebar={<ConversationSidebar
         conversations={conversations}
         activeId={activeId}
         user={user}
         open={sidebarOpen}
+        desktopVisible={desktopSidebarVisible}
         activePanel={workspacePanel}
         hideActiveConversation={isHome && activeConversation?.title === '新对话'}
         disabled={sending || creatingConversation || actionPreparing || !!pendingAction}
@@ -147,16 +149,13 @@ export function ChatPage() {
       />}
       panel={workspacePanel && token && user && <WorkspacePanel key={workspacePanel} token={token} userId={user.id} panel={workspacePanel} focusOnMount={panelOpenedByUser} hidden={privacyHidden} refreshSignal={workspaceRevision} actionDisabled={sending || actionPreparing || !!pendingAction} cardLossRecovery={cardLossRecovery} onCardLossRecoveryChange={onCardLossRecoveryChange} onCardLossResolved={onCardLossResolved} onActionBusy={setActionPreparing} onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onOpenSource={openSavedSource} sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} onClose={() => setWorkspacePanel(null)} />}
       overlay={pendingAction && token && <PendingActionDialog key={pendingAction.action.id} event={pendingAction} token={token} open={actionOpen} hidden={privacyHidden} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onClose={() => setActionOpen(false)} onResolved={() => { if (pendingAction.action.action_type === 'card_loss' && typeof pendingAction.action.details.card_id === 'number') onCardLossRecoveryChange(pendingAction.action.details.card_id, null) }} onFinish={() => { setActionOpen(false); setPendingAction(null); setWorkspaceRevision((value) => value + 1) }} />}>
-        <WorkspaceHeader title={activeConversation?.title ?? '新对话'} isHome={isHome} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} hidden={privacyHidden} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} status={
-          <span className="hidden items-center gap-1.5 rounded-full border border-line bg-white/70 px-2.5 py-1 text-[10.5px] text-muted sm:flex">
-            <span
-              className={cn(
-                'size-1.5 rounded-full',
-                health?.llm.mode === 'openai' ? 'bg-jade-500' : 'bg-amber-400',
-              )}
-            />
-            {health ? (health.llm.mode === 'mock' ? '演示模式' : health.llm.model) : healthUnavailable ? '状态不可用' : '连接中'}
-          </span>}
+        <WorkspaceHeader
+          title={activeConversation?.title ?? '新对话'}
+          isHome={isHome}
+          sidebarOpen={sidebarOpen}
+          sidebarVisible={desktopSidebarVisible}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          onToggleSidebar={() => setDesktopSidebarVisible((visible) => !visible)}
         />
         {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
         <p role="status" className="sr-only">{sending ? '消息请求进行中' : ''}</p>
@@ -174,7 +173,6 @@ export function ChatPage() {
           ) : isHome ? (
             <ChatHome
               composer={composer}
-              onPick={updateDraft}
               feedback={homeFeedback}
               disclaimer="AI 生成内容仅供参考，重要信息请以银行正式记录为准"
             />

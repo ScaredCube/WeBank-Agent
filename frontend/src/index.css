@@ -79,6 +79,15 @@
     background: transparent;
   }
 
+  .chat-composer-input {
+    resize: none;
+    scrollbar-width: none;
+  }
+
+  .chat-composer-input::-webkit-scrollbar {
+    display: none;
+  }
+
   .markdown {
     font-size: 16px;
     line-height: 1.7;
