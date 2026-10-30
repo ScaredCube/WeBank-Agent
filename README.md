@@ -1,6 +1,6 @@
 # AI 银行智能体
 
-银行 AI 智能体参赛项目的演示骨架。已实现登录、会话持久化、模拟查询、月度账单、卡片挂失、理财申购/赎回、订阅识别与取消、转账后端、固定风控、关键节点持久化审计及部分数据引用；前端当前仅作演示占位，业务联调与真实验证仍未完成。
+银行 AI 智能体参赛项目的模拟演示。后端包含登录、会话、模拟查询与业务操作、固定风控和审计；前端提供对话、资产、账单、收藏、操作记录及模拟业务确认流程。前后端真实链路联调与整体验收仍未完成；Agent 结构化界面及前置意图绑定有待协商。当前业务数据与验证均为模拟，不连接真实银行。
 
 ## 技术栈
 
@@ -31,6 +31,8 @@ bank_agent/
 ├─ frontend/
 │  └─ src/
 │     ├─ components/        # 基础 UI、聊天组件、确认弹窗
+│     ├─ features/          # 对话、资产、动作、收藏和受控卡片
+│     ├─ design-demo/       # 开发环境隔离的合成预览
 │     ├─ lib/               # API 客户端、SSE 解析、鉴权
 │     └─ pages/             # 登录、对话
 └─ docs/                    # 赛题解析与设计思路
@@ -82,8 +84,27 @@ uv run pytest
 
 cd ../frontend
 npm run lint
+npm run test
 npm run build
 ```
+
+浏览器测试使用隔离的合成预览数据，不登录或访问银行业务接口。首次运行时安装 Playwright 的 Chromium：
+
+```powershell
+cd frontend
+npx playwright install chromium
+npm run dev
+```
+
+保持开发服务运行，在另一个终端执行 `npm run test:e2e`。默认连接 `http://127.0.0.1:5173`；如果开发服务使用其他端口，设置 `PLAYWRIGHT_BASE_URL`。若使用已安装的 Chrome，可设置 `PLAYWRIGHT_CHANNEL=chrome`。例如本机开发服务在 5174 端口时：
+
+```powershell
+$env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:5174'
+$env:PLAYWRIGHT_CHANNEL = 'chrome'
+npm run test:e2e
+```
+
+合成产品预览为开发环境 `/product-preview`，与 `/chat` 共用部分界面组件，但不会调用业务接口。它不是已联调的真实产品。
 
 ## 文档
 

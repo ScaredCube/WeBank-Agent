@@ -5,7 +5,6 @@ import {
   EyeOff,
   LoaderCircle,
   LockKeyhole,
-  ShieldCheck,
   UserRound,
 } from 'lucide-react'
 
@@ -17,8 +16,8 @@ import { useAuth } from '@/lib/use-auth'
 export function LoginPage() {
   const { token, login } = useAuth()
   const navigate = useNavigate()
-  const [username, setUsername] = useState('demo')
-  const [password, setPassword] = useState('demo123')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -58,27 +57,21 @@ export function LoginPage() {
           <BrandMark className="size-10 rounded-xl bg-white/10 text-white ring-1 ring-white/15" />
           <div>
             <div className="text-[15px] font-medium tracking-wide">微众银行AI智能体</div>
-            <div className="text-[9.5px] uppercase tracking-[0.24em] text-white/40">
-              WeBank AI Agent
-            </div>
           </div>
         </div>
 
         <div className="relative">
           <h1 className="text-[46px] font-medium leading-[1.16] tracking-[-0.025em]">
-            说一句，
+            想办的事，
             <br />
-            就把事办了。
+            从对话开始。
           </h1>
           <p className="mt-6 max-w-[360px] text-[14.5px] leading-relaxed text-white/50">
-            从查账到转账，把复杂的流程留给我，你只需要说清楚想要什么。
+            查询账户信息，了解收支，按步骤核对需要确认的操作。
           </p>
         </div>
 
-        <div className="relative flex items-center gap-2 text-[11.5px] text-white/35">
-          <ShieldCheck className="size-4" />
-          分级授权 · 全程留痕 · 可随时接管
-        </div>
+        <div className="relative text-[11.5px] text-white/55">模拟业务环境</div>
       </section>
 
       <section className="flex min-h-dvh items-center justify-center px-6 py-12">
@@ -87,9 +80,6 @@ export function LoginPage() {
             <BrandMark className="size-10 rounded-xl" />
             <div>
               <div className="text-[15px] font-medium tracking-wide text-ink">微众银行AI智能体</div>
-              <div className="text-[9.5px] uppercase tracking-[0.24em] text-muted/60">
-                WeBank AI Agent
-              </div>
             </div>
           </div>
 
@@ -97,24 +87,29 @@ export function LoginPage() {
           <p className="mt-2 text-[13.5px] text-muted">登录后继续与你的 AI 管家对话</p>
 
           <form className="mt-8 space-y-3.5" onSubmit={handleSubmit}>
-            <div className="relative">
+            <div>
+              <label htmlFor="login-username" className="mb-2 block text-sm font-medium text-ink">账号</label>
+              <div className="relative">
               <UserRound className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
               <Input
+                id="login-username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                placeholder="账号"
                 autoComplete="username"
                 className="h-12 rounded-xl pl-10 text-[14px]"
               />
+              </div>
             </div>
 
-            <div className="relative">
+            <div>
+              <label htmlFor="login-password" className="mb-2 block text-sm font-medium text-ink">密码</label>
+              <div className="relative">
               <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
               <Input
+                id="login-password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="密码"
                 autoComplete="current-password"
                 className="h-12 rounded-xl pl-10 pr-11 text-[14px]"
               />
@@ -126,9 +121,10 @@ export function LoginPage() {
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 <span className="sr-only">{showPassword ? '隐藏密码' : '显示密码'}</span>
               </button>
+              </div>
             </div>
 
-            <p className="min-h-[18px] text-[12.5px] text-red-600">{error ?? ''}</p>
+            {error && <p role="alert" className="text-[12.5px] text-red-600">{error}</p>}
 
             <Button
               type="submit"
@@ -140,10 +136,6 @@ export function LoginPage() {
             </Button>
           </form>
 
-          <p className="mt-7 text-center text-[11.5px] text-muted/60">
-            演示账号{' '}
-            <span className="font-mono text-ink/55">demo / demo123</span>
-          </p>
         </div>
       </section>
     </div>

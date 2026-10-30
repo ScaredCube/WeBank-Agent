@@ -1,3 +1,16 @@
+const cnyIntegerFormatter = new Intl.NumberFormat('zh-CN', {
+  useGrouping: true,
+  maximumFractionDigits: 0,
+})
+
+export function formatCnyFen(fen: number): string {
+  if (!Number.isSafeInteger(fen)) throw new RangeError('金额必须是安全范围内的整数分')
+  const amount = BigInt(fen)
+  const absolute = amount < 0n ? -amount : amount
+  const yuan = cnyIntegerFormatter.format(absolute / 100n)
+  return `¥${amount < 0n ? '-' : ''}${yuan}.${String(absolute % 100n).padStart(2, '0')}`
+}
+
 export function formatRelativeTime(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''

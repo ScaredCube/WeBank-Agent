@@ -1,26 +1,29 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+  --font-sans: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
     ui-sans-serif, system-ui, sans-serif;
 
-  --color-canvas: #f7f6f2;
-  --color-panel: #fdfdfb;
-  --color-ink: #141a16;
-  --color-muted: #6f7773;
-  --color-line: #e6e4dc;
+  --color-canvas: #f7faf8;
+  --color-panel: #ffffff;
+  --color-sidebar: #fafcfb;
+  --color-workspace: #ffffff;
+  --color-message-user: #eef3f0;
+  --color-ink: #172722;
+  --color-muted: #61716a;
+  --color-line: #e2eae6;
 
-  --color-jade-50: #eef7f2;
-  --color-jade-100: #dcefe6;
-  --color-jade-200: #b9dfce;
-  --color-jade-300: #8bcbb2;
-  --color-jade-400: #4bad8a;
-  --color-jade-500: #1a8a63;
-  --color-jade-600: #107a57;
-  --color-jade-700: #0b5f45;
-  --color-jade-800: #0c4a37;
-  --color-jade-900: #0a2a20;
-  --color-jade-950: #071d16;
+  --color-jade-50: #eff6f2;
+  --color-jade-100: #deede6;
+  --color-jade-200: #c3ded2;
+  --color-jade-300: #97c2b0;
+  --color-jade-400: #69a087;
+  --color-jade-500: #3e8067;
+  --color-jade-600: #24715a;
+  --color-jade-700: #0d6250;
+  --color-jade-800: #075346;
+  --color-jade-900: #06443a;
+  --color-jade-950: #04372f;
 }
 
 @layer base {
@@ -50,6 +53,10 @@
     background-color: var(--color-jade-200);
     color: var(--color-jade-950);
   }
+
+  :focus-visible {
+    outline-color: var(--color-jade-700);
+  }
 }
 
 @layer components {
@@ -73,8 +80,8 @@
   }
 
   .markdown {
-    font-size: 15px;
-    line-height: 1.78;
+    font-size: 16px;
+    line-height: 1.7;
     color: var(--color-ink);
     word-break: break-word;
   }

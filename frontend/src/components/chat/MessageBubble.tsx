@@ -9,10 +9,11 @@ export function MessageBubble({
   message: Message
   streaming?: boolean
 }) {
+  if (message.unavailable) return <div role="status" className="rounded-xl border border-line bg-white px-4 py-3 text-sm text-muted">此条历史消息无法展示。</div>
   if (message.role === 'user') {
     return (
       <div className="rise-in flex justify-end">
-        <div className="max-w-[82%] whitespace-pre-wrap rounded-2xl rounded-br-[7px] bg-jade-900 px-4 py-2.5 text-[15px] leading-relaxed text-jade-50">
+        <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl rounded-br-[7px] bg-message-user px-4 py-3 text-base leading-relaxed text-ink">
           {message.content}
         </div>
       </div>
@@ -25,7 +26,7 @@ export function MessageBubble({
       <div className="min-w-0 flex-1 pt-0.5">
         {message.content ? (
           streaming ? (
-            <p className="whitespace-pre-wrap text-[15px] leading-[1.78] text-ink">
+            <p className="whitespace-pre-wrap break-words text-base leading-[1.7] text-ink">
               {message.content}
               <span className="stream-caret" />
             </p>
