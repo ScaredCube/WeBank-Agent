@@ -88,7 +88,7 @@ npm run test
 npm run build
 ```
 
-浏览器测试使用隔离的合成预览数据，不登录或访问银行业务接口。首次运行时安装 Playwright 的 Chromium：
+浏览器测试覆盖合成预览及正式 `/chat` 的隔离 API 替身场景；模拟登录和业务响应均由本地浏览器路由提供，不连接真实后端、模型或银行接口。首次运行时安装 Playwright 的 Chromium：
 
 ```powershell
 cd frontend

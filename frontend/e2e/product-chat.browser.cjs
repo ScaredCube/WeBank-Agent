@@ -15,6 +15,30 @@ function createMessages(userContent) {
   ]
 }
 
+function createMonthlyBill(month) {
+  return {
+    month,
+    account_name: '日常账户',
+    masked_number: '****8899',
+    currency: 'CNY',
+    income_fen: 2000,
+    expense_fen: 1234,
+    consumption_fen: 1234,
+    consumption_count: 1,
+    transfer_out_fen: 0,
+    transfer_out_count: 0,
+    transfer_in_fen: 0,
+    transfer_in_count: 0,
+    investment_out_fen: 0,
+    investment_out_count: 0,
+    investment_in_fen: 0,
+    investment_in_count: 0,
+    categories: [{ category: '餐饮', amount_fen: 1234, count: 1 }],
+    anomalies: [],
+    ignored_count: 0,
+  }
+}
+
 function createTransferEvent() {
   return {
     type: 'action_required',
@@ -40,6 +64,7 @@ function createTransferEvent() {
 
 async function installApiFixture(context, { rejectLogin = false } = {}) {
   const calls = []
+  const billRequests = []
   const unexpectedCalls = []
   let conversation = null
   let history = []
@@ -117,6 +142,13 @@ async function installApiFixture(context, { rejectLogin = false } = {}) {
       })
       return
     }
+    if (method === 'GET' && pathname === '/api/bills/monthly') {
+      const url = new URL(request.url())
+      const month = url.searchParams.get('month')
+      billRequests.push({ month, accountId: url.searchParams.get('account_id') })
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(createMonthlyBill(month ?? '')) })
+      return
+    }
     if (method === 'GET' && pathname === '/api/cards') {
       await route.fulfill({
         contentType: 'application/json',
@@ -143,6 +175,7 @@ async function installApiFixture(context, { rejectLogin = false } = {}) {
 
   return {
     calls,
+    billRequests,
     assertNoUnexpectedCalls() {
       expect(unexpectedCalls, `未配置的 API 请求: ${unexpectedCalls.join(', ')}`).toEqual([])
     },
@@ -204,6 +237,57 @@ test('正式登录页展示服务端拒绝并保留可重试入口', async ({ br
     await expect(page.getByRole('alert')).toHaveText('账号或密码错误')
     await expect(page).toHaveURL(/\/login$/)
     await expect(page.getByRole('button', { name: '登录' })).toBeEnabled()
+    fixture.assertNoUnexpectedCalls()
+  } finally {
+    await context.close()
+  }
+})
+
+test('正式资产面板查询月账单后可收藏快照并在刷新后读取', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 } })
+  const fixture = await installApiFixture(context)
+
+  try {
+    const page = await context.newPage()
+    await page.goto('/chat')
+    await expect(page).toHaveURL(/\/login$/)
+    await page.getByLabel('账号').fill('browser-fixture')
+    await page.getByLabel('密码').fill('fixture-not-a-real-password')
+    await page.getByRole('button', { name: '登录' }).click()
+    await expect(page).toHaveURL(/\/chat$/)
+    await expect(page.getByPlaceholder('说说你想办的事')).toBeVisible()
+
+    await page.getByRole('button', { name: '打开导航和会话列表' }).click()
+    await page.getByRole('button', { name: '资产', exact: true }).click()
+    await page.getByRole('button', { name: '账单', exact: true }).click()
+    await page.locator('#bill-month').fill('2026-10')
+    await page.getByRole('button', { name: '查询', exact: true }).click()
+
+    const billPanel = page.locator('#asset-section-bill')
+    await expect(billPanel.getByRole('heading', { name: '2026-10 账单' })).toBeVisible()
+    await expect(billPanel.getByText('¥12.34', { exact: true }).first()).toBeVisible()
+    await expect(billPanel.getByText(/餐饮/)).toBeVisible()
+    await billPanel.getByRole('button', { name: '收藏快照' }).click()
+    await expect(billPanel.getByRole('button', { name: '已收藏到此设备' })).toBeVisible()
+    expect(fixture.billRequests).toEqual([{ month: '2026-10', accountId: '11' }])
+
+    await page.getByRole('button', { name: '收起资产区' }).click()
+    await page.getByRole('button', { name: '打开导航和会话列表' }).click()
+    await page.getByRole('button', { name: '收藏', exact: true }).click()
+    await expect(page.getByRole('region', { name: '收藏', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: /2026-10 账单/ }).click()
+    await expect(page.getByRole('heading', { name: '2026-10 账单' })).toBeVisible()
+    await expect(page.getByText('¥12.34', { exact: true }).first()).toBeVisible()
+
+    await page.reload()
+    await expect(page.getByPlaceholder('说说你想办的事')).toBeVisible()
+    await page.getByRole('button', { name: '打开导航和会话列表' }).click()
+    await page.getByRole('button', { name: '收藏', exact: true }).click()
+    await expect(page.getByRole('button', { name: /2026-10 账单/ })).toBeVisible()
+    await page.getByRole('button', { name: /2026-10 账单/ }).click()
+    await expect(page.getByText('¥12.34', { exact: true }).first()).toBeVisible()
+
+    expect(fixture.calls).toContain('GET /api/bills/monthly')
     fixture.assertNoUnexpectedCalls()
   } finally {
     await context.close()
