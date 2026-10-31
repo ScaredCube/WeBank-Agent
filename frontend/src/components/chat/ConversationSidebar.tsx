@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import type { WorkspacePanelName } from '@/app/workspace-state'
 import { BrandMark } from '@/components/BrandMark'
 import { PenguinArt } from '@/features/theme/PenguinArt'
+import { MASCOT_NAME } from '@/features/theme/brand'
 import type { Conversation, User } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -95,7 +96,7 @@ export function ConversationSidebar({
             </button>
           </> : <PenguinArt pose="avatar" className="size-9 shrink-0" />}
           <div className={cn('min-w-0 flex-1 truncate text-[14px] font-bold tracking-[-0.025em] text-ink', desktopCollapsed && 'lg:hidden')}>
-            微众银行
+            {MASCOT_NAME}
           </div>
           {!desktopCollapsed && <button
             type="button"
@@ -133,7 +134,6 @@ export function ConversationSidebar({
         </div>
 
         <nav aria-label="主导航" className={cn('mt-8 shrink-0 px-4', desktopCollapsed && 'lg:px-2')}>
-          <p className={cn('mb-3 pl-3 text-[10px] font-semibold tracking-[0.14em] text-muted/85', desktopCollapsed && 'lg:hidden')}>工作空间</p>
           <div className="flex flex-col gap-1">
             {navigation.map(({ id, label, icon: Icon }) => {
               const active = id === activePanel

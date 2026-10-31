@@ -22,7 +22,7 @@ it('助手回答复制成功后才反馈已复制', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
   render(<MessageBubble message={assistantMessage} />)
-  expect(screen.getByText('企鹅助手')).toBeTruthy()
+  expect(screen.getByText('小We')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '复制回复' }))
   await screen.findByText('已复制')
   expect(writeText).toHaveBeenCalledWith(assistantMessage.content)

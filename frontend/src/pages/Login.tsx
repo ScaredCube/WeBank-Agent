@@ -11,6 +11,7 @@ import {
 import { PenguinArt } from '@/features/theme/PenguinArt'
 import { MascotStage } from '@/features/theme/MascotStage'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { MASCOT_NAME, MASCOT_SLOGAN } from '@/features/theme/brand'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/use-auth'
@@ -49,16 +50,12 @@ export function LoginPage() {
         <div className="relative flex items-center gap-3">
           <PenguinArt pose="avatar" className="size-11" />
           <div className="min-w-0">
-            <p className="text-[14px] font-semibold tracking-tight text-ink">微众银行 AI 智能体</p>
-            <p className="mt-1 text-[11px] text-muted">个人金融事务空间</p>
+            <p className="text-[14px] font-semibold tracking-tight text-ink">{MASCOT_NAME}</p>
           </div>
         </div>
 
         <div className="relative mx-auto flex w-full max-w-[520px] flex-col items-start">
-          <p className="mb-4 text-xs font-medium tracking-[0.06em] text-jade-700">陪你认真处理每件小事</p>
-          <h1 className="text-[clamp(2.4rem,3.25vw,3.6rem)] font-semibold leading-[1.23] tracking-[-0.055em] text-ink">
-            日常财务，<span className="block">从这里开始。</span>
-          </h1>
+          <h1 className="text-[clamp(2.4rem,3.25vw,3.6rem)] font-semibold leading-[1.23] tracking-[-0.055em] text-ink">{MASCOT_SLOGAN}</h1>
           <div className="relative mx-auto -mb-6 mt-5">
             <MascotStage showcase />
           </div>
@@ -70,15 +67,14 @@ export function LoginPage() {
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 lg:hidden">
             <PenguinArt pose="avatar" className="size-10" />
-            <span className="text-sm font-semibold tracking-tight text-ink">微众银行 AI 智能体</span>
+            <span className="text-sm font-semibold tracking-tight text-ink">{MASCOT_NAME}</span>
           </div>
-          <p className="hidden text-xs text-muted lg:block">欢迎使用智能银行服务</p>
           <ThemeToggle />
         </header>
 
         <div className="my-auto mx-auto w-full max-w-[380px] pb-12 pt-16 lg:py-12">
           <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-ink">欢迎回来</h2>
-          <p className="mt-2 text-sm leading-6 text-muted">登录后，继续处理你的银行事务。</p>
+          <p className="mt-2 text-sm leading-6 text-muted lg:hidden">{MASCOT_SLOGAN}</p>
 
           <form className="mt-10 space-y-5" onSubmit={handleSubmit}>
             <div>

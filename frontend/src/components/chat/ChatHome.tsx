@@ -60,13 +60,6 @@ export function ChatHome({
       className={'bank-home mx-auto flex min-h-full w-full max-w-[1240px] flex-col px-6 pb-10 pt-8 sm:px-10 sm:pt-10 ' +
         (compact ? 'lg:px-10 lg:pt-14' : 'lg:px-16 xl:px-20 xl:pt-12')}
     >
-      <div className="flex items-center justify-between gap-4 border-b border-line pb-5">
-        <div className="flex items-center gap-2.5">
-          <span aria-hidden="true" className="block size-1.5 rounded-full bg-jade-700" />
-          <span className="text-[11px] font-semibold tracking-[0.12em] text-muted">新委托</span>
-        </div>
-      </div>
-
       <div className={'grid flex-1 items-center ' + (compact ? 'py-8' : 'py-8 lg:py-10')}>
         <div className="relative w-full">
           <div className="relative flex items-baseline gap-4">
@@ -89,7 +82,6 @@ export function ChatHome({
                 <nav className="mt-10" aria-label="常用事务，选择后填入输入框">
                   <div className="flex items-center justify-between border-b border-line pb-3">
                     <h3 className="text-[12px] font-semibold text-ink">常用事务</h3>
-                    <span className="text-[11px] text-muted">选择后可修改</span>
                   </div>
                   <div className="grid md:grid-cols-3">
                     {suggestions.map(({ label, prompt, art }) => (

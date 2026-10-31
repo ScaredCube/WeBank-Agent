@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { GripVertical, Menu } from 'lucide-react'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { MASCOT_NAME } from '@/features/theme/brand'
 
 const DEFAULT_SIDEBAR_WIDTH = 296
 const MIN_SIDEBAR_WIDTH = 240
@@ -193,7 +194,7 @@ export function WorkspaceHeader({ title, isHome = false, sidebarOpen, onOpenSide
       <Menu className="size-[18px]" />
     </button>
     <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-ink/80 sm:text-[14px]">
-      <span className={isHome ? 'lg:sr-only' : ''}>{isHome ? '微众银行' : title}</span>
+      <span className={isHome ? 'lg:sr-only' : ''}>{isHome ? MASCOT_NAME : title}</span>
     </h1>
     {status}
     <ThemeToggle compact />

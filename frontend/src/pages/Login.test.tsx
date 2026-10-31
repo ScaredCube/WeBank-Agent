@@ -26,3 +26,11 @@ it('登录失败显示错误并允许用户重新提交', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('暂时无法登录')
   expect((screen.getByRole('button', { name: '登录' }) as HTMLButtonElement).disabled).toBe(false)
 })
+
+it('小We 品牌表达集中在欢迎主视觉，不重复堆叠次级文案', () => {
+  render(<MemoryRouter><LoginPage /></MemoryRouter>)
+  expect(screen.getByRole('heading', { name: 'We在你身边' })).toBeTruthy()
+  expect(screen.getAllByText('小We').length).toBeGreaterThan(0)
+  expect(screen.queryByText('个人金融事务空间')).toBeNull()
+  expect(screen.queryByText('陪你认真处理每件小事')).toBeNull()
+})

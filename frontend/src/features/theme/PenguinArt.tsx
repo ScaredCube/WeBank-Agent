@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import { useTheme } from '@/features/theme/theme-context'
+import { MASCOT_NAME } from '@/features/theme/brand'
 import { cn } from '@/lib/utils'
 
 export type PenguinPose = 'hero' | 'avatar' | 'thinking' | 'celebrate' | 'sleep' | 'peek'
@@ -110,7 +111,7 @@ export function PenguinArt({ pose = 'hero', className, decorative = true, style,
     className={cn('inline-flex shrink-0 items-center justify-center select-none', className)}
     style={style}
     role={decorative ? undefined : 'img'}
-    aria-label={decorative ? undefined : resolved === 'light' ? '戴红围巾的黑企鹅' : '戴蓝围巾的浅灰企鹅'}
+    aria-label={decorative ? undefined : resolved === 'light' ? `${MASCOT_NAME}，戴红围巾的黑企鹅` : `${MASCOT_NAME}，戴蓝围巾的浅灰企鹅`}
     aria-hidden={decorative ? true : undefined}
   >
     {failedSrc === src ? <VectorFallback silver={resolved === 'dark'} pose={pose}/> : <img

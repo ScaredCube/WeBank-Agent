@@ -6,6 +6,7 @@ import { MascotEmptyState } from '@/features/theme/MascotEmptyState'
 import { SparkleField } from '@/features/theme/SparkleField'
 import { FinanceSticker, type StickerKind } from '@/features/theme/FinanceSticker'
 import { useTheme } from '@/features/theme/theme-context'
+import { MASCOT_NAME } from '@/features/theme/brand'
 
 const poses: { id: PenguinPose; label: string; description: string }[] = [
   { id: 'hero', label: '欢迎', description: '首次进入 / 品牌记忆' },
@@ -30,7 +31,7 @@ export default function IPStudio() {
     <main className="mx-auto max-w-[1240px]">
       <div className="mt-14 max-w-[800px]">
         <p className="text-xs font-medium tracking-[0.12em] text-jade-700">WEBANK AGENT · IP LAB</p>
-        <h1 className="mt-4 text-[clamp(2.2rem,4.1vw,4rem)] font-semibold tracking-[-0.06em]">双主题角色与图形素材</h1>
+        <h1 className="mt-4 text-[clamp(2.2rem,4.1vw,4rem)] font-semibold tracking-[-0.06em]">{MASCOT_NAME} · 双主题素材</h1>
         <p className="mt-5 text-sm leading-7 text-muted">这是只在本地开发环境开放的素材试验台。每个角色状态会随明暗主题自动映射。图形衍生元素使用 SVG/CSS，图片加载失败时回退到简化角色。</p>
       </div>
       <section className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="角色姿态">
@@ -52,7 +53,7 @@ export default function IPStudio() {
           <div className="relative flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-medium text-jade-700">场景合成 / CSS + SVG</p>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight">企鹅与光点组成一个场景</h2>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight">{MASCOT_NAME}与光点</h2>
               <p className="mt-2 max-w-[360px] text-sm leading-6 text-muted">背景星点与柔和氛围由浏览器绘制，支持主题色变化，无需加载整张背景图。</p>
             </div>
             <Sparkles className="shrink-0 text-jade-500" size={22} />

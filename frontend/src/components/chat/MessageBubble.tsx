@@ -3,6 +3,7 @@ import { Check, Copy } from 'lucide-react'
 import { Markdown } from '@/components/Markdown'
 import { AgentWorkingIndicator } from '@/components/chat/AgentWorkingIndicator'
 import { PenguinArt } from '@/features/theme/PenguinArt'
+import { MASCOT_NAME } from '@/features/theme/brand'
 import type { Message } from '@/lib/api'
 import { presentReferenceMessage } from '@/features/references/bank-object-reference'
 
@@ -48,7 +49,7 @@ export function MessageBubble({
     <PenguinArt pose="avatar" className="mt-0.5 size-9 shrink-0" />
     <div className="min-w-0 flex-1 pt-0.5">
       <div className="mb-2.5 flex items-center gap-2 text-[11px] text-muted">
-        <span className="font-semibold tracking-[-0.01em] text-ink">企鹅助手</span>
+        <span className="font-semibold tracking-[-0.01em] text-ink">{MASCOT_NAME}</span>
         {streaming && <span role="status" className="inline-flex items-center gap-1.5 text-jade-700">
           <span aria-hidden="true" className="size-1.5 rounded-full bg-jade-500 agent-working-dot" />
           正在回复
