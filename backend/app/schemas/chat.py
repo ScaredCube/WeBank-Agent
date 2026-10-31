@@ -25,6 +25,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    bill_result: dict | None = None
 
 
 class AccountReference(BaseModel):

@@ -10,6 +10,7 @@ import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
 import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
+import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
@@ -249,7 +250,10 @@ export function ChatPage() {
               key={activeId ?? 'new'}
               scrollRoot={scrollRef}
               messages={messages}
-              renderAfterMessage={(message) => message.role === 'assistant' && resultCards[message.id] ? <IntelligentCard value={resultCards[message.id]} hidden={privacyHidden}/> : null}
+              renderAfterMessage={(message) => {
+                const card = resultCards[message.id] ?? billResultCard(message.bill_result)
+                return message.role === 'assistant' && card ? <IntelligentCard value={card} hidden={privacyHidden}/> : null
+              }}
               streamingText={streamingText}
               thinking={sending && !streamingText}
               focusMessageId={sourceTarget?.conversationId === activeId ? sourceTarget.messageId : null}

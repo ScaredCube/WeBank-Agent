@@ -30,6 +30,16 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class MessageResult(SQLModel, table=True):
+    """Encrypted server-authored read-only banking snapshot associated with a reply."""
+    id: int | None = Field(default=None, primary_key=True)
+    message_id: int = Field(foreign_key="message.id", unique=True, index=True)
+    kind: str
+    ciphertext: str
+    key_version: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Account(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)

@@ -72,6 +72,28 @@ def create_temporary(session: Session, user_id: int, kind: str, value: str, scop
     return token
 
 
+def encrypt_result_snapshot(payload: dict) -> tuple[str, str]:
+    """Encrypt trusted tool data at rest; do not log/serialize the ciphertext."""
+    keys, _ = _keys()
+    version = settings.data_encryption_key_version
+    ciphertext = Fernet(keys[version].encode()).encrypt(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    ).decode()
+    return ciphertext, version
+
+
+def decrypt_result_snapshot(ciphertext: str, version: str) -> dict:
+    try:
+        keys, _ = _keys()
+        key = keys[version]
+        payload = json.loads(Fernet(key.encode()).decrypt(ciphertext.encode()))
+        if not isinstance(payload, dict):
+            raise ValueError()
+        return payload
+    except (KeyError, ValueError, TypeError, InvalidToken):
+        raise VaultError() from None
+
+
 def create_account_token(session: Session, user_id: int, account_id: int) -> str:
     account = session.exec(select(Account).where(Account.id == account_id, Account.user_id == user_id,
                                                  Account.status == "active")).first()

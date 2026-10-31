@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from sqlmodel import Session, select
 
@@ -10,13 +10,14 @@ from app.agent.loop import AgentLoop
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Conversation, Account
+from app.models import Conversation, Account, Message, MessageResult
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
     ConversationOut,
     MessageOut,
 )
+from app.schemas.bills import MonthlyBill
 from app.services.chat_service import (
     append_message,
     create_conversation,
@@ -27,10 +28,11 @@ from app.services.chat_service import (
     recent_messages,
 )
 from app.risk.injection import detect_injection
+from app.core.time import utcnow
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
-from app.services.vault import VaultError, create_account_token
+from app.services.vault import VaultError, create_account_token, encrypt_result_snapshot, decrypt_result_snapshot
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
 
@@ -46,15 +48,44 @@ def _require_conversation(session: Session, user, conversation_id: int) -> Conve
     return conversation
 
 
-def _persist_assistant(conversation_id: int, content: str) -> dict | None:
+def _present_message(session: Session, message: Message, mask_content: bool = True) -> MessageOut:
+    output = MessageOut.model_validate(message).model_copy(
+        update={"content": mask_text(message.content) if mask_content else message.content}
+    )
+    if message.role != "assistant":
+        return output
+    snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
+    if snapshot is None or snapshot.kind != "monthly_bill":
+        return output
+    try:
+        payload = decrypt_result_snapshot(snapshot.ciphertext, snapshot.key_version)
+        bill = MonthlyBill.model_validate(payload)
+    except (VaultError, ValueError):
+        # History remains readable when old/retired encryption keys are unavailable.
+        return output
+    return output.model_copy(update={"bill_result": bill.model_dump()})
+
+
+def _persist_assistant(conversation_id: int, content: str, bill_result: dict | None = None) -> dict | None:
     if not content:
         return None
     with session_scope() as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             return None
-        message = append_message(session, conversation, "assistant", content)
-        return MessageOut.model_validate(message).model_dump(mode="json")
+        message = Message(conversation_id=conversation_id, role="assistant", content=content)
+        session.add(message)
+        conversation.updated_at = utcnow()
+        session.flush()
+        if bill_result is not None:
+            # Persist only the schema-validated successful tool payload, not model text.
+            bill = MonthlyBill.model_validate(bill_result)
+            ciphertext, key_version = encrypt_result_snapshot(bill.model_dump())
+            session.add(MessageResult(
+                message_id=message.id, kind="monthly_bill",
+                ciphertext=ciphertext, key_version=key_version))
+        session.commit()
+        return _present_message(session, message, mask_content=False).model_dump(mode="json")
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -80,10 +111,11 @@ def read_messages(
     conversation_id: int,
     session: SessionDep,
     user: CurrentUser,
+    response: Response,
 ) -> list[MessageOut]:
     _require_conversation(session, user, conversation_id)
-    return [MessageOut.model_validate(message).model_copy(update={"content": mask_text(message.content)})
-            for message in list_messages(session, conversation_id)]
+    response.headers["Cache-Control"] = "no-store"
+    return [_present_message(session, message) for message in list_messages(session, conversation_id)]
 
 
 @router.post("/conversations/{conversation_id}/messages")
@@ -147,6 +179,7 @@ async def send_message(
 
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
+        trusted_bill: dict | None = None
         audit_token = conversation_context.set(conversation_id)
         try:
             if injection.blocked:
@@ -169,17 +202,21 @@ async def send_message(
                     collected.append(text)
                     yield _sse({"type": "delta", "text": text})
                 elif event.type == "bill_result":
-                    yield _sse({"type": "bill_result", **event.data})
+                    # An event can be emitted only after the authenticated GREEN tool
+                    # returns; never accept card data from the model's delta text.
+                    validated = MonthlyBill.model_validate(event.data["data"])
+                    trusted_bill = validated.model_dump()
+                    yield _sse({"type": "bill_result", "data": trusted_bill})
                 elif event.type == "action_required":
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
                     yield _sse({"type": "error", "message": event.data["message"]})
                     return
 
-            message = _persist_assistant(conversation_id, "".join(collected))
+            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill)
             yield _sse({"type": "done", "message": message})
         except asyncio.CancelledError:
-            _persist_assistant(conversation_id, "".join(collected))
+            _persist_assistant(conversation_id, "".join(collected), trusted_bill)
             raise
         except Exception:
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})

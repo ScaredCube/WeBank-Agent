@@ -59,7 +59,9 @@ class AgentLoop:
                 if not tool_calls:
                     if tool_results:
                         yield AgentEvent("delta", {"text": "\n\n".join(
-                            render_tool_result(name, result) for name, result in tool_results
+                            ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
+                             else render_tool_result(name, result))
+                            for name, result in tool_results
                         )})
                     else:
                         # Model text is untrusted: without a tool result it cannot

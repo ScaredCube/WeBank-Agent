@@ -86,8 +86,7 @@ export function IntelligentCard({ value, hidden = false, onAction }: CardProps) 
   return <article data-intelligent-card="" className="relative overflow-hidden rounded-[21px] border border-line bg-panel shadow-[0_14px_45px_-40px_rgba(0,38,29,.36)]">
     <header className="flex items-center justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
       <div className="min-w-0">
-        <span className="text-[10.5px] font-medium tracking-[0.04em] text-muted">结果卡片</span>
-        <h3 className="mt-1 truncate text-[16px] font-semibold tracking-[-0.025em] text-ink">
+        <h3 className="truncate text-[16px] font-semibold tracking-[-0.025em] text-ink">
           {hidden ? '卡片内容已隐藏' : card.title}
         </h3>
       </div>

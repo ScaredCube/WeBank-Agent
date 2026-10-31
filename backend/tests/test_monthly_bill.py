@@ -93,7 +93,9 @@ def test_chat_bill_tool_fixed_rendering_and_audit(client, auth_headers, monkeypa
                            json={"content": "分析2026年1月的消费"})
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     content = events[-1]["message"]["content"]
-    assert "1,000.00 元" in content and "999999" not in content
+    assert "账单已查询" in content and "999999" not in content
+    assert events[0]["type"] == "bill_result"
+    assert events[0]["data"]["expense_fen"] == 100000
     audit = client.get("/api/audit", headers=auth_headers).json()
     assert any(e["tool"] == "get_monthly_bill" and e["conversation_id"] == conversation_id
                and e["event_type"] == "tool_result" for e in audit)
@@ -177,8 +179,9 @@ def test_bill_masks_sensitive_fields_in_api_model_and_chat(client, auth_headers,
     assert events[-1]["type"] == "done"
     assert llm.tool_result is not None
     assert_private(llm.tool_result)
-    assert_private(events[-1]["message"]["content"])
-    assert "需核对" in events[-1]["message"]["content"]
+    assert events[-1]["message"]["content"] == "账单已查询，明细见下方结果卡。"
+    assert_private(json.dumps(events[0]["data"], ensure_ascii=False))
+    assert len(events[0]["data"]["anomalies"]) == 1
     assert_private(chat.text)
 
 def test_chat_typed_account_reference_is_verified_and_bill_result_is_trusted(client, auth_headers, monkeypatch):
@@ -248,3 +251,77 @@ def test_chat_rejects_unowned_or_invalid_account_references_before_writing_messa
     assert client.post(url, headers=auth_headers, json={"content": "查消费",
         "references": [{"kind": "account", "id": 1}, {"kind": "account", "id": 2}]}).status_code == 422
     assert client.get(url, headers=auth_headers).json() == []
+
+def test_bill_result_is_encrypted_and_restores_with_its_original_assistant_message(client, auth_headers, monkeypatch):
+    from app.models import MessageResult
+    from app.services.vault import decrypt_result_snapshot
+
+    class FakeLLM:
+        calls = 0
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{"id": "bill-history", "type": "function", "function": {
+                    "name": "get_monthly_bill", "arguments": json.dumps({"month": "2026-01"})}}])
+            else:
+                yield LLMChunk(content="不采用模型自报金额。")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    url = f"/api/chat/conversations/{conversation_id}/messages"
+    response = client.post(url, json={"content": "查一月账单"}, headers=auth_headers)
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    saved = events[-1]["message"]
+    assert saved["bill_result"]["month"] == "2026-01"
+    assert saved["bill_result"]["expense_fen"] == 100000
+
+    with Session(get_engine()) as session:
+        snapshots = session.exec(select(MessageResult)).all()
+        assert len(snapshots) == 1
+        row = snapshots[0]
+        assert row.message_id == saved["id"]
+        assert row.kind == "monthly_bill"
+        assert "2026-01" not in row.ciphertext
+        assert "100000" not in row.ciphertext
+        assert decrypt_result_snapshot(row.ciphertext, row.key_version)["expense_fen"] == 100000
+
+    history = client.get(url, headers=auth_headers)
+    assert history.headers["cache-control"] == "no-store"
+    assert history.json()[-1]["bill_result"] == saved["bill_result"]
+    assert history.json()[0]["bill_result"] is None
+
+    other = User(username="snapshot_other", password_hash="test", display_name="其他用户")
+    with Session(get_engine()) as session:
+        session.add(other)
+        session.commit()
+        session.refresh(other)
+        other_id = other.id
+    different_user = {"Authorization": f"Bearer {create_access_token(str(other_id))}"}
+    assert client.get(url, headers=different_user).status_code == 404
+
+
+def test_invalid_snapshot_key_keeps_history_readable_without_leaking_data(client, auth_headers, monkeypatch):
+    from app.models import MessageResult
+    class FakeLLM:
+        calls = 0
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{"id": "bill-retired-key", "type": "function", "function": {
+                    "name": "get_monthly_bill", "arguments": json.dumps({"month": "2026-01"})}}])
+            else:
+                yield LLMChunk(content="工具查询已完成")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    url = f"/api/chat/conversations/{conversation_id}/messages"
+    client.post(url, headers=auth_headers, json={"content": "查月账单"})
+    with Session(get_engine()) as session:
+        snapshot = session.exec(select(MessageResult)).one()
+        snapshot.ciphertext = "tampered-invalid-ciphertext"
+        session.add(snapshot)
+        session.commit()
+    history = client.get(url, headers=auth_headers)
+    assert history.status_code == 200
+    assert history.json()[-1]["content"]
+    assert history.json()[-1]["bill_result"] is None

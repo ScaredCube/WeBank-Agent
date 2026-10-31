@@ -475,3 +475,32 @@ it('首次发送创建会话后保留账户上下文，供继续追问', async (
   expect(await screen.findByText('已收到请求')).toBeTruthy()
   expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('测试卡')
 })
+
+it('刷新后从历史消息重新展示可信账单卡，并尊重隐藏金额', async () => {
+  const persistedBill = {
+    month:'2026-10',account_name:'测试卡',masked_number:'****1234',currency:'CNY',
+    income_fen:600000,expense_fen:238600,consumption_fen:145000,consumption_count:5,
+    transfer_out_fen:40000,transfer_out_count:1,transfer_in_fen:0,transfer_in_count:0,
+    investment_out_fen:53600,investment_out_count:1,investment_in_fen:0,investment_in_count:0,
+    categories:[{category:'餐饮',amount_fen:145000,count:5}],anomalies:[],ignored_count:0,
+  }
+  vi.mocked(api.messages).mockResolvedValue([
+    {id:13,role:'user',content:'分析我的十月账单',created_at:new Date().toISOString()},
+    {id:14,role:'assistant',content:'查询已经完成。',created_at:new Date().toISOString(),bill_result:persistedBill},
+  ])
+  const user=userEvent.setup()
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  expect(await screen.findByText('2026-10 消费与收支')).toBeTruthy()
+  expect(screen.getAllByText('¥1,450.00').length).toBeGreaterThan(0)
+  await user.click(screen.getAllByRole('button',{name:'隐藏金额'})[0])
+  expect(screen.queryByText('¥1,450.00')).toBeNull()
+})
+
+it('旧会话无可信账单字段时不虚构金融卡片', async () => {
+  vi.mocked(api.messages).mockResolvedValue([
+    {id:2,role:'assistant',content:'暂时无法核对账单',created_at:new Date().toISOString()},
+  ])
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  expect(await screen.findByText('暂时无法核对账单')).toBeTruthy()
+  expect(screen.queryByText('消费与收支')).toBeNull()
+})
