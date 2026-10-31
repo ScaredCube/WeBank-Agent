@@ -41,7 +41,8 @@ class AgentLoop:
         self.llm = llm or get_llm()
         self.guard = guard if guard is not None else get_guard()
 
-    async def stream(self, history: list[dict[str, str]], user_id: int) -> AsyncIterator[AgentEvent]:
+    async def stream(self, history: list[dict[str, str]], user_id: int,
+                     verified_account_token: str | None = None) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
@@ -108,6 +109,13 @@ class AgentLoop:
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
                         argument_error = validate_tool_arguments(spec, args)
+                        # Account binding comes ONLY from the authenticated route's
+                        # ownership check. The model chooses the read-only tool and month,
+                        # but cannot forge, truncate or swap the selected account token.
+                        # Invalid tool fields still fail the existing whitelist check.
+                        if (argument_error is None and verified_account_token is not None
+                                and spec is not None and spec.name == "get_monthly_bill"):
+                            args["account_token"] = verified_account_token
                         guard_blocked = None
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):

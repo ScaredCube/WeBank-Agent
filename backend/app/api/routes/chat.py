@@ -187,6 +187,7 @@ async def send_message(
         session.rollback()
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
     injection = detect_injection(display_content)
+    verified_account_token: str | None = None
     if payload.references and not injection.blocked and not uncertain:
         try:
             visible = []
@@ -194,6 +195,7 @@ async def send_message(
             account = selected_account or (selected_card[1] if selected_card else None)
             if account is not None:
                 account_token = create_account_token(session, user.id, account.id)
+                verified_account_token = account_token
                 if selected_account is not None:
                     visible.append(f"账户：{mask_text(account.name)} · {mask_text(account.masked_number)}")
                 trusted.append(f"经核验的账户引用 account_token={account_token}。")
@@ -260,7 +262,9 @@ async def send_message(
                 yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
                 yield _sse({"type": "done", "message": None})
                 return
-            async for event in loop.stream(history, user_id=user.id):
+            async for event in loop.stream(
+                history, user_id=user.id, verified_account_token=verified_account_token
+            ):
                 if await request.is_disconnected():
                     break
                 if event.type == "delta":
