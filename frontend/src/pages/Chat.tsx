@@ -31,7 +31,7 @@ export function ChatPage() {
 
   const [actionWarning, setActionWarning] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const [workspacePanel, setWorkspacePanel] = useState(initialWorkspacePanel)
   const [pendingAction, setPendingAction] = useState<Extract<StreamEvent, { type: 'action_required' }> | null>(null)
   const [actionOpen, setActionOpen] = useState(false)
@@ -130,12 +130,12 @@ export function ChatPage() {
   }
 
   return (
-    <BankWorkspace sidebarVisible={desktopSidebarVisible} sidebar={<ConversationSidebar
+    <BankWorkspace sidebarCollapsed={desktopSidebarCollapsed} sidebar={<ConversationSidebar
         conversations={conversations}
         activeId={activeId}
         user={user}
         open={sidebarOpen}
-        desktopVisible={desktopSidebarVisible}
+        desktopCollapsed={desktopSidebarCollapsed}
         activePanel={workspacePanel}
         hideActiveConversation={isHome && activeConversation?.title === '新对话'}
         disabled={sending || creatingConversation || actionPreparing || !!pendingAction}
@@ -153,9 +153,9 @@ export function ChatPage() {
           title={activeConversation?.title ?? '新对话'}
           isHome={isHome}
           sidebarOpen={sidebarOpen}
-          sidebarVisible={desktopSidebarVisible}
+          sidebarCollapsed={desktopSidebarCollapsed}
           onOpenSidebar={() => setSidebarOpen(true)}
-          onToggleSidebar={() => setDesktopSidebarVisible((visible) => !visible)}
+          onToggleSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
         />
         {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
         <p role="status" className="sr-only">{sending ? '消息请求进行中' : ''}</p>

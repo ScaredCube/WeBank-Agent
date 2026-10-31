@@ -19,16 +19,20 @@ interface ResizeStart {
 }
 
 /** Shared layout only: data and commands belong to the entry point. */
-export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisible = true }: {
+export function BankWorkspace({ sidebar, panel, overlay, children, sidebarCollapsed = false }: {
   sidebar: ReactNode
   panel?: ReactNode
   overlay?: ReactNode
   children: ReactNode
-  sidebarVisible?: boolean
+  sidebarCollapsed?: boolean
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const resizeStart = useRef<ResizeStart | null>(null)
-  const style = { '--sidebar-width': `${sidebarWidth}px` } as CSSProperties
+  const style = {
+    '--sidebar-width': `${sidebarWidth}px`,
+    '--sidebar-width-transition-duration': isResizingSidebar ? '0ms' : '200ms',
+  } as CSSProperties
 
   function clampSidebarWidth(width: number) {
     return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width))
@@ -38,6 +42,7 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisibl
     if (event.pointerType === 'mouse' && event.button !== 0) return
     resizeStart.current = { pointerId: event.pointerId, x: event.clientX, width: sidebarWidth }
     event.currentTarget.setPointerCapture(event.pointerId)
+    setIsResizingSidebar(true)
     event.preventDefault()
   }
 
@@ -48,7 +53,10 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisibl
   }
 
   function stopResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (resizeStart.current?.pointerId === event.pointerId) resizeStart.current = null
+    if (resizeStart.current?.pointerId === event.pointerId) {
+      resizeStart.current = null
+      setIsResizingSidebar(false)
+    }
   }
 
   function resizeWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -62,7 +70,7 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisibl
 
   return <div style={style} className="relative flex h-dvh overflow-hidden bg-panel text-ink">
     {sidebar}
-    {sidebarVisible && <div
+    {!sidebarCollapsed && <div
       role="separator"
       aria-orientation="vertical"
       aria-label="调整导航栏宽度"
@@ -76,11 +84,11 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisibl
       onPointerMove={resize}
       onPointerUp={stopResize}
       onPointerCancel={stopResize}
-      onLostPointerCapture={() => { resizeStart.current = null }}
+      onLostPointerCapture={() => { resizeStart.current = null; setIsResizingSidebar(false) }}
       onKeyDown={resizeWithKeyboard}
       onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
       style={{ touchAction: 'none' }}
-      className="group hidden w-3 shrink-0 cursor-col-resize select-none items-center justify-center bg-transparent outline-none hover:bg-jade-50/70 focus-visible:bg-jade-50 xl:flex"
+      className="group hidden w-3 shrink-0 cursor-col-resize select-none items-center justify-center bg-transparent outline-none hover:bg-jade-50/70 focus-visible:bg-jade-50 lg:flex"
     >
       <GripVertical aria-hidden="true" className="size-3.5 text-muted/50 transition-colors group-hover:text-jade-700 group-focus-visible:text-jade-700" strokeWidth={2} />
     </div>}
@@ -90,24 +98,24 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarVisibl
   </div>
 }
 
-export function WorkspaceHeader({ title, isHome = false, sidebarOpen, sidebarVisible, onOpenSidebar, onToggleSidebar, status }: {
+export function WorkspaceHeader({ title, isHome = false, sidebarOpen, sidebarCollapsed, onOpenSidebar, onToggleSidebar, status }: {
   title: string
   isHome?: boolean
   sidebarOpen: boolean
-  sidebarVisible: boolean
+  sidebarCollapsed: boolean
   onOpenSidebar: () => void
   onToggleSidebar: () => void
   status?: ReactNode
 }) {
   return <header className="flex h-16 shrink-0 items-center gap-1 border-b border-line bg-white px-3 sm:gap-3 md:px-6">
-    <button id="open-sidebar-button" type="button" onClick={onOpenSidebar} aria-expanded={sidebarOpen} aria-controls="conversation-sidebar" aria-label="打开导航和会话列表" title="打开导航和会话列表" className="grid h-11 w-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 xl:hidden">
+    <button id="open-sidebar-button" type="button" onClick={onOpenSidebar} aria-expanded={sidebarOpen} aria-controls="conversation-sidebar" aria-label="打开导航和会话列表" title="打开导航和会话列表" className="grid h-11 w-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden">
       <Menu className="size-[18px]" />
     </button>
-    <button id="toggle-desktop-sidebar-button" type="button" onClick={onToggleSidebar} aria-expanded={sidebarVisible} aria-controls="conversation-sidebar" aria-label={sidebarVisible ? '收起侧栏' : '显示侧栏'} title={sidebarVisible ? '收起侧栏' : '显示侧栏'} className="hidden size-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 xl:grid">
-      {sidebarVisible ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
+    <button id="toggle-desktop-sidebar-button" type="button" onClick={onToggleSidebar} aria-expanded={!sidebarCollapsed} aria-controls="conversation-sidebar" aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} className="hidden size-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid">
+      {sidebarCollapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-[18px]" />}
     </button>
     <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-ink sm:text-[15px]">
-      <span className={isHome ? 'xl:sr-only' : ''}>{title}</span>
+      <span className={isHome ? 'lg:sr-only' : ''}>{title}</span>
     </h1>
     {status}
   </header>

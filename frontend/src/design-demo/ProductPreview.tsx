@@ -108,7 +108,7 @@ export default function ProductPreview() {
   const [messages, setMessages] = useState<Record<number, Message[]>>(previewMessages)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const [panel, setPanel] = useState(initialWorkspacePanel)
   const [hidden, setHidden] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -214,7 +214,7 @@ export default function ProductPreview() {
     activeId={activeId}
     user={{ id: 1, username: 'preview', display_name: '预览用户' }}
     open={sidebarOpen}
-    desktopVisible={desktopSidebarVisible}
+    desktopCollapsed={desktopSidebarCollapsed}
     activePanel={panel}
     hideActiveConversation={isHome && conversations.find((item) => item.id === activeId)?.title === '新对话'}
     onSelect={(id) => { setSourceTarget(null); setActiveId(id); resetScroll(); setNotice(''); setSourceError(''); setSidebarOpen(false) }}
@@ -230,14 +230,14 @@ export default function ProductPreview() {
     {panel === 'collections' && <><p className="mb-5 text-xs text-muted">合成预览使用独立收藏空间。</p>{sourceError && <p role="alert" className="mb-4 text-sm text-red-700">{sourceError}</p>}<CollectionPanel userId={1} hidden={hidden} databaseName={previewDatabase} onOpenSource={openPreviewSource} /></>}
     {panel === 'activity' && <ActivityList entries={previewActivity} />}
   </WorkspacePanelFrame>
-  return <BankWorkspace sidebarVisible={desktopSidebarVisible} sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="合成预览，操作及金额仅为样例。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
+  return <BankWorkspace sidebarCollapsed={desktopSidebarCollapsed} sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="合成预览，操作及金额仅为样例。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
     <WorkspaceHeader
       title={conversations.find((item) => item.id === activeId)?.title ?? '新对话'}
       isHome={isHome}
       sidebarOpen={sidebarOpen}
-      sidebarVisible={desktopSidebarVisible}
+      sidebarCollapsed={desktopSidebarCollapsed}
       onOpenSidebar={() => setSidebarOpen(true)}
-      onToggleSidebar={() => setDesktopSidebarVisible((visible) => !visible)}
+      onToggleSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
       status={<PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
     />
     <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />

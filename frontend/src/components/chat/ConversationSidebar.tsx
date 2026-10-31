@@ -12,7 +12,7 @@ interface ConversationSidebarProps {
   activeId: number | null
   user: User | null
   open: boolean
-  desktopVisible?: boolean
+  desktopCollapsed?: boolean
   activePanel: WorkspacePanelName | null
   hideActiveConversation?: boolean
   disabled?: boolean
@@ -30,7 +30,7 @@ export function ConversationSidebar({
   activeId,
   user,
   open,
-  desktopVisible = true,
+  desktopCollapsed = false,
   activePanel,
   hideActiveConversation = false,
   disabled = false,
@@ -63,22 +63,24 @@ export function ConversationSidebar({
     <>
       {open && (
         <div
-          className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px] xl:hidden"
+          className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px] lg:hidden"
           onClick={onClose}
         />
       )}
       <aside
         id="conversation-sidebar"
         onKeyDown={(event) => { if (open && event.key === 'Escape') { event.stopPropagation(); onClose() } }}
+        aria-label="导航栏"
         className={cn(
-          'fixed inset-y-0 left-0 z-40 w-[296px] flex-col border-r border-line bg-sidebar xl:static xl:z-auto xl:w-[var(--sidebar-width)]',
-          open ? 'flex' : 'hidden',
-          desktopVisible ? 'xl:flex' : 'xl:hidden',
+          'fixed inset-y-0 left-0 z-40 flex w-[296px] shrink-0 flex-col border-r border-line bg-sidebar lg:static lg:z-auto lg:overflow-hidden lg:transition-[width]',
+          open ? 'flex' : 'hidden lg:flex',
+          desktopCollapsed ? 'lg:w-[68px]' : 'lg:w-[var(--sidebar-width)]',
         )}
+        style={{ transitionDuration: 'var(--sidebar-width-transition-duration, 200ms)' }}
       >
-        <div className="flex h-16 items-center gap-3 px-4">
+        <div className={cn('flex h-16 shrink-0 items-center gap-3 px-4', desktopCollapsed && 'lg:justify-center lg:px-0')}>
           <BrandMark className="size-9 shrink-0 rounded-[10px]" />
-          <div className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-ink">
+          <div className={cn('min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-ink', desktopCollapsed && 'lg:hidden')}>
             微众银行 AI 智能体
           </div>
           <button
@@ -86,25 +88,28 @@ export function ConversationSidebar({
             type="button"
             aria-label="收起侧栏"
             title="收起侧栏"
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-jade-700 xl:hidden"
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden"
             onClick={onClose}
           >
             <X className="size-4" />
           </button>
         </div>
 
-        <div className="px-4 pt-2">
+        <div className={cn('px-4 pt-2', desktopCollapsed && 'lg:px-0')}>
           <button
+            type="button"
+            aria-label="新对话"
+            title="新对话"
             onClick={onNew}
             disabled={disabled || newDisabled}
-            className="flex h-11 w-full items-center gap-2.5 rounded-[10px] bg-jade-800 px-3 text-[13px] font-semibold text-white transition-[background-color,transform] hover:bg-jade-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 active:scale-[0.99] disabled:opacity-50"
+            className={cn('flex h-11 w-full items-center gap-2.5 rounded-[10px] bg-jade-800 px-3 text-[13px] font-semibold text-white transition-[background-color,transform] hover:bg-jade-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 active:scale-[0.99] disabled:opacity-50', desktopCollapsed && 'lg:mx-auto lg:w-10 lg:justify-center lg:px-0')}
           >
             <Plus className="size-[18px] shrink-0" />
-            新对话
+            <span className={desktopCollapsed ? 'lg:hidden' : undefined}>新对话</span>
           </button>
         </div>
 
-        <nav aria-label="主导航" className="mt-3 px-4">
+        <nav aria-label="主导航" className={cn('mt-3 shrink-0 px-4', desktopCollapsed && 'lg:px-2')}>
           <div className="flex flex-col gap-0.5">
             {navigation.map(({ id, label, icon: Icon }) => {
               const active = id === activePanel
@@ -113,22 +118,25 @@ export function ConversationSidebar({
                   key={label}
                   type="button"
                   aria-current={active ? 'page' : undefined}
+                  aria-label={label}
+                  title={desktopCollapsed ? label : undefined}
                   data-workspace-panel={id ?? 'chat'}
                   onClick={() => onOpenPanel(id)}
                   className={cn(
                     'flex h-10 w-full items-center gap-3 rounded-[9px] px-3 text-left text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-jade-700',
+                    desktopCollapsed && 'lg:justify-center lg:px-0',
                     active ? 'bg-[#eaf3ef] font-semibold text-jade-800' : 'text-ink/80 hover:bg-[#f0f5f2]',
                   )}
                 >
                   <Icon className="size-[17px] shrink-0" strokeWidth={1.8} />
-                  <span>{label}</span>
+                  <span className={desktopCollapsed ? 'lg:hidden' : undefined}>{label}</span>
                 </button>
               )
             })}
           </div>
         </nav>
 
-        <nav aria-label="最近对话" className="scroll-thin mt-6 flex-1 overflow-y-auto px-4 pb-4">
+        <nav aria-label="最近对话" className={cn('scroll-thin mt-6 min-h-0 flex-1 overflow-y-auto px-4 pb-4', desktopCollapsed && 'lg:hidden')}>
           <h2 className="mb-2 pl-10 text-[11px] font-medium text-muted">最近对话</h2>
           {disabledReason && <p role="status" className="pb-3 pl-10 text-xs leading-5 text-muted">{disabledReason}</p>}
           {visibleConversations.length === 0 && (
@@ -164,12 +172,12 @@ export function ConversationSidebar({
           </div>
         </nav>
 
-        <div className="border-t border-line/80 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#d9ebe5] text-[12px] font-semibold text-jade-800">
+        <div className={cn('shrink-0 border-t border-line/80 px-4 py-3', desktopCollapsed && 'lg:px-0')}>
+          <div className={cn('flex items-center gap-3', desktopCollapsed && 'lg:justify-center')}>
+            <div title={desktopCollapsed ? user?.display_name || '用户' : undefined} className="grid size-8 shrink-0 place-items-center rounded-full bg-[#d9ebe5] text-[12px] font-semibold text-jade-800">
               {(user?.display_name || '用户').slice(0, 1)}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className={cn('min-w-0 flex-1', desktopCollapsed && 'lg:hidden')}>
               <div className="truncate text-[13px] font-semibold text-ink">
                 {user?.display_name || '用户'}
               </div>
@@ -179,7 +187,7 @@ export function ConversationSidebar({
               onClick={onLogout}
               title="退出登录"
               aria-label="退出登录"
-              className="grid size-9 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700"
+              className={cn('grid size-9 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700', desktopCollapsed && 'lg:hidden')}
             >
               <LogOut className="size-[15px]" />
             </button>
