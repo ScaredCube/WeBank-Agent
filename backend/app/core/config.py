@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
+    # Additional provider-specific HTTP headers, supplied as a JSON object in .env.
+    # Authorization: Bearer is automatically handled by AsyncOpenAI via llm_api_key.
+    llm_extra_headers: dict[str, str] = Field(default_factory=dict)
     llm_timeout: float = 60.0
     llm_max_history: int = 20
 

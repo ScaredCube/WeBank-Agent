@@ -66,6 +66,7 @@ class OpenAIProvider:
         self._client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
+            default_headers=settings.llm_extra_headers or None,
             timeout=settings.llm_timeout,
         )
 
