@@ -7,6 +7,7 @@ from typing import Any
 from app.agent.guard import GuardProvider, GuardVerdict, build_guard_call, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
+from app.schemas.card_results import from_card_tool_result
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
 from app.risk.engine import assess_tool
@@ -60,6 +61,7 @@ class AgentLoop:
                     if tool_results:
                         yield AgentEvent("delta", {"text": "\n\n".join(
                             ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
+                             else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                              else render_tool_result(name, result))
                             for name, result in tool_results
                         )})
@@ -188,6 +190,9 @@ class AgentLoop:
                     # not a chart or financial claim authored by the language model.
                     if spec is not None and spec.name == "get_monthly_bill" and result.get("ok") and isinstance(result.get("data"), dict):
                         yield AgentEvent("bill_result", {"data": result["data"]})
+                    if spec is not None and spec.name == "get_card_status" and result.get("ok"):
+                        safe_snapshot = from_card_tool_result(result.get("data"))
+                        yield AgentEvent("card_result", {"data": safe_snapshot.model_dump()})
                     messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))

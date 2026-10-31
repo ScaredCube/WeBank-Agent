@@ -504,3 +504,37 @@ it('旧会话无可信账单字段时不虚构金融卡片', async () => {
   expect(await screen.findByText('暂时无法核对账单')).toBeTruthy()
   expect(screen.queryByText('消费与收支')).toBeNull()
 })
+
+it('历史记录恢复银行卡状态及隐私遮蔽', async () => {
+  const user=userEvent.setup()
+  vi.mocked(api.messages).mockResolvedValue([
+    {id:11,role:'user',content:'查看这张卡',created_at:'2026-01-01T00:00:00Z'},
+    {id:12,role:'assistant',content:'卡片状态已查询，详见下方卡片。',created_at:'2026-01-01T00:00:01Z',
+      card_result:{cards:[{card_id:1,account_name:'演示活期账户',
+        masked_number:'**** 0001',status:'active',account_status:'active'}]}}],
+  )
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  expect(await screen.findByRole('region',{name:'银行卡状态结果'})).toBeTruthy()
+  expect(screen.getByText('**** 0001')).toBeTruthy()
+  await user.click(screen.getAllByRole('button',{name:'隐藏金额'})[0])
+  expect(screen.queryByText('**** 0001')).toBeNull()
+  expect(screen.getByText('状态正常')).toBeTruthy()
+})
+
+it('实时银行卡结果可进入资产面板', async () => {
+  const user=userEvent.setup()
+  vi.spyOn(sse,'streamChat').mockImplementation(async ({onEvent}) => {
+    onEvent({type:'card_result',data:{cards:[{card_id:5,account_name:'日常账户',
+      masked_number:'**** 0008',status:'lost',account_status:'active'}]}})
+    onEvent({type:'done',message:{id:110,role:'assistant',
+      content:'卡片状态已查询，详见下方卡片。',created_at:'2026-01-01T00:00:00Z'}})
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第一段对话')
+  await user.type(screen.getByPlaceholderText('说说你想办的事'),'查银行卡')
+  await user.click(screen.getByRole('button',{name:'发送'}))
+  const panel=await screen.findByRole('region',{name:'银行卡状态结果'})
+  expect(panel.textContent).toContain('已挂失')
+  await user.click(screen.getByRole('button',{name:'查看资产'}))
+  expect(screen.getByRole('region',{name:'资产'})).toBeTruthy()
+})

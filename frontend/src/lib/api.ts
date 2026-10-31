@@ -22,6 +22,7 @@ export interface Message {
   unavailable?: true
   /** Trusted tool result restored from a saved assistant message. */
   bill_result?: unknown | null
+  card_result?: unknown | null
 }
 
 export interface Health {
@@ -109,7 +110,7 @@ export interface SubscriptionCancelExecution {
 }
 
 const positiveId = z.number().int().safe().positive()
-const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional() })
+const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional(), card_result: z.unknown().optional() })
 const cardListSchema = z.array(z.object({ card_id: positiveId, account_name: z.string(), masked_number: z.string(), status: z.string(), account_status: z.string() }))
 const bankDashboardSchema = z.object({
   accounts: z.array(z.object({

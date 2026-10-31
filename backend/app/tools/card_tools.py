@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import Session
 
 from app.db.session import session_scope
@@ -14,10 +14,14 @@ class CardArguments(BaseModel):
     account_token: str | None = None
 
 
+class CardStatusArguments(CardArguments):
+    card_id: int | None = Field(default=None, gt=0)
+
+
 async def get_card_status(session: Session, user_id: int, **arguments: object) -> dict:
     try:
-        args = CardArguments.model_validate(arguments)
-        return {"ok": True, "data": list_cards(session, user_id, args.account_token), "error": None}
+        args = CardStatusArguments.model_validate(arguments)
+        return {"ok": True, "data": list_cards(session, user_id, args.account_token, args.card_id), "error": None}
     except ValidationError:
         return {"ok": False, "data": None, "error": "查询参数无效"}
     except VaultError:

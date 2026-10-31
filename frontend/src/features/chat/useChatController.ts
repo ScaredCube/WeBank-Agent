@@ -3,6 +3,7 @@ import { ApiError, api, type Conversation, type Health, type Message } from '@/l
 import { streamChat, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
+import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/CardStatusResult'
 import type { CardDescription } from '@/features/intelligent-ui/schema'
 import { composeReferenceContext, type BankObjectReference } from '@/features/references/bank-object-reference'
 
@@ -26,6 +27,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const [activeId, setActiveId] = useState<number | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [resultCards, setResultCards] = useState<Record<number, CardDescription>>({})
+  const [cardStatusResults, setCardStatusResults] = useState<Record<number, unknown>>({})
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [receiving, setReceiving] = useState(false)
@@ -170,6 +172,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       let conversationId = activeId
       let receivedText = ''
       let pendingBill: CardDescription | null = null
+      let pendingCardStatus: unknown = null
       let savedReply: Message | null = null
       let sessionExpired = false
       let sendFailure: string | null = null
@@ -215,6 +218,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             if (!isCurrent()) return
             if (event.type === 'bill_result') {
               pendingBill = billResultCard(event.data)
+            } else if (event.type === 'card_result') {
+              const result = cardStatusSnapshotSchema.safeParse(event.data)
+              pendingCardStatus = result.success ? result.data : null
             } else if (event.type === 'delta') {
               receivedText += event.text
               setStreamingText((prev) => prev + event.text)
@@ -229,6 +235,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             } else if (event.type === 'done' && event.message) {
               savedReply = event.message
               if (pendingBill) setResultCards(current => ({...current,[event.message!.id]:pendingBill!}))
+              if (pendingCardStatus) setCardStatusResults(current => ({...current,[event.message!.id]:pendingCardStatus}))
               setMessages((prev) => [...prev, event.message as Message])
             }
           },
@@ -308,5 +315,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
     setDraft(value)
   }
   function stopReceiving() { receiveController.current?.abort() }
-  return { conversations, activeId, messages, resultCards, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { conversations, activeId, messages, resultCards, cardStatusResults, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

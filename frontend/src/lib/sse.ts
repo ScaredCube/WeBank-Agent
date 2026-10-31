@@ -15,6 +15,7 @@ export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; message: Message | null }
   | { type: 'bill_result'; data: unknown }
+  | { type: 'card_result'; data: unknown }
   | { type: 'error'; message: string }
   | { type: 'action_warning'; message: string }
   | {
@@ -37,6 +38,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseEvent(value: unknown): StreamEvent | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
   if (value.type === 'bill_result' && isRecord(value.data)) return {type:'bill_result', data:value.data}
+  if (value.type === 'card_result' && isRecord(value.data)) return {type:'card_result', data:value.data}
   if (value.type === 'delta' && typeof value.text === 'string') return { type: 'delta', text: value.text }
   if (value.type === 'error' && typeof value.message === 'string') return { type: 'error', message: value.message }
   if (value.type === 'done') {

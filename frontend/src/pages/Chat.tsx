@@ -11,6 +11,7 @@ import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
 import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
+import { CardStatusResult, cardStatusSnapshotSchema } from '@/features/intelligent-ui/CardStatusResult'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
@@ -77,7 +78,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { conversations, activeId, messages, resultCards, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
+  const { conversations, activeId, messages, resultCards, cardStatusResults, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -235,8 +236,14 @@ export function ChatPage() {
               scrollRoot={scrollRef}
               messages={messages}
               renderAfterMessage={(message) => {
-                const card = resultCards[message.id] ?? billResultCard(message.bill_result)
-                return message.role === 'assistant' && card ? <IntelligentCard value={card} hidden={privacyHidden}/> : null
+                if (message.role !== 'assistant') return null
+                const trustedBill = resultCards[message.id] ?? billResultCard(message.bill_result)
+                const trustedCard = cardStatusResults[message.id] ?? message.card_result
+                if (trustedBill) return <IntelligentCard value={trustedBill} hidden={privacyHidden}/>
+                if (cardStatusSnapshotSchema.safeParse(trustedCard).success)
+                  return <CardStatusResult value={trustedCard} hidden={privacyHidden}
+                    onOpenAssets={() => { setPanelOpenedByUser(true); setWorkspacePanel('assets') }}/>
+                return null
               }}
               streamingText={streamingText}
               thinking={sending && !streamingText}

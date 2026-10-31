@@ -20,11 +20,14 @@ class CardError(Exception):
     pass
 
 
-def list_cards(session: Session, user_id: int, account_token: str | None = None) -> list[dict]:
+def list_cards(session: Session, user_id: int, account_token: str | None = None,
+               card_id: int | None = None) -> list[dict]:
     account_id = resolve(session, user_id, account_token, "account", request_context.get() or "") if account_token else None
     query = select(Card, Account).join(Account, Card.account_id == Account.id).where(Account.user_id == user_id)
     if account_id is not None:
         query = query.where(Account.id == account_id)
+    if card_id is not None:
+        query = query.where(Card.id == card_id)
     rows = session.exec(query).all()
     result = []
     for card, account in rows:

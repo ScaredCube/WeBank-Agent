@@ -18,6 +18,7 @@ from app.schemas.chat import (
     MessageOut,
 )
 from app.schemas.bills import MonthlyBill
+from app.schemas.card_results import CardStatusSnapshot
 from app.services.chat_service import (
     append_message,
     create_conversation,
@@ -55,18 +56,20 @@ def _present_message(session: Session, message: Message, mask_content: bool = Tr
     if message.role != "assistant":
         return output
     snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
-    if snapshot is None or snapshot.kind != "monthly_bill":
+    if snapshot is None or snapshot.kind not in ("monthly_bill", "card_status"):
         return output
     try:
         payload = decrypt_result_snapshot(snapshot.ciphertext, snapshot.key_version)
-        bill = MonthlyBill.model_validate(payload)
+        if snapshot.kind == "monthly_bill":
+            return output.model_copy(update={"bill_result": MonthlyBill.model_validate(payload).model_dump()})
+        return output.model_copy(update={"card_result": CardStatusSnapshot.model_validate(payload).model_dump()})
     except (VaultError, ValueError):
         # History remains readable when old/retired encryption keys are unavailable.
         return output
-    return output.model_copy(update={"bill_result": bill.model_dump()})
 
 
-def _persist_assistant(conversation_id: int, content: str, bill_result: dict | None = None) -> dict | None:
+def _persist_assistant(conversation_id: int, content: str,
+                       bill_result: dict | None = None, card_result: dict | None = None) -> dict | None:
     if not content:
         return None
     with session_scope() as session:
@@ -83,6 +86,12 @@ def _persist_assistant(conversation_id: int, content: str, bill_result: dict | N
             ciphertext, key_version = encrypt_result_snapshot(bill.model_dump())
             session.add(MessageResult(
                 message_id=message.id, kind="monthly_bill",
+                ciphertext=ciphertext, key_version=key_version))
+        elif card_result is not None:
+            snapshot = CardStatusSnapshot.model_validate(card_result)
+            ciphertext, key_version = encrypt_result_snapshot(snapshot.model_dump())
+            session.add(MessageResult(
+                message_id=message.id, kind="card_status",
                 ciphertext=ciphertext, key_version=key_version))
         session.commit()
         return _present_message(session, message, mask_content=False).model_dump(mode="json")
@@ -178,7 +187,8 @@ async def send_message(
                 visible.append(f"银行卡：{mask_text(account.name)} · {mask_text(account.masked_number)}")
                 trusted.append(
                     "用户选择的银行卡已按 card_id 及所属账户核验，"
-                    f"对应 account_token={account_token}；卡片实际状态请使用 get_card_status 查询。"
+                    f"对应 account_token={account_token}、card_id={card.id}；"
+                    "请将两者同时传给 get_card_status，核实此卡真实状态。"
                 )
             if selected_contact is not None:
                 contact_token = create_contact_token(session, user.id, selected_contact.id)
@@ -202,7 +212,7 @@ async def send_message(
             raise HTTPException(status_code=503, detail="对象引用服务暂时不可用") from None
     append_message(session, conversation, "user", display_content)
     if conversation.title == "新对话":
-        conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content)
+        conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content.split("\n\n[已引用对象：", 1)[0])
         session.add(conversation)
         session.commit()
 
@@ -219,6 +229,7 @@ async def send_message(
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
         collected: list[str] = []
         trusted_bill: dict | None = None
+        trusted_cards: dict | None = None
         audit_token = conversation_context.set(conversation_id)
         try:
             if injection.blocked:
@@ -246,16 +257,27 @@ async def send_message(
                     validated = MonthlyBill.model_validate(event.data["data"])
                     trusted_bill = validated.model_dump()
                     yield _sse({"type": "bill_result", "data": trusted_bill})
+                elif event.type == "card_result":
+                    validated_cards = CardStatusSnapshot.model_validate(event.data["data"])
+                    if selected_card is not None:
+                        selected_card_id = selected_card[0].id
+                        matching = [item for item in validated_cards.cards if item.card_id == selected_card_id]
+                        if len(matching) != 1:
+                            yield _sse({"type": "error", "message": "未能核对所选银行卡，请重试查询。"})
+                            return
+                        validated_cards = CardStatusSnapshot(cards=matching)
+                    trusted_cards = validated_cards.model_dump()
+                    yield _sse({"type": "card_result", "data": trusted_cards})
                 elif event.type == "action_required":
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
                     yield _sse({"type": "error", "message": event.data["message"]})
                     return
 
-            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill)
+            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards)
             yield _sse({"type": "done", "message": message})
         except asyncio.CancelledError:
-            _persist_assistant(conversation_id, "".join(collected), trusted_bill)
+            _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards)
             raise
         except Exception:
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})

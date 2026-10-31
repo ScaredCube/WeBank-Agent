@@ -28,6 +28,7 @@ class MessageOut(BaseModel):
     content: str
     created_at: datetime
     bill_result: dict | None = None
+    card_result: dict | None = None
 
 
 class AccountReference(BaseModel):
