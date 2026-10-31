@@ -22,7 +22,7 @@ export default function IPStudio() {
   return <div className="min-h-dvh bg-canvas px-5 py-8 text-ink sm:px-10 lg:px-16">
     <header className="mx-auto flex max-w-[1240px] items-center justify-between gap-4 border-b border-line pb-5">
       <Link to="/product-preview?state=empty" className="inline-flex items-center gap-2 text-sm font-medium text-muted hover:text-ink"><ArrowLeft size={16}/> 返回产品</Link>
-      <button type="button" onClick={toggle} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-panel px-4 text-sm focus-visible:outline-2 focus-visible:outline-jade-700">
+      <button type="button" onClick={() => toggle()} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-panel px-4 text-sm focus-visible:outline-2 focus-visible:outline-jade-700">
         {resolved === 'dark' ? <Sun size={16}/> : <Moon size={16}/>} {resolved === 'dark' ? '夜间主题' : '日间主题'}
       </button>
     </header>

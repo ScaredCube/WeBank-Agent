@@ -1,4 +1,5 @@
 import { Moon, Sun } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
 import { PenguinArt } from './PenguinArt'
 import { useTheme } from './theme-context'
 
@@ -6,10 +7,17 @@ import { useTheme } from './theme-context'
 export function ThemeToggle({ compact: _compact = false }: { compact?: boolean }) {
   const { resolved, toggle } = useTheme()
   const target = resolved === 'dark' ? '浅色' : '深色'
+  const reduced = useReducedMotion()
 
-  return <button
+  return <motion.button
     type="button"
-    onClick={toggle}
+    onClick={(event) => {
+      const rect = event.currentTarget.getBoundingClientRect()
+      toggle({ x: rect.right - 12, y: rect.bottom - 12 })
+    }}
+    whileHover={reduced ? undefined : { y: -2, scale: 1.025 }}
+    whileTap={reduced ? undefined : { scale: 0.91, y: 0 }}
+    transition={{ type: 'spring', stiffness: 560, damping: 28, mass: 0.65 }}
     aria-label={`切换至${target}主题`}
     title={`切换至${target}主题`}
     aria-pressed={resolved === 'dark'}
@@ -19,5 +27,5 @@ export function ThemeToggle({ compact: _compact = false }: { compact?: boolean }
     <span aria-hidden="true" className="absolute bottom-[4px] right-[3px] grid size-[18px] place-items-center rounded-full border border-line bg-panel text-muted">
       {resolved === 'dark' ? <Sun size={11} strokeWidth={2.3}/> : <Moon size={11} strokeWidth={2.3}/>}
     </span>
-  </button>
+  </motion.button>
 }

@@ -21,7 +21,7 @@ export function AssetSectionNavigation({ active, onSelect }: {
   }
 
   return (
-    <nav aria-label="资产分类" className="sticky top-0 z-10 -mx-5 mb-7 grid grid-cols-5 rounded-xl border border-line bg-panel p-1">
+    <nav aria-label="资产分类" className="sticky top-0 z-10 -mx-5 mb-7 grid grid-cols-5 rounded-xl border border-line bg-panel p-1 sm:-mx-7">
       {sections.map((section) => (
         <button
           key={section.id}

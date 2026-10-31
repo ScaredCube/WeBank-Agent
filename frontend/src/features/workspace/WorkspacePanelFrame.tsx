@@ -37,7 +37,7 @@ export function WorkspacePanelFrame({ panel, onClose, hidden, onTogglePrivacy, o
     if (!persistentSidebar) queueMicrotask(() => { if (target?.isConnected) target.focus() })
   }
   return <section id="workspace-panel" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); closePanel() } }} data-workspace-panel-surface={panel} className="absolute inset-0 z-30 flex flex-col bg-workspace text-ink lg:left-[var(--nav-visible-width)] lg:right-0 lg:border-l lg:border-line lg:shadow-[0_20px_60px_-40px_rgba(0,30,24,.5)] xl:relative xl:inset-auto xl:w-[var(--workspace-panel-width)] xl:shrink-0 xl:rounded-none xl:border-l-0 xl:border-r xl:shadow-none" aria-label={names[panel]}>
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line px-4">
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line px-5 sm:px-7">
       <button ref={closeRef} type="button" onClick={closePanel} className="grid size-10 place-items-center rounded-lg text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700" aria-label={panel === 'assets' ? '收起资产区' : '返回对话'}>
         <ArrowLeft size={18} className="lg:hidden" />
         <X size={18} className="hidden lg:block" />

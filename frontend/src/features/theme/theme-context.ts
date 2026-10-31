@@ -6,7 +6,7 @@ export interface ThemeContextValue {
   mode: ThemeMode
   resolved: ResolvedTheme
   setMode: (mode: ThemeMode) => void
-  toggle: () => void
+  toggle: (origin?: { x: number; y: number }) => void
 }
 
 export const ThemeContext = createContext<ThemeContextValue | null>(null)

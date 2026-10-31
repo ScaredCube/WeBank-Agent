@@ -417,3 +417,33 @@
 :root[data-theme="dark"] .bank-action-dialog .action-caution .text-muted {
   color: #d6c3a6;
 }
+
+/* The new color theme opens as a circular curtain from the small corner icon.
+   The old snapshot remains still, avoiding the browser's default whole-page fade. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+  ::view-transition-old(root) { z-index: 1; }
+  ::view-transition-new(root) { z-index: 2; }
+}
+
+/* Subtle feedback for the adjustable seams, never movement detached from the pointer. */
+.bank-app [role="separator"][aria-orientation="vertical"] svg {
+  transition: color 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+}
+.bank-app [role="separator"][aria-orientation="vertical"]:is(:hover, :focus-visible) svg {
+  transform: scale(1.14);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bank-reference-source { transition: translate 280ms cubic-bezier(.2,.8,.2,1); }
+  .bank-reference-source:hover { translate: 0 -2px; }
+  .bank-reference-source:active { translate: 0 0; }
+}

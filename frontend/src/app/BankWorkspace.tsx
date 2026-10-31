@@ -188,7 +188,7 @@ export function WorkspaceHeader({ title, isHome = false, sidebarOpen, onOpenSide
   onOpenSidebar: () => void
   status?: ReactNode
 }) {
-  return <header className="flex h-16 shrink-0 items-center gap-1 border-b border-line/70 bg-panel px-4 sm:gap-3 md:px-7">
+  return <header className="flex h-16 shrink-0 items-center gap-1 border-b border-line/70 bg-panel px-5 sm:gap-3 sm:px-7">
     <button id="open-sidebar-button" type="button" onClick={onOpenSidebar} aria-expanded={sidebarOpen} aria-controls="conversation-sidebar" aria-label="打开导航和会话列表" title="打开导航和会话列表" className="grid h-11 w-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden">
       <Menu className="size-[18px]" />
     </button>

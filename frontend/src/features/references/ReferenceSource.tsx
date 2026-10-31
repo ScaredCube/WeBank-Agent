@@ -1,5 +1,6 @@
 import type { ReactNode, DragEvent } from 'react'
 import { ArrowUpRight, Grip } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
 import { OBJECT_MIME, type BankObjectReference } from './bank-object-reference'
 
 export function ReferenceSource({ reference, onReference, children, disabled = false }: {
@@ -9,21 +10,25 @@ export function ReferenceSource({ reference, onReference, children, disabled = f
   disabled?: boolean
 }) {
   const enabled = Boolean(onReference) && !disabled
+  const reducedMotion = useReducedMotion()
   function startDrag(event: DragEvent<HTMLDivElement>) {
     if (!enabled) { event.preventDefault(); return }
     event.dataTransfer.effectAllowed = 'copy'
     event.dataTransfer.setData(OBJECT_MIME, JSON.stringify(reference))
     event.dataTransfer.setData('text/plain', `${reference.label} ${reference.detail}`)
   }
-  return <div className="group/reference relative" draggable={enabled} onDragStart={startDrag}>
+  return <div className="group/reference bank-reference-source relative" draggable={enabled} onDragStart={startDrag}>
     {children}
     {enabled && <div className="mt-1.5 flex items-center justify-between gap-2 px-1 pb-2">
       <span className="inline-flex items-center gap-1 text-[10px] text-muted"><Grip size={12} aria-hidden="true" />可拖入对话</span>
-      <button type="button" onClick={() => onReference?.(reference)}
+      <motion.button type="button" onClick={() => onReference?.(reference)}
+        whileHover={reducedMotion ? undefined : { x: 2 }}
+        whileTap={reducedMotion ? undefined : { scale: 0.94 }}
+        transition={{ type: "spring", stiffness: 540, damping: 30 }}
         aria-label={`引用到对话：${reference.label}`}
         className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold text-jade-800 transition-colors hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700">
         询问此项 <ArrowUpRight size={14} aria-hidden="true" />
-      </button>
+      </motion.button>
     </div>}
   </div>
 }
