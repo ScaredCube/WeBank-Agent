@@ -19,6 +19,7 @@ from app.schemas.chat import (
 )
 from app.schemas.bills import MonthlyBill
 from app.schemas.card_results import CardStatusSnapshot
+from app.schemas.tool_results import ToolResultBundle, ToolResultItem
 from app.services.chat_service import (
     append_message,
     create_conversation,
@@ -56,22 +57,34 @@ def _present_message(session: Session, message: Message, mask_content: bool = Tr
     if message.role != "assistant":
         return output
     snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
-    if snapshot is None or snapshot.kind not in ("monthly_bill", "card_status"):
+    if snapshot is None or snapshot.kind not in ("monthly_bill", "card_status", "tool_results"):
         return output
     try:
         payload = decrypt_result_snapshot(snapshot.ciphertext, snapshot.key_version)
-        if snapshot.kind == "monthly_bill":
-            return output.model_copy(update={"bill_result": MonthlyBill.model_validate(payload).model_dump()})
-        return output.model_copy(update={"card_result": CardStatusSnapshot.model_validate(payload).model_dump()})
+        if snapshot.kind == "tool_results":
+            validated = ToolResultBundle.model_validate(payload)
+        else:
+            validated = ToolResultBundle(items=[ToolResultItem(
+                kind=snapshot.kind, data=payload
+            )])
+        values = [item.model_dump() for item in validated.items]
+        first_bill = next((item["data"] for item in values if item["kind"] == "monthly_bill"), None)
+        first_card = next((item["data"] for item in values if item["kind"] == "card_status"), None)
+        return output.model_copy(update={
+            "tool_results": values, "bill_result": first_bill, "card_result": first_card,
+        })
     except (VaultError, ValueError):
         # History remains readable when old/retired encryption keys are unavailable.
         return output
 
 
 def _persist_assistant(conversation_id: int, content: str,
-                       bill_result: dict | None = None, card_result: dict | None = None) -> dict | None:
-    if not content:
+                       bill_result: dict | None = None, card_result: dict | None = None,
+                       tool_results: list[dict] | None = None) -> dict | None:
+    if not content and not (tool_results or bill_result or card_result):
         return None
+    if not content:
+        content = "已完成查询，结果见下方卡片。"
     with session_scope() as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
@@ -80,18 +93,20 @@ def _persist_assistant(conversation_id: int, content: str,
         session.add(message)
         conversation.updated_at = utcnow()
         session.flush()
-        if bill_result is not None:
-            # Persist only the schema-validated successful tool payload, not model text.
-            bill = MonthlyBill.model_validate(bill_result)
-            ciphertext, key_version = encrypt_result_snapshot(bill.model_dump())
+        data = tool_results if tool_results is not None else (
+            ([{"kind": "monthly_bill", "data": bill_result}] if bill_result is not None else [])
+            + ([{"kind": "card_status", "data": card_result}] if card_result is not None else [])
+        )
+        if data:
+            validated = ToolResultBundle.model_validate({"items": data})
+            if len(validated.items) == 1:
+                item = validated.items[0]
+                snapshot_kind, payload = item.kind, item.data
+            else:
+                snapshot_kind, payload = "tool_results", validated.model_dump()
+            ciphertext, key_version = encrypt_result_snapshot(payload)
             session.add(MessageResult(
-                message_id=message.id, kind="monthly_bill",
-                ciphertext=ciphertext, key_version=key_version))
-        elif card_result is not None:
-            snapshot = CardStatusSnapshot.model_validate(card_result)
-            ciphertext, key_version = encrypt_result_snapshot(snapshot.model_dump())
-            session.add(MessageResult(
-                message_id=message.id, kind="card_status",
+                message_id=message.id, kind=snapshot_kind,
                 ciphertext=ciphertext, key_version=key_version))
         session.commit()
         return _present_message(session, message, mask_content=False).model_dump(mode="json")
@@ -230,6 +245,7 @@ async def send_message(
         collected: list[str] = []
         trusted_bill: dict | None = None
         trusted_cards: dict | None = None
+        trusted_results: list[dict] = []
         audit_token = conversation_context.set(conversation_id)
         try:
             if injection.blocked:
@@ -256,6 +272,10 @@ async def send_message(
                     # returns; never accept card data from the model's delta text.
                     validated = MonthlyBill.model_validate(event.data["data"])
                     trusted_bill = validated.model_dump()
+                    if len(trusted_results) >= 8:
+                        yield _sse({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
+                        return
+                    trusted_results.append({"kind": "monthly_bill", "data": trusted_bill})
                     yield _sse({"type": "bill_result", "data": trusted_bill})
                 elif event.type == "card_result":
                     validated_cards = CardStatusSnapshot.model_validate(event.data["data"])
@@ -267,6 +287,10 @@ async def send_message(
                             return
                         validated_cards = CardStatusSnapshot(cards=matching)
                     trusted_cards = validated_cards.model_dump()
+                    if len(trusted_results) >= 8:
+                        yield _sse({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
+                        return
+                    trusted_results.append({"kind": "card_status", "data": trusted_cards})
                     yield _sse({"type": "card_result", "data": trusted_cards})
                 elif event.type == "action_required":
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
@@ -274,10 +298,10 @@ async def send_message(
                     yield _sse({"type": "error", "message": event.data["message"]})
                     return
 
-            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards)
+            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
             yield _sse({"type": "done", "message": message})
         except asyncio.CancelledError:
-            _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards)
+            _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
             raise
         except Exception:
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})

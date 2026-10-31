@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
@@ -11,7 +11,9 @@ import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
 import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
-import { CardStatusResult, cardStatusSnapshotSchema } from '@/features/intelligent-ui/CardStatusResult'
+import { CardStatusResult } from '@/features/intelligent-ui/CardStatusResult'
+import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/card-status-schema'
+import { messageToolResults } from '@/features/intelligent-ui/tool-results'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
@@ -19,6 +21,7 @@ import { PendingActionDialog } from '@/features/actions/PendingActionDialog'
 import { PendingActionBanner } from '@/features/actions/PendingActionBanner'
 import { useChatController } from '@/features/chat/useChatController'
 import { useAuth } from '@/lib/use-auth'
+import { api } from '@/lib/api'
 import { useHomeAccountOverview } from '@/features/home/useHomeAccountOverview'
 import type { StreamEvent } from '@/lib/sse'
 import type { CardOrigin } from '@/features/intelligent-ui/schema'
@@ -50,6 +53,30 @@ export function ChatPage() {
   const [actionPreparing, setActionPreparing] = useState(false)
   const [cardLossRecovery, setCardLossRecovery] = useState<ReadonlyMap<number, CardLossRecovery>>(() => new Map())
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
+  const referenceSearchCache = useRef<{key:string, promise:Promise<BankObjectReference[]>}|null>(null)
+  const searchBankReferences = useCallback((): Promise<BankObjectReference[]> => {
+    if (!token) return Promise.resolve([])
+    const key = token + ':' + workspaceRevision
+    if (referenceSearchCache.current?.key === key) return referenceSearchCache.current.promise
+    // The catalog supplies display candidates only. Permission checks remain server-side.
+    const promise = Promise.all([api.bankDashboard(token), api.cards(token)]).then(([dashboard,cards]) => [
+      ...dashboard.accounts
+        .filter(item => item.status === 'active' && item.currency === 'CNY')
+        .map(item => ({kind:'account' as const,id:item.account_id,label:item.name,detail:item.masked_number})),
+      ...cards
+        .filter(item => item.account_status === 'active')
+        .map(item => ({kind:'card' as const,id:item.card_id,label:item.account_name,detail:item.masked_number})),
+      ...dashboard.contacts
+        .filter(item => item.status === 'active')
+        .map(item => ({kind:'contact' as const,id:item.contact_id,label:item.name,
+          detail:item.bank_name + ' · ' + item.masked_phone})),
+    ]).catch(error => {
+      if (referenceSearchCache.current?.key === key) referenceSearchCache.current = null
+      throw error
+    })
+    referenceSearchCache.current = {key,promise}
+    return promise
+  },[token,workspaceRevision])
   const [privacyHidden, setPrivacyHidden] = useState(false)
   const [referencesByConversation, setReferencesByConversation] = useState<Record<string, BankObjectReference[]>>({})
   const [sourceNavigation, setSourceNavigation] = useState<SourceNavigation | null>(null)
@@ -78,7 +105,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { conversations, activeId, messages, resultCards, cardStatusResults, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
+  const { conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -142,6 +169,7 @@ export function ChatPage() {
     references={references}
     onReferenceDrop={addReference}
     onRemoveReference={removeReference}
+    onSearchReferences={searchBankReferences}
     onStop={receiving ? stopReceiving : undefined}
     disabled={sending || creatingConversation || loadingMessages || historyUnavailable || actionPreparing || !!pendingAction}
   />
@@ -237,12 +265,17 @@ export function ChatPage() {
               messages={messages}
               renderAfterMessage={(message) => {
                 if (message.role !== 'assistant') return null
-                const trustedBill = resultCards[message.id] ?? billResultCard(message.bill_result)
-                const trustedCard = cardStatusResults[message.id] ?? message.card_result
-                if (trustedBill) return <IntelligentCard value={trustedBill} hidden={privacyHidden}/>
-                if (cardStatusSnapshotSchema.safeParse(trustedCard).success)
-                  return <CardStatusResult value={trustedCard} hidden={privacyHidden}
-                    onOpenAssets={() => { setPanelOpenedByUser(true); setWorkspacePanel('assets') }}/>
+                const list = toolResultLists[message.id] ?? messageToolResults(message)
+                if (list.length) return <div className="space-y-4">{list.map((result, index) => {
+                  if (result.kind === 'monthly_bill') {
+                    const card = billResultCard(result.data)
+                    return card ? <IntelligentCard key={index} value={card} hidden={privacyHidden}/> : null
+                  }
+                  if (cardStatusSnapshotSchema.safeParse(result.data).success)
+                    return <CardStatusResult key={index} value={result.data} hidden={privacyHidden}
+                      onOpenAssets={() => { setPanelOpenedByUser(true); setWorkspacePanel('assets') }}/>
+                  return null
+                })}</div>
                 return null
               }}
               streamingText={streamingText}

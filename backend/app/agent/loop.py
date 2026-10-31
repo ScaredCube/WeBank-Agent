@@ -59,12 +59,17 @@ class AgentLoop:
                         tool_calls = chunk.tool_calls
                 if not tool_calls:
                     if tool_results:
-                        yield AgentEvent("delta", {"text": "\n\n".join(
-                            ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
-                             else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
-                             else render_tool_result(name, result))
-                            for name, result in tool_results
-                        )})
+                        fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
+                                              for name, result in tool_results)
+                        if fully_supported and len(tool_results) > 1:
+                            summary = f"已完成 {len(tool_results)} 项查询，结果见下方。"
+                        else:
+                            summary = "\n\n".join(
+                                ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
+                                 else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
+                                 else render_tool_result(name, result))
+                                for name, result in tool_results)
+                        yield AgentEvent("delta", {"text": summary})
                     else:
                         # Model text is untrusted: without a tool result it cannot
                         # establish any account, amount or transaction claim.

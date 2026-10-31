@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { findMention } from './mention'
 import { OBJECT_MIME, parseDroppedReference, referenceKindLabel, type BankObjectReference } from '@/features/references/bank-object-reference'
 
 interface ChatComposerProps {
@@ -15,14 +16,57 @@ interface ChatComposerProps {
   references?: BankObjectReference[]
   onReferenceDrop?: (value: BankObjectReference) => void
   onRemoveReference?: (value: BankObjectReference) => void
+  onSearchReferences?: () => Promise<BankObjectReference[]>
 }
 
 export function ChatComposer({ value, onChange, onSend, disabled = false, onStop, variant = 'conversation',
-  references = [], onReferenceDrop, onRemoveReference }: ChatComposerProps) {
+  references = [], onReferenceDrop, onRemoveReference, onSearchReferences }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
   const prefersReducedMotion = useReducedMotion()
   const [dropActive, setDropActive] = useState(false)
+  const [caret, setCaret] = useState(value.length)
+  const [suggestions, setSuggestions] = useState<BankObjectReference[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true)
+  const [suggestionsError, setSuggestionsError] = useState(false)
+  const [activeSuggestion, setActiveSuggestion] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
+  const mention = findMention(value, caret)
+  const showing = !!mention && !!onSearchReferences && !!onReferenceDrop && !disabled && !dismissed
+  const filtered = suggestions.filter(item => {
+    const query = mention?.query.trim().toLocaleLowerCase('zh-CN') ?? ''
+    return !query || [item.label, item.detail, referenceKindLabel(item.kind)].some(
+      text => text.toLocaleLowerCase('zh-CN').includes(query))
+  }).slice(0, 8)
+
+  useEffect(() => {
+    if (!showing || !onSearchReferences) return
+    let cancelled = false
+    Promise.resolve().then(() => onSearchReferences()).then(items => {
+      if (cancelled) return
+      setSuggestions(items)
+      setSuggestionsLoading(false)
+      setSuggestionsError(false)
+    }).catch(() => {
+      if (cancelled) return
+      setSuggestionsLoading(false)
+      setSuggestionsError(true)
+    })
+    return () => { cancelled = true }
+  }, [showing, onSearchReferences])
+
+  function insertMention(reference: BankObjectReference) {
+    if (!mention || !onReferenceDrop) return
+    onReferenceDrop(reference)
+    const next = value.slice(0, mention.start) + value.slice(mention.end)
+    onChange(next)
+    setCaret(mention.start)
+    setDismissed(true)
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(mention.start, mention.start)
+    })
+  }
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
@@ -83,15 +127,54 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
         </motion.span>)}
         </AnimatePresence>
       </div>}
+      {showing && <div role="listbox" id="bank-object-mentions"
+        aria-label="选择金融对象"
+        className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 max-h-72 overflow-auto rounded-2xl border border-line bg-panel p-1.5 shadow-[0_16px_45px_-22px_rgba(0,38,29,.4)]">
+        {suggestionsLoading && !suggestions.length ? <p className="px-3 py-3 text-xs text-muted">正在加载可引用对象…</p>
+        : suggestionsError ? <p className="px-3 py-3 text-xs text-muted">暂时无法获取对象，请稍后重试。</p>
+        : filtered.length ? filtered.map((item, index) => <button type="button" role="option"
+            aria-selected={index === activeSuggestion} key={item.kind+':'+item.id}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => insertMention(item)}
+            className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700',
+              index === activeSuggestion && 'bg-jade-50')}>
+            <span className="w-12 shrink-0 text-[11px] font-semibold text-jade-800">{referenceKindLabel(item.kind)}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-semibold text-ink">{item.label}</span>
+              <span className="block truncate text-[11px] text-muted">{item.detail}</span>
+            </span>
+          </button>) : <p className="px-3 py-3 text-xs text-muted">没有匹配的金融对象</p>}
+      </div>}
       <div className="flex items-end gap-2">
         <Textarea ref={textareaRef} rows={1} value={value}
           placeholder={references.length ? '围绕所选对象，想了解什么？' : '说说你想办的事'}
           aria-label="输入消息"
           className="chat-composer-input max-h-[168px] min-h-10 flex-1 overflow-y-auto py-2 pl-2 pr-2"
-          onChange={(event) => onChange(event.target.value)}
+          aria-controls={showing ? 'bank-object-mentions' : undefined}
+          aria-expanded={showing}
+          aria-autocomplete="list"
+          onChange={(event) => {
+            onChange(event.target.value)
+            setCaret(event.target.selectionStart)
+            setDismissed(false)
+            setActiveSuggestion(0)
+          }}
+          onClick={(event) => { setCaret(event.currentTarget.selectionStart); setDismissed(false) }}
+          onKeyUp={(event) => { if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) setCaret(event.currentTarget.selectionStart) }}
           onCompositionStart={() => { composingRef.current = true }}
           onCompositionEnd={() => { composingRef.current = false }}
           onKeyDown={(event) => {
+            if (showing && !composingRef.current) {
+              if (event.key === 'Escape') { event.preventDefault(); setDismissed(true); return }
+              if (event.key === 'ArrowDown') { event.preventDefault(); setActiveSuggestion(i => (i+1) % Math.max(filtered.length,1)); return }
+              if (event.key === 'ArrowUp') { event.preventDefault(); setActiveSuggestion(i => (i+Math.max(filtered.length,1)-1) % Math.max(filtered.length,1)); return }
+              if ((event.key === 'Enter' || event.key === 'Tab') && filtered.length > 0) {
+                event.preventDefault(); insertMention(filtered[Math.min(activeSuggestion,filtered.length-1)]); return
+              }
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); return // Never submit a half-resolved @ query.
+              }
+            }
             if (event.key === 'Enter' && !event.shiftKey && !composingRef.current) {
               event.preventDefault(); if (canSend) onSend()
             }

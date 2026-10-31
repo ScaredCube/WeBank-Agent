@@ -538,3 +538,53 @@ it('实时银行卡结果可进入资产面板', async () => {
   await user.click(screen.getByRole('button',{name:'查看资产'}))
   expect(screen.getByRole('region',{name:'资产'})).toBeTruthy()
 })
+
+it('历史消息的多 Tool 快照按照查询顺序展示两张结果卡', async () => {
+  const bill = {
+    month:'2026-01',account_name:'日常账户',masked_number:'**** 0001',currency:'CNY',
+    income_fen:300000,expense_fen:220000,consumption_fen:100000,consumption_count:2,
+    transfer_out_fen:120000,transfer_out_count:1,transfer_in_fen:0,transfer_in_count:0,
+    investment_out_fen:0,investment_out_count:0,investment_in_fen:0,investment_in_count:0,
+    categories:[{category:'餐饮',amount_fen:100000,count:2}],anomalies:[],ignored_count:0,
+  }
+  vi.mocked(api.messages).mockResolvedValue([
+    {id:10,role:'user',content:'查询两项金融信息',created_at:''},
+    {id:11,role:'assistant',content:'已完成两项查询',created_at:'',
+      tool_results:[
+        {kind:'monthly_bill',data:bill},
+        {kind:'card_status',data:{cards:[{card_id:1,account_name:'日常账户',
+          masked_number:'**** 0001',status:'active',account_status:'active'}]}},
+      ]},
+  ])
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  expect(await screen.findByText('2026-01 消费与收支')).toBeTruthy()
+  expect(screen.getByRole('region',{name:'银行卡状态结果'})).toBeTruthy()
+  const cards=document.querySelectorAll('[data-message-id="11"] [data-intelligent-card], [data-message-id="11"] [aria-label="银行卡状态结果"]')
+  expect(cards.length).toBe(2)
+  expect(cards[0].textContent).toContain('2026-01')
+  expect(cards[1].textContent).toContain('状态正常')
+})
+
+it('@搜索当前用户的联系人并按类型 ID 发给 Agent', async () => {
+  const user=userEvent.setup()
+  vi.spyOn(api,'bankDashboard').mockResolvedValue({...dashboard(),contacts:[
+    {contact_id:7,name:'张三',bank_name:'某银行',masked_phone:'138****0001',status:'active',can_transfer:true},
+  ]})
+  vi.spyOn(api,'cards').mockResolvedValue([
+    {card_id:3,account_name:'测试卡',masked_number:'****1234',status:'active',account_status:'active'},
+  ])
+  vi.spyOn(sse,'streamChat').mockImplementation(async options => {
+    expect(options.references?.map(x=>({kind:x.kind,id:x.id}))).toEqual([{kind:'contact',id:7}])
+    options.onEvent({type:'done',message:{id:99,role:'assistant',content:'查询完成',created_at:''}})
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第一段对话')
+  const input=screen.getByRole('textbox',{name:'输入消息'})
+  await user.type(input,'请协助 @张')
+  await user.click(await screen.findByRole('option',{name:/张三/}))
+  expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('张三')
+  expect((input as HTMLTextAreaElement).value).not.toContain('@张')
+  await user.type(input,' 查询信息')
+  await user.click(screen.getByRole('button',{name:'发送'}))
+  expect(await screen.findByText('查询完成')).toBeTruthy()
+})

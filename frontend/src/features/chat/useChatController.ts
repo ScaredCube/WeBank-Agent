@@ -3,8 +3,8 @@ import { ApiError, api, type Conversation, type Health, type Message } from '@/l
 import { streamChat, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
-import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/CardStatusResult'
-import type { CardDescription } from '@/features/intelligent-ui/schema'
+import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/card-status-schema'
+import { toolResultListSchema, type ToolResultItem } from '@/features/intelligent-ui/tool-results'
 import { composeReferenceContext, type BankObjectReference } from '@/features/references/bank-object-reference'
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
@@ -26,8 +26,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
-  const [resultCards, setResultCards] = useState<Record<number, CardDescription>>({})
-  const [cardStatusResults, setCardStatusResults] = useState<Record<number, unknown>>({})
+  const [toolResultLists, setToolResultLists] = useState<Record<number, ToolResultItem[]>>({})
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [receiving, setReceiving] = useState(false)
@@ -171,8 +170,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
 
       let conversationId = activeId
       let receivedText = ''
-      let pendingBill: CardDescription | null = null
-      let pendingCardStatus: unknown = null
+      const pendingToolResults: ToolResultItem[] = []
       let savedReply: Message | null = null
       let sessionExpired = false
       let sendFailure: string | null = null
@@ -217,10 +215,12 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           onEvent: (event) => {
             if (!isCurrent()) return
             if (event.type === 'bill_result') {
-              pendingBill = billResultCard(event.data)
+              if (billResultCard(event.data) && pendingToolResults.length < 8)
+                pendingToolResults.push({kind:'monthly_bill',data:event.data})
             } else if (event.type === 'card_result') {
               const result = cardStatusSnapshotSchema.safeParse(event.data)
-              pendingCardStatus = result.success ? result.data : null
+              if (result.success && pendingToolResults.length < 8)
+                pendingToolResults.push({kind:'card_status',data:result.data})
             } else if (event.type === 'delta') {
               receivedText += event.text
               setStreamingText((prev) => prev + event.text)
@@ -234,8 +234,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
               onActionRequired(event)
             } else if (event.type === 'done' && event.message) {
               savedReply = event.message
-              if (pendingBill) setResultCards(current => ({...current,[event.message!.id]:pendingBill!}))
-              if (pendingCardStatus) setCardStatusResults(current => ({...current,[event.message!.id]:pendingCardStatus}))
+              const validated = toolResultListSchema.safeParse(pendingToolResults)
+              if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[event.message!.id]:validated.data}))
               setMessages((prev) => [...prev, event.message as Message])
             }
           },
@@ -315,5 +315,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
     setDraft(value)
   }
   function stopReceiving() { receiveController.current?.abort() }
-  return { conversations, activeId, messages, resultCards, cardStatusResults, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }
