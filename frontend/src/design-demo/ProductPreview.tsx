@@ -140,7 +140,7 @@ export default function ProductPreview() {
   const { scrollRef, onScroll, resetScroll, hasNewContent, jumpToLatest } = useConversationScroll(currentMessages, '', false, false)
 
   function send() {
-    const content = composeReferenceContext(drafts[activeId] ?? '', referencesByConversation[activeId] ?? [])
+    const content = composeReferenceContext(drafts[activeId] ?? '', referencesByConversation[activeId] ?? [], true)
     if (!content || !canCompose) return
     setSourceTarget(null)
     const createdAt = new Date().toISOString()

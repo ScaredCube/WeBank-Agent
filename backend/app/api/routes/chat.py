@@ -4,13 +4,13 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.agent.loop import AgentLoop
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Conversation
+from app.models import Conversation, Account
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -30,7 +30,7 @@ from app.risk.injection import detect_injection
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
-from app.services.vault import VaultError
+from app.services.vault import VaultError, create_account_token
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
 
@@ -96,6 +96,17 @@ async def send_message(
 ) -> EventSourceResponse:
     conversation = _require_conversation(session, user, conversation_id)
 
+    # A client-side chip is NOT authorization. Resolve ownership and status before
+    # saving the message, minting a token or dispatching an Agent request.
+    selected_account = None
+    if payload.references:
+        account_id = payload.references[0].id
+        selected_account = session.exec(select(Account).where(
+            Account.id == account_id, Account.user_id == user.id,
+            Account.status == "active", Account.currency == "CNY")).first()
+        if selected_account is None:
+            raise HTTPException(status_code=400, detail="所选账户不可用，请重新选择")
+
     try:
         display_content, model_content, uncertain = redact_input(
             session, user.id, payload.content, request_context.get() or "")
@@ -103,6 +114,21 @@ async def send_message(
         session.rollback()
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
     injection = detect_injection(display_content)
+    if selected_account is not None and not injection.blocked and not uncertain:
+        try:
+            reference_token = create_account_token(session, user.id, selected_account.id)
+            # Only an authenticated server-side token is supplied to the model;
+            # the client cannot choose its value, identity or scope.
+            display_content += f"\n\n[已引用账户：{mask_text(selected_account.name)} · {mask_text(selected_account.masked_number)}]"
+            model_content += (
+                "\n\n[服务端已核验账户引用。对于本次选中账户的查询，"
+                f"请将 account_token={reference_token} 传给相应的只读银行工具；"
+                "仅允许工具结果确定金融事实，不要推测账户余额、流水或支出。]"
+            )
+            session.commit()
+        except VaultError:
+            session.rollback()
+            raise HTTPException(status_code=503, detail="账户引用服务暂时不可用") from None
     append_message(session, conversation, "user", display_content)
     if conversation.title == "新对话":
         conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content)
@@ -142,6 +168,8 @@ async def send_message(
                     text = event.data["text"]
                     collected.append(text)
                     yield _sse({"type": "delta", "text": text})
+                elif event.type == "bill_result":
+                    yield _sse({"type": "bill_result", **event.data})
                 elif event.type == "action_required":
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":

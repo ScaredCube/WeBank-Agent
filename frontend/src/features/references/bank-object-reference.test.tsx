@@ -13,7 +13,8 @@ it('引用最多五个且按类型与 ID 去重', () => {
   expect(addBankReference([account],account)).toHaveLength(1)
   expect(addBankReference([account],contact)).toHaveLength(2)
   const many = Array.from({length:7},(_,i)=>({...account,id:i+1}))
-  expect(many.reduce(addBankReference,[] as typeof many)).toHaveLength(5)
+  expect(many.reduce(addBankReference,[] as typeof many)).toHaveLength(1)
+  expect(addBankReference([account,contact],{...account,id:8}).map(item=>item.id)).toEqual([2,8])
 })
 
 it('任意外部拖拽内容不会被当作可信对象引用', () => {
@@ -25,11 +26,12 @@ it('任意外部拖拽内容不会被当作可信对象引用', () => {
 
 it('发给 Agent 的引用属于普通用户文本，明确要求服务端核实', () => {
   const content = composeReferenceContext('帮我看看账单',[account,contact])
-  expect(content).toContain('账户：日常账户')
+  expect(content).not.toContain('账户：日常账户')
   expect(content).toContain('联系人：小林')
   expect(content).toContain('不是授权令牌')
   expect(content).toContain('不要直接执行任何交易')
-  expect(presentReferenceMessage(content)).toEqual({text:'帮我看看账单',objects:['账户：日常账户','联系人：小林']})
+  expect(presentReferenceMessage(content)).toEqual({text:'帮我看看账单',objects:['联系人：小林']})
+  expect(presentReferenceMessage('查消费\n\n[已引用账户：日常账户 · ****8899]')).toEqual({text:'查消费',objects:['账户：日常账户 · ****8899']})
   expect(presentReferenceMessage('普通问题')).toEqual({text:'普通问题',objects:[]})
 })
 

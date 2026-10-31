@@ -182,6 +182,10 @@ class AgentLoop:
                         record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool,
                                           result="denied", reason_code=rejection_reason)
                     result = mask_value(result)
+                    # Trusted, user-scoped data produced by the existing GREEN tool,
+                    # not a chart or financial claim authored by the language model.
+                    if spec is not None and spec.name == "get_monthly_bill" and result.get("ok") and isinstance(result.get("data"), dict):
+                        yield AgentEvent("bill_result", {"data": result["data"]})
                     messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))

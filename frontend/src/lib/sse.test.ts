@@ -9,6 +9,25 @@ function response(chunks: string[]): Response {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('对话流协议', () => {
+
+  it('typed account reference 仅发送账户 ID，可信账单事件可在 done 前送达', async () => {
+    const bill = { month: '2026-10', expense_fen: 10000 }
+    const stream = [
+      'data: '+JSON.stringify({type:'bill_result',data:bill})+'\n\n',
+      'data: '+JSON.stringify({type:'done',message:null})+'\n\n',
+    ].join('')
+    const fetchMock = vi.fn().mockResolvedValue(response([stream]))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: StreamEvent[] = []
+    await streamChat({ token: 'test', conversationId: 5, content: '分析这个账户',
+      references: [{kind:'account',id:7,label:'日常账户',detail:'****8899'},
+                   {kind:'contact',id:2,label:'小林',detail:'银行'}],
+      onEvent: event => events.push(event) })
+    const [_, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body)).toEqual({content:'分析这个账户',references:[{kind:'account',id:7}]})
+    expect(events).toEqual([{type:'bill_result',data:bill},{type:'done',message:null}])
+  })
+
   it('跨分片还原内容并识别结束事件', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(['data: {"type":"del', 'ta","text":"你好"}\r\n\r\ndata: {"type":"done","message":null}\n\n'])))
     const events: StreamEvent[] = []

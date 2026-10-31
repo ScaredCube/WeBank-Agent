@@ -422,3 +422,56 @@ it('页面卸载时停止接收并且不再回读旧会话', async () => {
   await waitFor(() => expect(abortSeen).toBe(true))
   expect(api.messages).toHaveBeenCalledTimes(1)
 })
+
+it('引用真实账户并收到可信账单事件后，回答旁显示可隐藏的动态结果卡', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'bankDashboard').mockResolvedValue(dashboard())
+  vi.spyOn(api, 'cards').mockResolvedValue([])
+  vi.spyOn(sse, 'streamChat').mockImplementation(async (options) => {
+    expect(options.references).toEqual([{kind:'account',id:1,label:'测试卡',detail:'****1234'}])
+    options.onEvent({type:'bill_result',data:{
+      month:'2026-10',account_name:'测试卡',masked_number:'****1234',currency:'CNY',
+      income_fen:500000,expense_fen:200000,consumption_fen:145000,consumption_count:5,
+      transfer_out_fen:55000,transfer_out_count:1,transfer_in_fen:0,transfer_in_count:0,
+      investment_out_fen:0,investment_out_count:0,investment_in_fen:0,investment_in_count:0,
+      categories:[{category:'餐饮',amount_fen:145000,count:5}],anomalies:[],ignored_count:0,
+    }})
+    options.onEvent({type:'done',message:{id:99,role:'assistant',content:'账单已查询',created_at:new Date().toISOString()}})
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第一段对话')
+  await user.click(screen.getByRole('button',{name:'打开导航和会话列表'}))
+  await user.click(screen.getByRole('button',{name:'资产'}))
+  await user.click(await screen.findByRole('button',{name:'引用到对话：测试卡'}))
+  expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('测试卡')
+  await user.type(screen.getByRole('textbox',{name:'输入消息'}),'帮我分析这个账户十月的消费')
+  await user.click(screen.getByRole('button',{name:'发送'}))
+  expect(await screen.findByText('2026-10 消费与收支')).toBeTruthy()
+  expect(screen.getAllByText('¥1,450.00').length).toBeGreaterThan(0)
+  expect(screen.getByText(/银行账单工具/)).toBeTruthy()
+  expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('测试卡')
+  await user.click(screen.getAllByRole('button',{name:'隐藏金额'})[0])
+  expect(screen.queryByText('¥1,450.00')).toBeNull()
+})
+
+it('首次发送创建会话后保留账户上下文，供继续追问', async () => {
+  const user = userEvent.setup()
+  vi.mocked(api.conversations).mockResolvedValue([])
+  vi.spyOn(api, 'createConversation').mockResolvedValue(conversation(8))
+  vi.spyOn(api, 'bankDashboard').mockResolvedValue(dashboard())
+  vi.spyOn(api, 'cards').mockResolvedValue([])
+  vi.spyOn(sse, 'streamChat').mockImplementation(async options => {
+    expect(options.conversationId).toBe(8)
+    expect(options.references?.[0]).toMatchObject({kind:'account',id:1})
+    options.onEvent({type:'done',message:{id:222,role:'assistant',content:'已收到请求',created_at:new Date().toISOString()}})
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByRole('heading',{name:/今天/})
+  await user.click(screen.getByRole('button',{name:'打开导航和会话列表'}))
+  await user.click(screen.getByRole('button',{name:'资产'}))
+  await user.click(await screen.findByRole('button',{name:'引用到对话：测试卡'}))
+  await user.type(screen.getByRole('textbox',{name:'输入消息'}),'查询这个账户的消费')
+  await user.click(screen.getByRole('button',{name:'发送'}))
+  expect(await screen.findByText('已收到请求')).toBeTruthy()
+  expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('测试卡')
+})

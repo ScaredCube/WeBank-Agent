@@ -1,5 +1,6 @@
 import { ApiError, api, type Message } from '@/lib/api'
 import { notifyUnauthorized } from '@/lib/session'
+import type { BankObjectReference } from './bank-references'
 
 export interface PendingAction {
   id: number
@@ -13,6 +14,7 @@ export interface PendingAction {
 export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; message: Message | null }
+  | { type: 'bill_result'; data: unknown }
   | { type: 'error'; message: string }
   | { type: 'action_warning'; message: string }
   | {
@@ -34,6 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseEvent(value: unknown): StreamEvent | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
+  if (value.type === 'bill_result' && isRecord(value.data)) return {type:'bill_result', data:value.data}
   if (value.type === 'delta' && typeof value.text === 'string') return { type: 'delta', text: value.text }
   if (value.type === 'error' && typeof value.message === 'string') return { type: 'error', message: value.message }
   if (value.type === 'done') {
@@ -72,6 +75,7 @@ interface StreamChatOptions {
   token: string
   conversationId: number
   content: string
+  references?: BankObjectReference[]
   signal?: AbortSignal
   onEvent: (event: StreamEvent) => void
 }
@@ -98,6 +102,7 @@ export async function streamChat({
   token,
   conversationId,
   content,
+  references = [],
   signal,
   onEvent,
 }: StreamChatOptions) {
@@ -109,7 +114,9 @@ export async function streamChat({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ content }),
+      // Unsupported object kinds remain UI-only text hints until their backend
+      // reference contracts are introduced. Never send them as trusted IDs.
+      body: JSON.stringify({ content, references: references.filter(ref => ref.kind === 'account').map(ref => ({kind:'account',id:ref.id})) }),
       signal,
     },
   )

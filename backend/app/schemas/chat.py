@@ -1,4 +1,6 @@
-﻿from datetime import datetime
+from datetime import datetime
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,5 +27,13 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class AccountReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["account"]
+    id: int = Field(gt=0)
+
+
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1, max_length=4000)
+    references: list[AccountReference] = Field(default_factory=list, max_length=1)

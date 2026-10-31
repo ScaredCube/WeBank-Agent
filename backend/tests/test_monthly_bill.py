@@ -180,3 +180,71 @@ def test_bill_masks_sensitive_fields_in_api_model_and_chat(client, auth_headers,
     assert_private(events[-1]["message"]["content"])
     assert "需核对" in events[-1]["message"]["content"]
     assert_private(chat.text)
+
+def test_chat_typed_account_reference_is_verified_and_bill_result_is_trusted(client, auth_headers, monkeypatch):
+    """The selected account is resolved server-side, not from client-provided names or tokens."""
+    import re
+
+    with Session(get_engine()) as session:
+        account = session.exec(select(Account)).one()
+        account_id = account.id
+
+    class FakeLLM:
+        calls = 0
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                context = messages[-1]["content"]
+                match = re.search(r"<CARD_[A-Za-z]{32}>", context)
+                assert match is not None
+                assert "客户端" not in context
+                yield LLMChunk(tool_calls=[{"id": "bill-typed", "type": "function",
+                    "function": {"name": "get_monthly_bill",
+                                 "arguments": json.dumps({"month": "2026-01", "account_token": match.group()})}}])
+            else:
+                result = json.loads(messages[-1]["content"])
+                assert result["ok"]
+                assert result["data"]["expense_fen"] == 100000
+                yield LLMChunk(content="这段模型文字不能自行决定账单金额。")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    url = f"/api/chat/conversations/{conversation_id}/messages"
+    response = client.post(url, headers=auth_headers, json={"content": "分析这张账户的月度消费",
+        "references": [{"kind": "account", "id": account_id}]})
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert [event["type"] for event in events] == ["bill_result", "delta", "done"]
+    assert events[0]["data"]["expense_fen"] == 100000
+    assert "account_token" not in json.dumps(events[0], ensure_ascii=False)
+    assert "<CARD_" not in response.text
+    history = client.get(url, headers=auth_headers).json()
+    assert len(history) == 2
+    assert "[已引用账户：" in history[0]["content"]
+    assert "<CARD_" not in str(history)
+
+
+def test_chat_rejects_unowned_or_invalid_account_references_before_writing_message(client, auth_headers):
+    with Session(get_engine()) as session:
+        other = User(username="reference_other", password_hash="test", display_name="其他用户")
+        session.add(other)
+        session.commit()
+        session.refresh(other)
+        other_account = Account(user_id=other.id, name="其他人的账户", masked_number="****0000",
+                                currency="CNY", balance_fen=100, status="active")
+        session.add(other_account)
+        session.commit()
+        session.refresh(other_account)
+        foreign_id = other_account.id
+
+    conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    url = f"/api/chat/conversations/{conversation_id}/messages"
+    assert client.post(url, headers=auth_headers, json={"content": "查消费",
+        "references": [{"kind": "account", "id": foreign_id}]}).status_code == 400
+    assert client.post(url, headers=auth_headers, json={"content": "查消费",
+        "references": [{"kind": "contact", "id": 1}]}).status_code == 422
+    assert client.post(url, headers=auth_headers, json={"content": "查消费",
+        "references": [{"kind": "account", "id": -1}]}).status_code == 422
+    assert client.post(url, headers=auth_headers, json={"content": "查消费",
+        "references": [{"kind": "account", "id": 1}, {"kind": "account", "id": 2}]}).status_code == 422
+    assert client.get(url, headers=auth_headers).json() == []

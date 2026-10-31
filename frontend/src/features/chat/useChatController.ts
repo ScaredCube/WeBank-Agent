@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
 import { streamChat, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
+import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
+import type { CardDescription } from '@/features/intelligent-ui/schema'
 import { composeReferenceContext, type BankObjectReference } from '@/features/references/bank-object-reference'
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
@@ -12,16 +14,18 @@ function restoreDraftBefore(current: string, content: string): string {
   return `${content}\n${current}`
 }
 
-export function useChatController({ token, actionBlocked, onActionRequired, onActionWarning, onConversationChange }: {
+export function useChatController({ token, actionBlocked, onActionRequired, onActionWarning, onConversationChange, onConversationCreated }: {
   token: string | null
   actionBlocked: boolean
   onActionRequired: (event: ActionEvent) => void
   onActionWarning: (message: string) => void
   onConversationChange: () => void
+  onConversationCreated?: (conversationId: number) => void
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [resultCards, setResultCards] = useState<Record<number, CardDescription>>({})
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [receiving, setReceiving] = useState(false)
@@ -133,6 +137,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       drafts.current.set(activeId, draftDuringCreation.current)
       setConversations((prev) => [conversation, ...prev])
       setActiveId(conversation.id)
+      onConversationCreated?.(conversation.id)
       resetScroll('top')
       setMessages([])
       setHistoryUnavailable(false)
@@ -149,7 +154,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       creatingRef.current = false
       setCreatingConversation(false)
     }
-  }, [activeId, draft, loadingMessages, sending, actionBlocked, token, resetScroll, onConversationChange])
+  }, [activeId, draft, loadingMessages, sending, actionBlocked, token, resetScroll, onConversationChange, onConversationCreated])
 
   const sendMessage = useCallback(
     async (raw: string, references: BankObjectReference[] = []) => {
@@ -164,6 +169,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
 
       let conversationId = activeId
       let receivedText = ''
+      let pendingBill: CardDescription | null = null
       let savedReply: Message | null = null
       let sessionExpired = false
       let sendFailure: string | null = null
@@ -182,6 +188,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             ...prev.filter((item) => item.id !== conversation.id),
           ])
           setActiveId(conversation.id)
+          onConversationCreated?.(conversation.id)
         }
 
         const optimistic: Message = {
@@ -202,10 +209,13 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           token,
           conversationId,
           content,
+          references,
           signal: controller.signal,
           onEvent: (event) => {
             if (!isCurrent()) return
-            if (event.type === 'delta') {
+            if (event.type === 'bill_result') {
+              pendingBill = billResultCard(event.data)
+            } else if (event.type === 'delta') {
               receivedText += event.text
               setStreamingText((prev) => prev + event.text)
             } else if (event.type === 'error') {
@@ -218,6 +228,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
               onActionRequired(event)
             } else if (event.type === 'done' && event.message) {
               savedReply = event.message
+              if (pendingBill) setResultCards(current => ({...current,[event.message!.id]:pendingBill!}))
               setMessages((prev) => [...prev, event.message as Message])
             }
           },
@@ -231,7 +242,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             sessionExpired = true
             return
           }
-          if (err instanceof ApiError && err.status === 422) {
+          if (err instanceof ApiError && (err.status === 422 || err.status === 400)) {
             setDraft((current) => restoreDraftBefore(current, raw))
             if (optimisticId !== null) setMessages((previous) => previous.filter((message) => message.id !== optimisticId))
             setError(err.message)
@@ -289,7 +300,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (isCurrent()) { sendingRef.current = false; setSending(false) }
       }
     },
-    [activeId, actionBlocked, draft, historyUnavailable, loadingMessages, messages, sending, token, resetScroll, onActionRequired, onActionWarning],
+    [activeId, actionBlocked, draft, historyUnavailable, loadingMessages, messages, sending, token, resetScroll, onActionRequired, onActionWarning, onConversationCreated],
   )
 
   function updateDraft(value: string) {
@@ -297,5 +308,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
     setDraft(value)
   }
   function stopReceiving() { receiveController.current?.abort() }
-  return { conversations, activeId, messages, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { conversations, activeId, messages, resultCards, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

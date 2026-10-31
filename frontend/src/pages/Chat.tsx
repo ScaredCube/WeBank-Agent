@@ -9,6 +9,7 @@ import { ChatHome, type ChatStarterPrompt } from '@/components/chat/ChatHome'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
+import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
@@ -55,6 +56,15 @@ export function ChatPage() {
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false)
   const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => { setPendingAction(event); setActionOpen(true) }, [])
   const onConversationChange = useCallback(() => setSidebarOpen(false), [])
+  const onConversationCreated = useCallback((id: number) => {
+    setReferencesByConversation(current => {
+      const selected = current.new
+      if (!selected?.length) return current
+      const next = {...current,[String(id)]:selected}
+      delete next.new
+      return next
+    })
+  }, [])
   const onCardLossRecoveryChange = useCallback((cardId: number, recovery: CardLossRecovery | null) => {
     setCardLossRecovery((current) => {
       const next = new Map(current)
@@ -67,7 +77,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { conversations, activeId, messages, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange })
+  const { conversations, activeId, messages, resultCards, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -88,7 +98,11 @@ export function ChatPage() {
       const key = String(activeId ?? 'new')
       setReferencesByConversation(current => {
         if (!(key in current)) return current
-        const next = {...current}; delete next[key]; return next
+        const next = {...current}
+        // Keep the verified account as the context of the current conversation.
+        // Other object types currently have only the legacy text bridge.
+        next[key] = current[key].filter(ref => ref.kind === 'account')
+        return next
       })
     }
     wasSending.current = sending
@@ -235,6 +249,7 @@ export function ChatPage() {
               key={activeId ?? 'new'}
               scrollRoot={scrollRef}
               messages={messages}
+              renderAfterMessage={(message) => message.role === 'assistant' && resultCards[message.id] ? <IntelligentCard value={resultCards[message.id]} hidden={privacyHidden}/> : null}
               streamingText={streamingText}
               thinking={sending && !streamingText}
               focusMessageId={sourceTarget?.conversationId === activeId ? sourceTarget.messageId : null}

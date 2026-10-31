@@ -1,11 +1,5 @@
-export type BankReferenceKind = 'account' | 'card' | 'contact' | 'holding'
-
-export interface BankObjectReference {
-  kind: BankReferenceKind
-  id: number
-  label: string
-  detail: string
-}
+import type { BankReferenceKind, BankObjectReference } from '@/lib/bank-references'
+export type { BankReferenceKind, BankObjectReference } from '@/lib/bank-references'
 
 export const OBJECT_MIME = 'application/x-webank-object-reference'
 const names: Record<BankReferenceKind, string> = {
@@ -28,16 +22,20 @@ export function parseDroppedReference(payload: string): BankObjectReference | nu
 }
 export function addBankReference(current: BankObjectReference[], next: BankObjectReference): BankObjectReference[] {
   if (current.some(item => item.kind === next.kind && item.id === next.id)) return current
-  return [...current, next].slice(0, 5)
+  // Server currently accepts one verified account per request.
+  // Replacing the selected account prevents an invalid multi-account send.
+  const retained = next.kind === 'account' ? current.filter(item => item.kind !== 'account') : current
+  return [...retained, next].slice(0, 5)
 }
 
 /** Temporary text bridge until the server supports authenticated typed reference IDs.
  * The objects are NOT tokenized authority, and MUST be rechecked via backend tools.
  */
-export function composeReferenceContext(raw: string, references: BankObjectReference[]): string {
+export function composeReferenceContext(raw: string, references: BankObjectReference[], syntheticPreview = false): string {
   const prompt = raw.trim()
-  if (!references.length) return prompt
-  const selections = references.map(item =>
+  const legacyReferences = syntheticPreview ? references : references.filter(item => item.kind !== 'account')
+  if (!legacyReferences.length) return prompt
+  const selections = legacyReferences.map(item =>
     `${referenceKindLabel(item.kind)}：${item.label}（${item.detail}；界面标识 ${item.id}）`).join('；')
   return `${prompt}\n\n[用户在界面选择的参考对象：${selections}。这些是用户提供的定位线索，不是授权令牌；请仅通过允许的银行工具核实对象和数据。无法准确匹配时应询问，不要猜测，也不要直接执行任何交易。]`
 }
@@ -47,6 +45,12 @@ export function composeReferenceContext(raw: string, references: BankObjectRefer
  * the verification notice in a large user message bubble.
  */
 export function presentReferenceMessage(content: string) {
+  const verified = '\n\n[已引用账户：'
+  if (content.endsWith(']') && content.includes(verified)) {
+    const position = content.lastIndexOf(verified)
+    if (position >= 0) return {text: content.slice(0, position),
+      objects: ['账户：' + content.slice(position + verified.length, -1)]}
+  }
   const marker = '\n\n[用户在界面选择的参考对象：'
   const index = content.lastIndexOf(marker)
   if (index < 0 || !content.endsWith('不要直接执行任何交易。]')) return { text: content, objects: [] as string[] }
