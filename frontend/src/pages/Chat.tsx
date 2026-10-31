@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
@@ -51,7 +51,6 @@ export function ChatPage() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
   const [privacyHidden, setPrivacyHidden] = useState(false)
   const [referencesByConversation, setReferencesByConversation] = useState<Record<string, BankObjectReference[]>>({})
-  const wasSending = useRef(false)
   const [sourceNavigation, setSourceNavigation] = useState<SourceNavigation | null>(null)
 
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false)
@@ -93,21 +92,6 @@ export function ChatPage() {
   const removeReference = useCallback((value: BankObjectReference) => {
     setReferencesByConversation(current => ({...current,[referenceKey]:(current[referenceKey] ?? []).filter(item => !(item.id === value.id && item.kind === value.kind))}))
   },[referenceKey])
-
-  useEffect(() => {
-    if (wasSending.current && !sending && !draft && !error) {
-      const key = String(activeId ?? 'new')
-      setReferencesByConversation(current => {
-        if (!(key in current)) return current
-        const next = {...current}
-        // Keep the verified account as the context of the current conversation.
-        // Other object types currently have only the legacy text bridge.
-        next[key] = current[key].filter(ref => ref.kind === 'account')
-        return next
-      })
-    }
-    wasSending.current = sending
-  }, [sending, draft, error, activeId])
 
   const openSavedSource = useCallback((origin: CardOrigin) => {
     const sourceConversation = conversations.find((item) => item.id === origin.conversationId)

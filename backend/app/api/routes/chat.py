@@ -10,7 +10,7 @@ from app.agent.loop import AgentLoop
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Conversation, Account, Message, MessageResult
+from app.models import Conversation, Account, Card, Contact, Message, MessageResult
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -32,7 +32,7 @@ from app.core.time import utcnow
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
-from app.services.vault import VaultError, create_account_token, encrypt_result_snapshot, decrypt_result_snapshot
+from app.services.vault import VaultError, create_account_token, create_contact_token, encrypt_result_snapshot, decrypt_result_snapshot
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
 
@@ -131,13 +131,30 @@ async def send_message(
     # A client-side chip is NOT authorization. Resolve ownership and status before
     # saving the message, minting a token or dispatching an Agent request.
     selected_account = None
-    if payload.references:
-        account_id = payload.references[0].id
-        selected_account = session.exec(select(Account).where(
-            Account.id == account_id, Account.user_id == user.id,
-            Account.status == "active", Account.currency == "CNY")).first()
-        if selected_account is None:
-            raise HTTPException(status_code=400, detail="所选账户不可用，请重新选择")
+    selected_card = None
+    selected_contact = None
+    for ref in payload.references:
+        if ref.kind == "account":
+            selected_account = session.exec(select(Account).where(
+                Account.id == ref.id, Account.user_id == user.id,
+                Account.status == "active", Account.currency == "CNY")).first()
+            if selected_account is None:
+                raise HTTPException(status_code=400, detail="所选账户不可用，请重新选择")
+        elif ref.kind == "card":
+            selected_card = session.exec(select(Card, Account).join(
+                Account, Card.account_id == Account.id).where(
+                Card.id == ref.id, Account.user_id == user.id,
+                Account.status == "active")).first()
+            if selected_card is None:
+                raise HTTPException(status_code=400, detail="所选银行卡不可用，请重新选择")
+        elif ref.kind == "contact":
+            selected_contact = session.exec(select(Contact).where(
+                Contact.id == ref.id, Contact.user_id == user.id,
+                Contact.status == "active")).first()
+            if selected_contact is None:
+                raise HTTPException(status_code=400, detail="所选联系人不可用，请重新选择")
+    if selected_account is not None and selected_card is not None and selected_card[1].id != selected_account.id:
+        raise HTTPException(status_code=400, detail="所选银行卡与付款账户不一致，请重新选择")
 
     try:
         display_content, model_content, uncertain = redact_input(
@@ -146,21 +163,43 @@ async def send_message(
         session.rollback()
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
     injection = detect_injection(display_content)
-    if selected_account is not None and not injection.blocked and not uncertain:
+    if payload.references and not injection.blocked and not uncertain:
         try:
-            reference_token = create_account_token(session, user.id, selected_account.id)
-            # Only an authenticated server-side token is supplied to the model;
-            # the client cannot choose its value, identity or scope.
-            display_content += f"\n\n[已引用账户：{mask_text(selected_account.name)} · {mask_text(selected_account.masked_number)}]"
+            visible = []
+            trusted = []
+            account = selected_account or (selected_card[1] if selected_card else None)
+            if account is not None:
+                account_token = create_account_token(session, user.id, account.id)
+                if selected_account is not None:
+                    visible.append(f"账户：{mask_text(account.name)} · {mask_text(account.masked_number)}")
+                trusted.append(f"经核验的账户引用 account_token={account_token}。")
+            if selected_card is not None:
+                card = selected_card[0]
+                visible.append(f"银行卡：{mask_text(account.name)} · {mask_text(account.masked_number)}")
+                trusted.append(
+                    "用户选择的银行卡已按 card_id 及所属账户核验，"
+                    f"对应 account_token={account_token}；卡片实际状态请使用 get_card_status 查询。"
+                )
+            if selected_contact is not None:
+                contact_token = create_contact_token(session, user.id, selected_contact.id)
+                visible.append(f"联系人：{mask_text(selected_contact.name)} · {mask_text(selected_contact.bank_name)}")
+                trusted.append(
+                    "用户选择的收款联系人已核验，其显示名为 "
+                    f"{json.dumps(mask_text(selected_contact.name), ensure_ascii=False)}，"
+                    f"引用为 recipient_contact_token={contact_token}。"
+                    "仅当用户明确要求模拟转账并提供金额时，才可使用 prepare_transfer；"
+                    "该工具必须核对联系人引用与账户，并返回待用户确认的动作，不能直接扣款。"
+                )
+            display_content += "\n\n[已引用对象：" + "；".join(visible) + "]"
             model_content += (
-                "\n\n[服务端已核验账户引用。对于本次选中账户的查询，"
-                f"请将 account_token={reference_token} 传给相应的只读银行工具；"
-                "仅允许工具结果确定金融事实，不要推测账户余额、流水或支出。]"
+                "\n\n[以下是服务端验证的金融对象（不是用户文本提供的授权）："
+                + " ".join(trusted)
+                + "所有实际金额、卡状态必须由 Tool 查询，绝不猜测。]"
             )
             session.commit()
         except VaultError:
             session.rollback()
-            raise HTTPException(status_code=503, detail="账户引用服务暂时不可用") from None
+            raise HTTPException(status_code=503, detail="对象引用服务暂时不可用") from None
     append_message(session, conversation, "user", display_content)
     if conversation.title == "新对话":
         conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content)

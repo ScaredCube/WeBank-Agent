@@ -11,7 +11,7 @@ from app.agent.registry import RiskLevel, ToolSpec
 from app.core.config import settings
 from app.core.time import utcnow
 from app.db.session import get_engine
-from app.models import Account, Card, DataToken, PendingAction, Transaction, TransferRequest, TransferTokenBinding, VerificationSession
+from app.models import Account, Card, Contact, DataToken, PendingAction, Transaction, TransferRequest, TransferTokenBinding, VerificationSession
 from app.risk.engine import assess_tool
 from app.schemas.transfers import PrepareTransferRequest
 from app.services.action_service import create_pending_action, create_simulated_red_action, get_pending_action
@@ -58,7 +58,8 @@ def _require_card_available(session: Session, account_id: int) -> None:
 
 
 def _prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_token: str | None = None,
-                      target_token: str | None = None, model_request: bool = False) -> dict:
+                      target_token: str | None = None, recipient_contact_token: str | None = None,
+                      model_request: bool = False) -> dict:
     """Prepare a simulated transfer; never trust a model's risk or daily total."""
     with Session(get_engine()) as session:
         _begin_locked(session)
@@ -70,8 +71,19 @@ def _prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_t
                     raise TransferError("请先指定付款账户")
                 source_token = create_account_token(session, user_id, accounts[0].id)
             account_id = resolve(session, user_id, source_token, "account", scope)
-            phone = resolve(session, user_id, target_token, "phone_input", scope) if target_token else None
-            payload = payload.model_copy(update={"account_id": account_id, "recipient_phone": phone})
+            if recipient_contact_token and target_token:
+                raise TransferError("不能同时选择联系人和临时收款号码")
+            if recipient_contact_token:
+                contact_id = resolve(session, user_id, recipient_contact_token, "contact", scope)
+                contact = session.get(Contact, contact_id)
+                if contact is None or contact.user_id != user_id or contact.status != "active":
+                    raise TransferError("收款联系人不可用")
+                # Always overwrite model-supplied recipient_name with the authenticated record.
+                payload = payload.model_copy(update={
+                    "account_id": account_id, "recipient_name": contact.name, "recipient_phone": None})
+            else:
+                phone = resolve(session, user_id, target_token, "phone_input", scope) if target_token else None
+                payload = payload.model_copy(update={"account_id": account_id, "recipient_phone": phone})
         else:
             source_token = create_account_token(session, user_id, payload.account_id)
             resolve(session, user_id, source_token, "account", scope)
@@ -131,8 +143,10 @@ def _prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_t
         session.add(transfer)
         session.flush()
         source = session.exec(select(DataToken).where(DataToken.token == source_token, DataToken.user_id == user_id)).one()
-        target = (session.exec(select(DataToken).where(DataToken.token == target_token, DataToken.user_id == user_id)).one()
-                  if target_token else None)
+        effective_target_token = recipient_contact_token if model_request and recipient_contact_token else target_token
+        target = (session.exec(select(DataToken).where(
+            DataToken.token == effective_target_token, DataToken.user_id == user_id)).one()
+                  if effective_target_token else None)
         session.add(TransferTokenBinding(transfer_id=transfer.id, source_token_id=source.id,
                                          target_token_id=target.id if target else None, request_scope=scope))
         record(session, user_id=user_id, event_type="risk_assessed", action_id=action.id,
@@ -197,8 +211,16 @@ def _execute_transfer(user_id: int, transfer_id: int) -> dict:
             target = session.get(DataToken, binding.target_token_id)
             if target is None:
                 raise VaultError()
-            phone = resolve(session, user_id, target.token, "phone_input", binding.request_scope)
-            if not hmac.compare_digest(_phone_digest(phone) or "", transfer.recipient_phone_digest or ""):
+            if target.kind == "contact":
+                contact_id = resolve(session, user_id, target.token, "contact", binding.request_scope)
+                contact = session.get(Contact, contact_id)
+                if contact is None or contact.user_id != user_id or mask_text(contact.name) != transfer.recipient_name:
+                    raise VaultError()
+            elif target.kind == "phone_input":
+                phone = resolve(session, user_id, target.token, "phone_input", binding.request_scope)
+                if not hmac.compare_digest(_phone_digest(phone) or "", transfer.recipient_phone_digest or ""):
+                    raise VaultError()
+            else:
                 raise VaultError()
         account = session.exec(select(Account).where(
             Account.id == transfer.account_id, Account.user_id == user_id,
@@ -262,10 +284,11 @@ def _record_failure(user_id: int, event_type: str, exc: Exception, *, transfer_i
 
 
 def prepare_transfer(user_id: int, payload: PrepareTransferRequest, *, source_token: str | None = None,
-                     target_token: str | None = None, model_request: bool = False) -> dict:
+                     target_token: str | None = None, recipient_contact_token: str | None = None,
+                     model_request: bool = False) -> dict:
     try:
         return _prepare_transfer(user_id, payload, source_token=source_token, target_token=target_token,
-                                 model_request=model_request)
+                                 recipient_contact_token=recipient_contact_token, model_request=model_request)
     except VaultError:
         with Session(get_engine()) as session:
             record(session, user_id=user_id, event_type="token_resolve_denied", result="denied",

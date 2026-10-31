@@ -114,9 +114,11 @@ export async function streamChat({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      // Unsupported object kinds remain UI-only text hints until their backend
-      // reference contracts are introduced. Never send them as trusted IDs.
-      body: JSON.stringify({ content, references: references.filter(ref => ref.kind === 'account').map(ref => ({kind:'account',id:ref.id})) }),
+      // Only typed IDs cross the trust boundary; names and display labels are ignored.
+      // The server validates ownership, state and card-to-account relationships.
+      body: JSON.stringify({ content, references: references
+        .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
+        .map(ref => ({ kind: ref.kind, id: ref.id })) }),
       signal,
     },
   )

@@ -24,7 +24,7 @@ describe('对话流协议', () => {
                    {kind:'contact',id:2,label:'小林',detail:'银行'}],
       onEvent: event => events.push(event) })
     const [_, init] = fetchMock.mock.calls[0]
-    expect(JSON.parse(init.body)).toEqual({content:'分析这个账户',references:[{kind:'account',id:7}]})
+    expect(JSON.parse(init.body)).toEqual({content:'分析这个账户',references:[{kind:'account',id:7},{kind:'contact',id:2}]})
     expect(events).toEqual([{type:'bill_result',data:bill},{type:'done',message:null}])
   })
 

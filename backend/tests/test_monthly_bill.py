@@ -223,7 +223,7 @@ def test_chat_typed_account_reference_is_verified_and_bill_result_is_trusted(cli
     assert "<CARD_" not in response.text
     history = client.get(url, headers=auth_headers).json()
     assert len(history) == 2
-    assert "[已引用账户：" in history[0]["content"]
+    assert "[已引用对象：账户：" in history[0]["content"]
     assert "<CARD_" not in str(history)
 
 
@@ -245,7 +245,7 @@ def test_chat_rejects_unowned_or_invalid_account_references_before_writing_messa
     assert client.post(url, headers=auth_headers, json={"content": "查消费",
         "references": [{"kind": "account", "id": foreign_id}]}).status_code == 400
     assert client.post(url, headers=auth_headers, json={"content": "查消费",
-        "references": [{"kind": "contact", "id": 1}]}).status_code == 422
+        "references": [{"kind": "untrusted", "id": 1}]}).status_code == 422
     assert client.post(url, headers=auth_headers, json={"content": "查消费",
         "references": [{"kind": "account", "id": -1}]}).status_code == 422
     assert client.post(url, headers=auth_headers, json={"content": "查消费",

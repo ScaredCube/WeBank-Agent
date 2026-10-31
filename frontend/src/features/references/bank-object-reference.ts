@@ -22,18 +22,17 @@ export function parseDroppedReference(payload: string): BankObjectReference | nu
 }
 export function addBankReference(current: BankObjectReference[], next: BankObjectReference): BankObjectReference[] {
   if (current.some(item => item.kind === next.kind && item.id === next.id)) return current
-  // Server currently accepts one verified account per request.
-  // Replacing the selected account prevents an invalid multi-account send.
-  const retained = next.kind === 'account' ? current.filter(item => item.kind !== 'account') : current
-  return [...retained, next].slice(0, 5)
+  // The server accepts at most one account, card, and contact for a request.
+  const retained = current.filter(item => item.kind !== next.kind)
+  return [...retained, next].slice(-5)
 }
 
-/** Temporary text bridge until the server supports authenticated typed reference IDs.
- * The objects are NOT tokenized authority, and MUST be rechecked via backend tools.
+/** The legacy text bridge is only for unsupported holding references.
+ * Account, card and contact references are now typed and resolved server-side.
  */
 export function composeReferenceContext(raw: string, references: BankObjectReference[], syntheticPreview = false): string {
   const prompt = raw.trim()
-  const legacyReferences = syntheticPreview ? references : references.filter(item => item.kind !== 'account')
+  const legacyReferences = syntheticPreview ? references : references.filter(item => item.kind === 'holding')
   if (!legacyReferences.length) return prompt
   const selections = legacyReferences.map(item =>
     `${referenceKindLabel(item.kind)}：${item.label}（${item.detail}；界面标识 ${item.id}）`).join('；')
@@ -45,6 +44,14 @@ export function composeReferenceContext(raw: string, references: BankObjectRefer
  * the verification notice in a large user message bubble.
  */
 export function presentReferenceMessage(content: string) {
+  const typed = '\n\n[已引用对象：'
+  if (content.endsWith(']') && content.includes(typed)) {
+    const position = content.lastIndexOf(typed)
+    const description = content.slice(position + typed.length, -1)
+    const objects = description.split('；').filter(item =>
+      /^(账户|银行卡|联系人)：.{1,150}$/.test(item))
+    if (objects.length) return {text:content.slice(0,position),objects}
+  }
   const verified = '\n\n[已引用账户：'
   if (content.endsWith(']') && content.includes(verified)) {
     const position = content.lastIndexOf(verified)
