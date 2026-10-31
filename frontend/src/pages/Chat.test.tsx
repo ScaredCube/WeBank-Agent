@@ -44,7 +44,7 @@ afterEach(() => {
 it('健康检查失败时不一直显示连接中', async () => {
   vi.mocked(api.health).mockRejectedValueOnce(new Error('不可用'))
   render(<MemoryRouter><ChatPage /></MemoryRouter>)
-  expect(await screen.findByText('状态不可用')).toBeTruthy()
+  expect(await screen.findByText('无法读取连接状态，仍可尝试发送。')).toBeTruthy()
   expect(screen.queryByText('连接中')).toBeNull()
 })
 
@@ -197,7 +197,7 @@ it('首次发送等待创建会话时继续输入的草稿不会被清除', asyn
   vi.spyOn(api, 'createConversation').mockImplementation(() => new Promise((resolve) => { finishCreate = resolve }))
   vi.spyOn(sse, 'streamChat').mockImplementation(() => new Promise(() => {}))
   render(<MemoryRouter><ChatPage /></MemoryRouter>)
-  await screen.findByRole('heading', { name: /让金融事务/ })
+  await screen.findByRole('heading', { name: /今天，想完成什么/ })
   const composer = screen.getByPlaceholderText('说说你想办的事') as HTMLTextAreaElement
   await user.type(composer, '第一条')
   await user.click(screen.getByRole('button', { name: '发送' }))
@@ -398,7 +398,7 @@ it('页面卸载后迟到的会话创建不会继续发送消息', async () => {
   vi.spyOn(api, 'createConversation').mockReturnValue(pending)
   const stream = vi.spyOn(sse, 'streamChat').mockResolvedValue()
   const page = render(<MemoryRouter><ChatPage /></MemoryRouter>)
-  await screen.findByRole('heading', { name: /让金融事务/ })
+  await screen.findByRole('heading', { name: /今天，想完成什么/ })
   await user.type(screen.getByPlaceholderText('说说你想办的事'), '测试消息')
   await user.click(screen.getByRole('button', { name: '发送' }))
   page.unmount()

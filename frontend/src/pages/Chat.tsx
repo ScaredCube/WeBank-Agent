@@ -1,11 +1,11 @@
-﻿import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 
 import { BankWorkspace, WorkspaceHeader } from '@/app/BankWorkspace'
 import { initialWorkspacePanel } from '@/app/workspace-state'
-import { ChatHome } from '@/components/chat/ChatHome'
+import { ChatHome, type ChatStarterPrompt } from '@/components/chat/ChatHome'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
@@ -13,17 +13,26 @@ import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
 import { PendingActionDialog } from '@/features/actions/PendingActionDialog'
+import { PendingActionBanner } from '@/features/actions/PendingActionBanner'
 import { useChatController } from '@/features/chat/useChatController'
 import { useAuth } from '@/lib/use-auth'
+import { useHomeAccountOverview } from '@/features/home/useHomeAccountOverview'
 import type { StreamEvent } from '@/lib/sse'
 import type { CardOrigin } from '@/features/intelligent-ui/schema'
 import { cn } from '@/lib/utils'
+import { addBankReference, type BankObjectReference } from '@/features/references/bank-object-reference'
 
 type SourceNavigationFeedback = { type: 'status' | 'error'; message: string }
 type SourceNavigation = {
   origin: CardOrigin
   status: 'opening' | 'located' | 'conversation-missing' | 'message-missing'
 }
+
+const bankingStarters: readonly ChatStarterPrompt[] = [
+  { label: '查看本月收支', prompt: '请帮我查询本月账单，分析主要支出分类。', art: "chart" },
+  { label: '检查订阅扣费', prompt: '帮我查看订阅与即将续费的项目，并识别可能的重复订阅。', art: "receipt" },
+  { label: '准备一笔转账', prompt: '我想准备一笔转账，请帮我确认需要提供哪些信息。', art: "card" },
+]
 
 export function ChatPage() {
   const { token, user, logout } = useAuth()
@@ -39,6 +48,8 @@ export function ChatPage() {
   const [cardLossRecovery, setCardLossRecovery] = useState<ReadonlyMap<number, CardLossRecovery>>(() => new Map())
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
   const [privacyHidden, setPrivacyHidden] = useState(false)
+  const [referencesByConversation, setReferencesByConversation] = useState<Record<string, BankObjectReference[]>>({})
+  const wasSending = useRef(false)
   const [sourceNavigation, setSourceNavigation] = useState<SourceNavigation | null>(null)
 
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false)
@@ -57,6 +68,31 @@ export function ChatPage() {
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
   const { conversations, activeId, messages, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange })
+
+  const referenceKey = String(activeId ?? 'new')
+  const references = referencesByConversation[referenceKey] ?? []
+  const addReference = useCallback((next: BankObjectReference) => {
+    setReferencesByConversation(current => {
+      const nextMap = {...current,[referenceKey]:addBankReference(current[referenceKey] ?? [],next)}
+      if (referenceKey !== 'new') delete nextMap.new
+      return nextMap
+    })
+    if (window.matchMedia?.('(max-width: 1279px)').matches) setWorkspacePanel(null)
+  },[referenceKey])
+  const removeReference = useCallback((value: BankObjectReference) => {
+    setReferencesByConversation(current => ({...current,[referenceKey]:(current[referenceKey] ?? []).filter(item => !(item.id === value.id && item.kind === value.kind))}))
+  },[referenceKey])
+
+  useEffect(() => {
+    if (wasSending.current && !sending && !draft && !error) {
+      const key = String(activeId ?? 'new')
+      setReferencesByConversation(current => {
+        if (!(key in current)) return current
+        const next = {...current}; delete next[key]; return next
+      })
+    }
+    wasSending.current = sending
+  }, [sending, draft, error, activeId])
 
   const openSavedSource = useCallback((origin: CardOrigin) => {
     const sourceConversation = conversations.find((item) => item.id === origin.conversationId)
@@ -97,10 +133,15 @@ export function ChatPage() {
 
   const activeConversation = conversations.find((item) => item.id === activeId)
   const isHome = messages.length === 0 && !sending && !loadingMessages && !historyUnavailable
+  const homeOverview = useHomeAccountOverview(token, user?.id, isHome, workspaceRevision)
   const composer = <ChatComposer
+    variant={isHome ? 'home' : 'conversation'}
     value={draft}
     onChange={updateDraft}
-    onSend={() => void sendMessage(draft)}
+    onSend={() => void sendMessage(draft, references)}
+    references={references}
+    onReferenceDrop={addReference}
+    onRemoveReference={removeReference}
     onStop={receiving ? stopReceiving : undefined}
     disabled={sending || creatingConversation || loadingMessages || historyUnavailable || actionPreparing || !!pendingAction}
   />
@@ -148,13 +189,20 @@ export function ChatPage() {
         onClose={() => setSidebarOpen(false)}
         onLogout={handleLogout}
       />}
-      panel={workspacePanel && token && user && <WorkspacePanel key={workspacePanel} token={token} userId={user.id} panel={workspacePanel} focusOnMount={panelOpenedByUser} hidden={privacyHidden} refreshSignal={workspaceRevision} actionDisabled={sending || actionPreparing || !!pendingAction} cardLossRecovery={cardLossRecovery} onCardLossRecoveryChange={onCardLossRecoveryChange} onCardLossResolved={onCardLossResolved} onActionBusy={setActionPreparing} onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onOpenSource={openSavedSource} sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} onClose={() => setWorkspacePanel(null)} />}
+      panel={workspacePanel && token && user && <WorkspacePanel key={workspacePanel} token={token} userId={user.id} panel={workspacePanel} focusOnMount={panelOpenedByUser} hidden={privacyHidden} refreshSignal={workspaceRevision} actionDisabled={sending || actionPreparing || !!pendingAction} cardLossRecovery={cardLossRecovery} onCardLossRecoveryChange={onCardLossRecoveryChange} onCardLossResolved={onCardLossResolved} onActionBusy={setActionPreparing} onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onOpenSource={openSavedSource} onReference={addReference} sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} onClose={() => setWorkspacePanel(null)} />}
       overlay={pendingAction && token && <PendingActionDialog key={pendingAction.action.id} event={pendingAction} token={token} open={actionOpen} hidden={privacyHidden} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onClose={() => setActionOpen(false)} onResolved={() => { if (pendingAction.action.action_type === 'card_loss' && typeof pendingAction.action.details.card_id === 'number') onCardLossRecoveryChange(pendingAction.action.details.card_id, null) }} onFinish={() => { setActionOpen(false); setPendingAction(null); setWorkspaceRevision((value) => value + 1) }} />}>
         <WorkspaceHeader
           title={activeConversation?.title ?? '新对话'}
           isHome={isHome}
           sidebarOpen={sidebarOpen}
           onOpenSidebar={() => setSidebarOpen(true)}
+          status={!isHome && <button type="button" onClick={() => setPrivacyHidden((value) => !value)}
+            title={privacyHidden ? '显示金额' : '隐藏金额'}
+            aria-label={privacyHidden ? '显示金额' : '隐藏金额'}
+            aria-pressed={privacyHidden}
+            className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-jade-800 focus-visible:outline-2 focus-visible:outline-jade-700">
+            {privacyHidden ? <EyeOff size={17}/> : <Eye size={17}/>}
+          </button>}
         />
         {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
         <p role="status" className="sr-only">{sending ? '消息请求进行中' : ''}</p>
@@ -173,10 +221,19 @@ export function ChatPage() {
             <ChatHome
               composer={composer}
               feedback={homeFeedback}
-              disclaimer="AI 生成内容仅供参考，重要信息请以银行正式记录为准"
+              suggestions={bankingStarters}
+              onPick={updateDraft}
+              overview={homeOverview}
+              mode={workspacePanel ? 'sidecar' : 'full'}
+              hidden={privacyHidden}
+              onTogglePrivacy={() => setPrivacyHidden((value) => !value)}
+              onOpenAssets={() => { setPanelOpenedByUser(true); setWorkspacePanel('assets') }}
+              disclaimer="业务信息来自模拟银行环境，所有重要操作以服务端结果为准。"
             />
           ) : (
             <MessageList
+              key={activeId ?? 'new'}
+              scrollRoot={scrollRef}
               messages={messages}
               streamingText={streamingText}
               thinking={sending && !streamingText}
@@ -188,7 +245,7 @@ export function ChatPage() {
 
         {!isHome && <div className="shrink-0 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 md:px-6">
           {actionWarning && <div role="alert" className="mx-auto mb-2 flex w-full max-w-[680px] items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span className="flex-1">{actionWarning}</span><button type="button" onClick={() => setActionWarning(null)} className="shrink-0 underline">已了解</button></div>}
-          {pendingAction && !actionOpen && <button type="button" onClick={() => setActionOpen(true)} className="mx-auto mb-2 block w-full max-w-[680px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-900">查看待处理操作</button>}
+          {pendingAction && !actionOpen && <PendingActionBanner event={pendingAction} onOpen={() => setActionOpen(true)} />}
           {hasNewContent && (
             <button type="button" className="mx-auto mb-2 block rounded-full border border-line bg-white px-3 py-1 text-xs text-jade-800" onClick={jumpToLatest}>查看新消息</button>
           )}

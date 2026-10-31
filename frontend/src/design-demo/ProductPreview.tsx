@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { ArrowLeftRight, BookmarkPlus, CalendarDays, CreditCard } from 'lucide-react'
+import { BookmarkPlus, Eye, EyeOff } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 import { BankWorkspace, WorkspaceHeader } from '@/app/BankWorkspace'
 import { initialWorkspacePanel } from '@/app/workspace-state'
@@ -20,6 +20,7 @@ import { useConversationScroll } from '@/features/chat/useConversationScroll'
 import type { TransferIntent } from '@/features/assets/intent'
 import type { Conversation, Message } from '@/lib/api'
 import type { StreamEvent } from '@/lib/sse'
+import { addBankReference, composeReferenceContext, type BankObjectReference } from '@/features/references/bank-object-reference'
 import { PreviewAssets } from './PreviewAssets'
 import { createPreviewActionTransport, makePreviewAction, previewActivity, previewCardMessageIds, previewCards, previewConversations, previewMessages } from './scenarios'
 
@@ -28,10 +29,20 @@ const emptyMessages: Message[] = []
 type PreviewScenario = 'normal' | 'empty' | 'error' | 'loading'
 
 const previewSuggestions = [
-  { label: '查一下我的账户余额', prompt: '查一下我的账户余额', icon: CreditCard },
-  { label: '看看这个月的消费', prompt: '看看这个月的消费', icon: CalendarDays },
-  { label: '准备给朋友转账', prompt: '准备给朋友转账', icon: ArrowLeftRight },
+  { label: '查看账户余额', prompt: '查一下我的账户余额', art: "card" },
+  { label: '分析本月收支', prompt: '看看这个月的消费', art: "chart" },
+  { label: '准备转账', prompt: '准备给朋友转账', art: "receipt" },
 ] satisfies readonly ChatStarterPrompt[]
+
+// Explicitly synthetic preview data. The real chat home queries /api/bank/dashboard.
+const previewDashboard = {
+  accounts: [
+    { account_id: 1, name: '日常账户', masked_number: '**** 8899', currency: 'CNY', balance_fen: 2865830, status: 'active', card_status: 'active', can_transfer: true },
+    { account_id: 2, name: '储蓄账户', masked_number: '**** 2068', currency: 'CNY', balance_fen: 12850000, status: 'active', card_status: 'active', can_transfer: true },
+  ],
+  contacts: [], holdings: [], risk_profile: { risk_level: 'R2', score: 4, assessed_at: null },
+  generated_at: new Date().toISOString(),
+}
 
 interface InitialPreviewState {
   scenario: PreviewScenario
@@ -51,8 +62,8 @@ function PreviewScenarioSelect({ scenario, onChange, mobile = false }: {
       value={scenario}
       onChange={(event) => onChange(event.target.value as PreviewScenario)}
       className={mobile
-        ? 'rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink'
-        : 'rounded-md border border-jade-200 bg-white px-1 py-0.5 text-xs'}
+        ? 'rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-ink'
+        : 'rounded-md border border-jade-200 bg-panel px-1 py-0.5 text-xs'}
     >
       <option value="normal">正常</option>
       <option value="empty">空状态</option>
@@ -79,7 +90,7 @@ function MobilePreviewStatus({ scenario, onChange }: {
   onChange: (scenario: PreviewScenario) => void
 }) {
   return (
-    <div title="合成数据，不连接 Agent 或业务接口" className="flex h-8 shrink-0 items-center justify-center gap-2 border-b border-line/70 bg-white/45 px-3 text-[10.5px] text-muted sm:hidden">
+    <div title="合成数据，不连接 Agent 或业务接口" className="flex min-h-9 shrink-0 items-center justify-center gap-2 border-b border-line bg-panel px-3 text-[10.5px] text-muted sm:hidden">
       <span>合成数据 · 不连接 Agent 或业务接口</span>
       <PreviewScenarioSelect mobile scenario={scenario} onChange={onChange} />
     </div>
@@ -118,6 +129,7 @@ export default function ProductPreview() {
   const [sourceError, setSourceError] = useState('')
   const [sourceTarget, setSourceTarget] = useState<CardOrigin | null>(null)
   const [intents, setIntents] = useState<Record<number, TransferIntent | undefined>>({})
+  const [referencesByConversation, setReferencesByConversation] = useState<Record<number, BankObjectReference[]>>({})
   const nextMessageId = useRef(100)
   const nextConversationId = useRef(initialPreview.nextConversationId)
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false)
@@ -128,7 +140,7 @@ export default function ProductPreview() {
   const { scrollRef, onScroll, resetScroll, hasNewContent, jumpToLatest } = useConversationScroll(currentMessages, '', false, false)
 
   function send() {
-    const content = drafts[activeId]?.trim()
+    const content = composeReferenceContext(drafts[activeId] ?? '', referencesByConversation[activeId] ?? [])
     if (!content || !canCompose) return
     setSourceTarget(null)
     const createdAt = new Date().toISOString()
@@ -154,6 +166,7 @@ export default function ProductPreview() {
       ],
     }))
     setDrafts((current) => ({ ...current, [activeId]: '', [conversationId]: '' }))
+    setReferencesByConversation(current => ({...current,[activeId]:[],[conversationId]:[]}))
     setScenario('normal')
   }
 
@@ -207,7 +220,13 @@ export default function ProductPreview() {
     setPanel(null)
   }
 
-  const composer = <ChatComposer value={drafts[activeId] ?? ''} onChange={(value) => setDrafts((current) => ({ ...current, [activeId]: value }))} onSend={send} disabled={!canCompose} />
+  function addReference(value: BankObjectReference) {
+    setReferencesByConversation(current => ({...current,[activeId]:addBankReference(current[activeId] ?? [],value)}))
+    if (window.matchMedia?.('(max-width: 1279px)').matches) setPanel(null)
+  }
+  const composer = <ChatComposer variant={isHome ? 'home' : 'conversation'} value={drafts[activeId] ?? ''} onChange={(value) => setDrafts((current) => ({ ...current, [activeId]: value }))} onSend={send} disabled={!canCompose}
+    references={referencesByConversation[activeId] ?? []} onReferenceDrop={addReference}
+    onRemoveReference={(reference) => setReferencesByConversation(current => ({...current,[activeId]:(current[activeId] ?? []).filter(item => !(item.kind === reference.kind && item.id === reference.id))}))} />
 
   const sidebar = <ConversationSidebar
     conversations={conversations}
@@ -227,7 +246,7 @@ export default function ProductPreview() {
   const workspace = panel && <WorkspacePanelFrame key={panel} panel={panel} focusOnMount={panelOpenedByUser} onClose={() => setPanel(null)} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)}>
     {panel === 'assets' && scenario === 'error' && <p role="alert" className="text-sm text-muted">样例：资产加载失败，请重试。</p>}
     {panel === 'assets' && scenario === 'loading' && <p role="status" className="text-sm text-muted">样例：正在加载资产…</p>}
-    {panel === 'assets' && (scenario === 'empty' || scenario === 'normal') && <PreviewAssets key={activeId} hidden={hidden} onIntent={(intent) => { setIntents((current) => ({ ...current, [activeId]: intent })); setNotice(''); setPanel(null) }} />}
+    {panel === 'assets' && (scenario === 'empty' || scenario === 'normal') && <PreviewAssets key={activeId} hidden={hidden} onReference={addReference} onIntent={(intent) => { setIntents((current) => ({ ...current, [activeId]: intent })); setNotice(''); setPanel(null) }} />}
     {panel === 'collections' && <><p className="mb-5 text-xs text-muted">合成预览使用独立收藏空间。</p>{sourceError && <p role="alert" className="mb-4 text-sm text-red-700">{sourceError}</p>}<CollectionPanel userId={1} hidden={hidden} databaseName={previewDatabase} onOpenSource={openPreviewSource} /></>}
     {panel === 'activity' && <ActivityList entries={previewActivity} />}
   </WorkspacePanelFrame>
@@ -237,7 +256,16 @@ export default function ProductPreview() {
       isHome={isHome}
       sidebarOpen={sidebarOpen}
       onOpenSidebar={() => setSidebarOpen(true)}
-      status={<PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
+      status={<div className="ml-auto flex items-center gap-2">
+        {!isHome && <button type="button" onClick={() => setHidden((value) => !value)}
+          title={hidden ? '显示金额' : '隐藏金额'}
+          aria-label={hidden ? '显示金额' : '隐藏金额'}
+          aria-pressed={hidden}
+          className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-jade-800 focus-visible:outline-2 focus-visible:outline-jade-700">
+          {hidden ? <EyeOff size={17}/> : <Eye size={17}/>}
+        </button>}
+        <PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />
+      </div>}
     />
     <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />
     <LayoutGroup id="bank-agent-product-preview">
@@ -255,12 +283,19 @@ export default function ProductPreview() {
         <ChatHome
           composer={composer}
           suggestions={previewSuggestions}
+          mode={panel ? 'sidecar' : 'full'}
+          overview={{ status: 'ready', data: previewDashboard }}
+          hidden={hidden}
+          onTogglePrivacy={() => setHidden((value) => !value)}
+          onOpenAssets={() => { setPanelOpenedByUser(true); setPanel('assets') }}
           onPick={(prompt) => setDrafts((current) => ({ ...current, [activeId]: prompt }))}
           disclaimer="AI 生成内容仅供参考，重要信息请以银行正式记录为准"
         />
       ) : currentMessages.length ? (
         <MessageList
-          messages={currentMessages}
+          key={activeId}
+          scrollRoot={scrollRef}
+              messages={currentMessages}
           streamingText=""
           thinking={false}
           focusMessageId={sourceTarget?.conversationId === activeId ? sourceTarget.messageId : null}

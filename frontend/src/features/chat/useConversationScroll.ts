@@ -9,7 +9,12 @@ export function useConversationScroll(messages: Message[], streamingText: string
 
   useEffect(() => {
     const container = scrollRef.current
-    if (container && followScroll.current) container.scrollTop = container.scrollHeight
+    if (container && messages.length === 0 && !streamingText && !sending && !loading) {
+      // An empty banking workspace is a top-to-bottom page, not a chat transcript.
+      container.scrollTop = 0
+      followScroll.current = true
+      setHasNewContent(false)
+    } else if (container && followScroll.current) container.scrollTop = container.scrollHeight
     else if (container && (streamingText || sending || messages !== previousMessages.current)) setHasNewContent(true)
     previousMessages.current = messages
   }, [messages, streamingText, sending, loading])

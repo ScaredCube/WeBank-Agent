@@ -3,10 +3,12 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { ApiError, type SubscriptionCancelExecution, type WealthOrderExecution } from '@/lib/api'
 import type { StreamEvent } from '@/lib/sse'
 import { formatCnyFen } from '@/lib/format'
+import { PenguinArt } from '@/features/theme/PenguinArt'
+import { ActionJourney, type ActionStage } from './ActionJourney'
 import { serviceActionTransport, type ActionTransport } from './transport'
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
-type Stage = 'review' | 'code' | 'ready' | 'recover_execute' | 'complete' | 'cancelled' | 'unknown' | 'rejected' | 'recover_pending'
+type Stage = ActionStage
 
 type Props = { event: ActionEvent; onClose: () => void; onFinish?: () => void; onResolved?: (status: 'completed' | 'cancelled' | 'expired') => void; open?: boolean; hidden?: boolean; onTogglePrivacy?: () => void; supplementalDescription?: string; verificationHint?: string } & ({ token: string; transport?: never } | { token?: never; transport: ActionTransport })
 
@@ -214,9 +216,12 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   const executionLabel = wealthSubscribe ? '执行模拟申购' : wealthRedeem ? '执行模拟赎回' : subscriptionCancel ? '执行模拟取消' : '执行操作'
 
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !busy) { if (stage === 'complete' || stage === 'cancelled') onFinish(); else onClose() } }}>
-    <DialogContent className="p-6">
+    <DialogContent className="bank-action-dialog p-5 sm:p-6">
       <DialogTitle>{operationTitle}</DialogTitle>
+      {stage === "complete" && <div className="flex items-center gap-4 rounded-xl bg-jade-50/60 px-3 py-2"><PenguinArt pose="celebrate" className="size-16" /><span className="text-sm font-medium text-ink">操作已完成</span></div>}
       <DialogDescription className="mt-2">{supplementalDescription}{operationDescription}{action.risk_level === 'red' && verificationHint}</DialogDescription>
+      <ActionJourney stage={stage} needsVerification={action.risk_level === 'red'} busy={busy}/>
+      <h3 className="mt-5 text-[12px] font-semibold tracking-tight text-ink">操作信息</h3>
       <dl className="mt-5 divide-y divide-line rounded-xl border border-line px-4">{rows.map(([label, value]) => <div className="flex justify-between gap-4 py-3 text-sm" key={label}><dt className="text-muted">{label}</dt><dd className="text-right font-medium break-all">{privacyLabels.has(label) && hidden ? <span aria-label={`${label}已隐藏`}>••••</span> : value}</dd></div>)}</dl>
       {hidden && usesMoney && onTogglePrivacy && <button type="button" onClick={onTogglePrivacy} className="mt-3 text-sm text-jade-700 underline">查看金额</button>}
       {wealthResult && <dl className="mt-4 divide-y divide-line rounded-xl border border-jade-200 bg-jade-50/50 px-4" aria-label="理财执行结果">
@@ -232,12 +237,12 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
       {stage === 'code' && <label className="mt-4 block text-sm">模拟验证码<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" className="mt-2 w-full rounded-xl border border-line bg-white px-3 py-2" /></label>}
       <div className="mt-5 flex flex-wrap gap-2">
         {(stage === 'review' || stage === 'code' || stage === 'recover_pending') && <button disabled={busy} onClick={() => void cancel()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">取消操作</button>}
-        {stage === 'review' && <button disabled={busy || !supported || (hidden && usesMoney)} onClick={() => void start()} className="flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{action.risk_level === 'red' ? '开始模拟验证' : subscriptionCancel ? '确认取消' : '确认'}</button>}
-        {stage === 'code' && <button disabled={busy || !code.trim()} onClick={() => void verify()} className="flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">验证</button>}
-        {(stage === 'ready' || stage === 'recover_execute') && <button disabled={busy || (hidden && usesMoney)} onClick={() => void execute()} className="flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{stage === 'recover_execute' ? '按原动作编号重试' : executionLabel}</button>}
+        {stage === 'review' && <button disabled={busy || !supported || (hidden && usesMoney)} onClick={() => void start()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{action.risk_level === 'red' ? '开始模拟验证' : subscriptionCancel ? '确认取消' : '确认'}</button>}
+        {stage === 'code' && <button disabled={busy || !code.trim()} onClick={() => void verify()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">验证</button>}
+        {(stage === 'ready' || stage === 'recover_execute') && <button disabled={busy || (hidden && usesMoney)} onClick={() => void execute()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{stage === 'recover_execute' ? '按原动作编号重试' : executionLabel}</button>}
         {(stage === 'unknown' || stage === 'rejected' || stage === 'recover_execute') && <button disabled={busy} onClick={() => void checkStatus()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">查询服务端状态</button>}
         {(stage === 'unknown' || stage === 'rejected') && <button disabled={busy} onClick={onFinish} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">移除本地记录</button>}
-        {(stage === 'complete' || stage === 'cancelled') && <button onClick={onFinish} className="flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white">关闭</button>}
+        {(stage === 'complete' || stage === 'cancelled') && <button onClick={onFinish} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white">关闭</button>}
       </div>
     </DialogContent>
   </Dialog>

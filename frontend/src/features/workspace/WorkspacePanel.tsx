@@ -4,6 +4,7 @@ import { api, type AuditEntry, type BankCard, type BankDashboardData } from '@/l
 import { CollectionPanel } from '@/features/collections/CollectionPanel'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
 import { AssetWorkspace } from '@/features/assets/AssetWorkspace'
+import type { BankObjectReference } from '@/features/references/bank-object-reference'
 import { ActivityList } from './ActivityList'
 import { WorkspacePanelFrame } from './WorkspacePanelFrame'
 import type { CardOrigin } from '@/features/intelligent-ui/schema'
@@ -11,7 +12,7 @@ import type { StreamEvent } from '@/lib/sse'
 
 type Panel = 'assets' | 'activity' | 'collections'
 
-export function WorkspacePanel({ token, userId, panel, onClose, hidden, onTogglePrivacy, focusOnMount = true, refreshSignal = 0, actionDisabled = false, onActionBusy = () => {}, onActionPrepared = () => {}, cardLossRecovery = new Map<number, CardLossRecovery>(), onCardLossRecoveryChange = () => {}, onCardLossResolved = () => {}, onOpenSource, sourceDisabled = false }: { token: string; userId: number; panel: Panel; onClose: () => void; hidden: boolean; onTogglePrivacy: () => void; focusOnMount?: boolean; refreshSignal?: number; actionDisabled?: boolean; onActionBusy?: (busy: boolean) => void; onActionPrepared?: (event: Extract<StreamEvent, { type: 'action_required' }>) => void; cardLossRecovery?: ReadonlyMap<number, CardLossRecovery>; onCardLossRecoveryChange?: (cardId: number, recovery: CardLossRecovery | null) => void; onCardLossResolved?: (cardId: number) => void; onOpenSource?: (origin: CardOrigin) => void; sourceDisabled?: boolean }) {
+export function WorkspacePanel({ token, userId, panel, onClose, hidden, onTogglePrivacy, focusOnMount = true, refreshSignal = 0, actionDisabled = false, onActionBusy = () => {}, onActionPrepared = () => {}, cardLossRecovery = new Map<number, CardLossRecovery>(), onCardLossRecoveryChange = () => {}, onCardLossResolved = () => {}, onOpenSource, sourceDisabled = false, onReference }: { token: string; userId: number; panel: Panel; onClose: () => void; hidden: boolean; onTogglePrivacy: () => void; focusOnMount?: boolean; refreshSignal?: number; actionDisabled?: boolean; onActionBusy?: (busy: boolean) => void; onActionPrepared?: (event: Extract<StreamEvent, { type: 'action_required' }>) => void; cardLossRecovery?: ReadonlyMap<number, CardLossRecovery>; onCardLossRecoveryChange?: (cardId: number, recovery: CardLossRecovery | null) => void; onCardLossResolved?: (cardId: number) => void; onOpenSource?: (origin: CardOrigin) => void; sourceDisabled?: boolean; onReference?: (reference: BankObjectReference) => void }) {
   const [cards, setCards] = useState<BankCard[]>([])
   const [dashboard, setDashboard] = useState<BankDashboardData | null>(null)
   const [entries, setEntries] = useState<AuditEntry[]>([])
@@ -115,10 +116,10 @@ export function WorkspacePanel({ token, userId, panel, onClose, hidden, onToggle
           onCardLossResolved={onCardLossResolved}
           onActionBusy={onActionBusy}
           onActionPrepared={onActionPrepared}
+          onReference={onReference}
         />}
         {panel === 'activity' && <>
-          {!loading && !error && entries.length === 0 && <p className="text-sm text-muted">暂无操作记录</p>}
-          <ActivityList entries={entries} />
+          {(entries.length > 0 || (!isLoading && !error)) && <ActivityList entries={entries} />}
           {entries.length > 0 && <p className="mt-4 text-xs text-muted">显示已加载记录，按发生顺序排列</p>}
           {hasMore && <button type="button" disabled={isLoading} onClick={() => void loadMore()} className="mt-4 w-full rounded-xl border border-line bg-white px-4 py-3 text-sm disabled:opacity-50">{isLoading ? '加载中…' : '加载更多'}</button>}
         </>}

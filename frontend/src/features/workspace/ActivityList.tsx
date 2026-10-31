@@ -1,4 +1,5 @@
 import { ChevronDown, History } from 'lucide-react'
+import { MascotEmptyState } from '@/features/theme/MascotEmptyState'
 import type { AuditEntry } from '@/lib/api'
 
 const eventNames: Record<string, string> = {
@@ -45,6 +46,7 @@ function activityName(entry: AuditEntry) {
 }
 
 export function ActivityList({ entries }: { entries: AuditEntry[] }) {
+  if (entries.length === 0) return <MascotEmptyState title="还没有操作记录" description="未来的操作轨迹会显示在这里。" pose="sleep" />
   return <ol className="space-y-1">{entries.map((entry) => <li key={entry.id} className="border-b border-line py-4">
     <details className="group">
       <summary className="flex cursor-pointer list-none gap-3 rounded focus-visible:outline-2 focus-visible:outline-jade-700">

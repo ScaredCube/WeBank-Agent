@@ -101,3 +101,15 @@ it('未知记录使用中性名称和状态，不暴露内部枚举', async () =
   expect(screen.getByText('状态未知')).toBeTruthy()
   expect(screen.queryByText('future_result')).toBeNull()
 })
+
+it('操作记录加载期间不误显示空态，加载完成后只显示一个空态', async () => {
+  let resolveAudit!: (entries: AuditEntry[]) => void
+  const pending = new Promise<AuditEntry[]>((resolve) => { resolveAudit = resolve })
+  vi.spyOn(api, 'audit').mockReturnValue(pending)
+  render(<WorkspacePanel panel="activity" token="test" userId={1} hidden={false} onClose={() => {}} onTogglePrivacy={() => {}} />)
+  expect(screen.getByRole('status').textContent).toContain('加载中')
+  expect(screen.queryByText('还没有操作记录')).toBeNull()
+  await act(async () => { resolveAudit([]); await pending })
+  expect(await screen.findByText('还没有操作记录')).toBeTruthy()
+  expect(screen.queryByText('暂无操作记录')).toBeNull()
+})

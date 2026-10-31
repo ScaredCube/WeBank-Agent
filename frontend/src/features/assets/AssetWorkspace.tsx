@@ -5,8 +5,11 @@ import type { BankAccountOverview, BankCard, BankContactOverview, BankDashboardD
 import { formatCnyFen } from '@/lib/format'
 import { CardLossButton, type CardLossRecovery } from '@/features/actions/CardLossButton'
 import { MonthlyBillPanel } from '@/features/intelligent-ui/MonthlyBillPanel'
+import { MascotEmptyState } from '@/features/theme/MascotEmptyState'
 import type { StreamEvent } from '@/lib/sse'
 import { AssetSection } from './AssetSection'
+import { ReferenceSource } from '@/features/references/ReferenceSource'
+import type { BankObjectReference } from '@/features/references/bank-object-reference'
 import { AssetSectionNavigation, type AssetSectionKey } from './AssetSectionNavigation'
 
 function accountStatus(status: string) {
@@ -41,12 +44,14 @@ function Money({ fen, hidden, currency = 'CNY', className = '' }: { fen: number;
   )
 }
 
-function AccountCard({ account, hidden }: {
+function AccountCard({ account, hidden, onReference }: {
   account: BankAccountOverview
   hidden: boolean
+  onReference?: (reference: BankObjectReference) => void
 }) {
   return (
-    <article className="rounded-xl border border-line bg-white px-4 py-4">
+    <ReferenceSource reference={{kind:'account',id:account.account_id,label:account.name,detail:account.masked_number}} onReference={onReference}>
+    <article className="rounded-xl border border-line bg-panel px-4 py-4">
       <div className="flex items-center gap-3">
         <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-full bg-jade-50 text-jade-800">
           <Landmark size={20} strokeWidth={1.8} />
@@ -64,10 +69,11 @@ function AccountCard({ account, hidden }: {
         <span>{accountStatus(account.status)}</span>
       </div>
     </article>
+    </ReferenceSource>
   )
 }
 
-function CardEntry({ card, token, disabled, recovery, onRecoveryChange, onResolved, onBusyChange, onPrepared }: {
+function CardEntry({ card, token, disabled, recovery, onRecoveryChange, onResolved, onBusyChange, onPrepared, onReference }: {
   card: BankCard
   token: string
   disabled: boolean
@@ -76,11 +82,14 @@ function CardEntry({ card, token, disabled, recovery, onRecoveryChange, onResolv
   onResolved: (cardId: number) => void
   onBusyChange: (busy: boolean) => void
   onPrepared: (event: Extract<StreamEvent, { type: 'action_required' }>) => void
+  onReference?: (reference: BankObjectReference) => void
 }) {
   return (
-    <article className="rounded-xl border border-line bg-white px-4 py-4">
+    <ReferenceSource reference={{kind:'card', id:card.card_id,label:card.account_name,detail:card.masked_number}} onReference={onReference}>
+    <article className="relative overflow-hidden rounded-[18px] border border-line bg-panel px-4 py-4">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-jade-300 via-jade-500 to-jade-800 opacity-70" />
       <div className="flex items-center gap-3">
-        <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-jade-50 text-jade-800"><CreditCard size={18} /></span>
+        <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-xl bg-jade-50 text-jade-800"><CreditCard size={18} /></span>
         <div className="min-w-0 flex-1">
           <h4 className="truncate text-[13px] font-semibold text-ink">{card.account_name}</h4>
           <p className="mt-1 truncate text-xs text-muted">银行卡 · {card.masked_number}</p>
@@ -103,11 +112,13 @@ function CardEntry({ card, token, disabled, recovery, onRecoveryChange, onResolv
         </div>
       </details>
     </article>
+    </ReferenceSource>
   )
 }
 
-function ContactRow({ contact }: { contact: BankContactOverview }) {
+function ContactRow({ contact, onReference }: { contact: BankContactOverview; onReference?: (reference: BankObjectReference) => void }) {
   return (
+    <ReferenceSource reference={{kind:'contact',id:contact.contact_id,label:contact.name,detail:contact.bank_name}} onReference={onReference}>
     <div className="flex min-h-[68px] items-center gap-3 border-b border-line py-3 last:border-b-0">
       <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-[#eef4f2] text-[14px] font-semibold text-jade-800">
         {contact.name.slice(0, 1)}
@@ -118,11 +129,13 @@ function ContactRow({ contact }: { contact: BankContactOverview }) {
       </div>
       <span className="shrink-0 text-[11px] text-muted">{contactStatus(contact)}</span>
     </div>
+    </ReferenceSource>
   )
 }
 
-function HoldingRow({ holding, hidden }: { holding: WealthHoldingOverview; hidden: boolean }) {
+function HoldingRow({ holding, hidden, onReference }: { holding: WealthHoldingOverview; hidden: boolean; onReference?: (reference: BankObjectReference) => void }) {
   return (
+    <ReferenceSource reference={{kind:'holding',id:holding.holding_id,label:holding.product_name,detail:holding.category}} onReference={onReference}>
     <div className="flex min-h-[76px] items-center gap-3 border-b border-line py-3 last:border-b-0">
       <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-[#eef4f2] text-jade-800">
         <ChartNoAxesCombined size={19} strokeWidth={1.8} />
@@ -137,11 +150,12 @@ function HoldingRow({ holding, hidden }: { holding: WealthHoldingOverview; hidde
         <Money fen={holding.amount_fen} hidden={hidden} className="mt-0.5 block text-[13px] font-semibold text-ink" />
       </div>
     </div>
+    </ReferenceSource>
   )
 }
 
 function EmptyState({ label }: { label: string }) {
-  return <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-xs text-muted">{label}</p>
+  return <MascotEmptyState title={label} pose="sleep" compact />
 }
 
 function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -158,7 +172,7 @@ function SectionError({ message, onRetry }: { message: string; onRetry: () => vo
   )
 }
 
-export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashboardError, cardError, hidden, actionDisabled, cardLossRecovery, onRetry, onCardLossRecoveryChange, onCardLossResolved, onActionBusy, onActionPrepared }: {
+export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashboardError, cardError, hidden, actionDisabled, cardLossRecovery, onRetry, onCardLossRecoveryChange, onCardLossResolved, onActionBusy, onActionPrepared, onReference }: {
   token: string
   userId: number
   dashboard: BankDashboardData | null
@@ -174,6 +188,7 @@ export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashb
   onCardLossResolved: (cardId: number) => void
   onActionBusy: (busy: boolean) => void
   onActionPrepared: (event: Extract<StreamEvent, { type: 'action_required' }>) => void
+  onReference?: (reference: BankObjectReference) => void
 }) {
   const [activeSection, setActiveSection] = useState<AssetSectionKey>('accounts')
   const counts = useMemo(() => ({
@@ -188,6 +203,7 @@ export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashb
       key={account.account_id}
       account={account}
       hidden={hidden}
+      onReference={onReference}
     />
   }
 
@@ -217,6 +233,7 @@ export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashb
           onResolved={onCardLossResolved}
           onBusyChange={onActionBusy}
           onPrepared={onActionPrepared}
+          onReference={onReference}
         />)}
       </AssetSection>
 
@@ -224,14 +241,14 @@ export function AssetWorkspace({ token, userId, dashboard, cards, loading, dashb
         {!loading && dashboardError && <p role="status" className="text-xs leading-5 text-muted">账户与资产数据不可用，联系人暂时无法显示。</p>}
         {loading && <p role="status" className="rounded-xl border border-line bg-white px-4 py-5 text-xs text-muted">正在读取联系人…</p>}
         {!loading && dashboard?.contacts.length === 0 && <EmptyState label="暂无联系人" />}
-        {!loading && dashboard?.contacts.length ? <div className="rounded-xl border border-line bg-white px-4">{dashboard.contacts.map((contact) => <ContactRow key={contact.contact_id} contact={contact} />)}</div> : null}
+        {!loading && dashboard?.contacts.length ? <div className="rounded-xl border border-line bg-white px-4">{dashboard.contacts.map((contact) => <ContactRow key={contact.contact_id} contact={contact} onReference={onReference} />)}</div> : null}
       </AssetSection>
 
       <AssetSection id="asset-section-holdings" title="理财持仓" count={counts.holdings}>
         {!loading && dashboardError && <p role="status" className="text-xs leading-5 text-muted">账户与资产数据不可用，持仓暂时无法显示。</p>}
         {loading && <p role="status" className="rounded-xl border border-line bg-white px-4 py-5 text-xs text-muted">正在读取持仓…</p>}
         {!loading && dashboard?.holdings.length === 0 && <EmptyState label="暂无持仓" />}
-        {!loading && dashboard?.holdings.length ? <div className="rounded-xl border border-line bg-white px-4">{dashboard.holdings.map((holding) => <HoldingRow key={holding.holding_id} holding={holding} hidden={hidden} />)}</div> : null}
+        {!loading && dashboard?.holdings.length ? <div className="rounded-xl border border-line bg-white px-4">{dashboard.holdings.map((holding) => <HoldingRow key={holding.holding_id} holding={holding} hidden={hidden} onReference={onReference} />)}</div> : null}
       </AssetSection>
 
       <MonthlyBillPanel

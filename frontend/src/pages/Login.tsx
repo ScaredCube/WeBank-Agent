@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Eye,
@@ -8,7 +8,9 @@ import {
   UserRound,
 } from 'lucide-react'
 
-import { BrandMark } from '@/components/BrandMark'
+import { PenguinArt } from '@/features/theme/PenguinArt'
+import { MascotStage } from '@/features/theme/MascotStage'
+import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/use-auth'
@@ -42,100 +44,84 @@ export function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1.08fr_1fr]">
-      <section className="relative hidden overflow-hidden bg-jade-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-36 -top-40 size-[520px] rounded-full bg-jade-600/25 blur-[130px]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-40 -left-24 size-[460px] rounded-full bg-jade-500/12 blur-[110px]"
-        />
-
+    <div className="grid min-h-dvh bg-canvas text-ink lg:grid-cols-[minmax(0,1fr)_minmax(440px,1fr)]">
+      <section aria-label="欢迎插画" className="relative hidden overflow-hidden border-r border-line bg-sidebar px-12 py-10 lg:flex lg:flex-col lg:justify-between">
         <div className="relative flex items-center gap-3">
-          <BrandMark className="size-10 rounded-xl bg-white/10 text-white ring-1 ring-white/15" />
-          <div>
-            <div className="text-[15px] font-medium tracking-wide">微众银行AI智能体</div>
+          <PenguinArt pose="avatar" className="size-11" />
+          <div className="min-w-0">
+            <p className="text-[14px] font-semibold tracking-tight text-ink">微众银行 AI 智能体</p>
+            <p className="mt-1 text-[11px] text-muted">个人金融事务空间</p>
           </div>
         </div>
 
-        <div className="relative">
-          <h1 className="text-[46px] font-medium leading-[1.16] tracking-[-0.025em]">
-            想办的事，
-            <br />
-            从对话开始。
+        <div className="relative mx-auto flex w-full max-w-[520px] flex-col items-start">
+          <p className="mb-4 text-xs font-medium tracking-[0.06em] text-jade-700">陪你认真处理每件小事</p>
+          <h1 className="text-[clamp(2.4rem,3.25vw,3.6rem)] font-semibold leading-[1.23] tracking-[-0.055em] text-ink">
+            日常财务，<span className="block">从这里开始。</span>
           </h1>
-          <p className="mt-6 max-w-[360px] text-[14.5px] leading-relaxed text-white/50">
-            查询账户信息，了解收支，按步骤核对需要确认的操作。
-          </p>
+          <div className="relative mx-auto -mb-6 mt-5">
+            <MascotStage showcase />
+          </div>
         </div>
-
-        <div className="relative text-[11.5px] text-white/55">模拟业务环境</div>
+        <p className="relative text-[12px] leading-5 text-muted">模拟银行业务环境 · 操作结果以服务端记录为准</p>
       </section>
 
-      <section className="flex min-h-dvh items-center justify-center px-6 py-12">
-        <div className="w-full max-w-[360px]">
-          <div className="mb-10 flex items-center gap-3 lg:hidden">
-            <BrandMark className="size-10 rounded-xl" />
-            <div>
-              <div className="text-[15px] font-medium tracking-wide text-ink">微众银行AI智能体</div>
-            </div>
+      <section className="relative flex min-h-dvh flex-col px-6 py-8 sm:px-12 lg:px-16">
+        <header className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 lg:hidden">
+            <PenguinArt pose="avatar" className="size-10" />
+            <span className="text-sm font-semibold tracking-tight text-ink">微众银行 AI 智能体</span>
           </div>
+          <p className="hidden text-xs text-muted lg:block">欢迎使用智能银行服务</p>
+          <ThemeToggle />
+        </header>
 
-          <h2 className="text-[28px] font-medium tracking-tight text-ink">欢迎回来</h2>
-          <p className="mt-2 text-[13.5px] text-muted">登录后继续与你的 AI 管家对话</p>
+        <div className="my-auto mx-auto w-full max-w-[380px] pb-12 pt-16 lg:py-12">
+          <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-ink">欢迎回来</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">登录后，继续处理你的银行事务。</p>
 
-          <form className="mt-8 space-y-3.5" onSubmit={handleSubmit}>
+          <form className="mt-10 space-y-5" onSubmit={handleSubmit}>
             <div>
-              <label htmlFor="login-username" className="mb-2 block text-sm font-medium text-ink">账号</label>
+              <label htmlFor="login-username" className="mb-2 block text-[13px] font-medium text-ink">账号</label>
               <div className="relative">
-              <UserRound className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
-              <Input
-                id="login-username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
-                className="h-12 rounded-xl pl-10 text-[14px]"
-              />
+                <UserRound className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted/65" />
+                <Input id="login-username" value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  className="h-12 rounded-xl border-line bg-panel pl-11 text-[14px]"
+                />
               </div>
             </div>
 
             <div>
-              <label htmlFor="login-password" className="mb-2 block text-sm font-medium text-ink">密码</label>
+              <label htmlFor="login-password" className="mb-2 block text-[13px] font-medium text-ink">密码</label>
               <div className="relative">
-              <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
-              <Input
-                id="login-password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                className="h-12 rounded-xl pl-10 pr-11 text-[14px]"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((current) => !current)}
-                className="absolute right-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted/55 transition hover:bg-ink/5 hover:text-ink"
-              >
-                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                <span className="sr-only">{showPassword ? '隐藏密码' : '显示密码'}</span>
-              </button>
+                <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted/65" />
+                <Input id="login-password" type={showPassword ? 'text' : 'password'}
+                  value={password} onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  className="h-12 rounded-xl border-line bg-panel pl-11 pr-12 text-[14px]"
+                />
+                <button type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                  title={showPassword ? '隐藏密码' : '显示密码'}
+                  className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-muted transition-colors hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700"
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
               </div>
             </div>
 
-            {error && <p role="alert" className="text-[12.5px] text-red-600">{error}</p>}
+            {error && <p role="alert" className="text-[13px] text-red-600">{error}</p>}
 
-            <Button
-              type="submit"
-              disabled={loading || !username.trim() || !password}
-              className="h-12 w-full rounded-xl text-[14.5px]"
-            >
+            <Button type="submit" disabled={loading || !username.trim() || !password}
+              className="mt-3 h-12 w-full rounded-xl text-[14px] font-semibold">
               {loading && <LoaderCircle className="size-4 animate-spin" />}
               {loading ? '正在登录' : '登录'}
             </Button>
           </form>
-
+          <p className="mt-8 text-center text-xs text-muted lg:hidden">模拟银行业务环境</p>
         </div>
       </section>
     </div>

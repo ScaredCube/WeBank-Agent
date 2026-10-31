@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
 import { streamChat, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
+import { composeReferenceContext, type BankObjectReference } from '@/features/references/bank-object-reference'
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
 
@@ -150,8 +151,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [activeId, draft, loadingMessages, sending, actionBlocked, token, resetScroll, onConversationChange])
 
   const sendMessage = useCallback(
-    async (raw: string) => {
-      const content = raw.trim()
+    async (raw: string, references: BankObjectReference[] = []) => {
+      const content = composeReferenceContext(raw, references)
       if (!content || sendingRef.current || sending || creatingRef.current || loadingMessages || historyUnavailable || actionBlocked || !token) return
 
       sendingRef.current = true

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
+import { MascotEmptyState } from '@/features/theme/MascotEmptyState'
 import { cardSchema, type CardOrigin } from '@/features/intelligent-ui/schema'
 import { clearSnapshots, deleteSnapshot, listSnapshots, type Snapshot } from './store'
 
@@ -67,7 +68,7 @@ function UserCollection({ userId, hidden, databaseName, onOpenSource, sourceDisa
     <div className="flex items-start justify-between gap-3"><p className="min-w-0 flex-1 text-sm leading-5 text-muted">仅保存在此设备，不会自动更新；部分敏感文字可能保留。</p>{items.length > 0 && <button type="button" disabled={busy} onClick={() => void remove()} className="min-h-10 shrink-0 whitespace-nowrap px-2 text-sm text-muted underline disabled:opacity-50">清空</button>}</div>
     {loading && <p role="status" className="mt-5 text-sm text-muted">加载中…</p>}
     {error && <p role="alert" className="mt-5 text-sm text-red-700">{error}</p>}
-    {!loading && !error && items.length === 0 && <p className="mt-8 text-sm text-muted">还没有收藏卡片</p>}
+    {!loading && !error && items.length === 0 && <div className="mt-6"><MascotEmptyState title="还没有收藏卡片" description="喜欢的分析结果，可以收藏在这里。" pose="peek" /></div>}
     <div className="mt-5 space-y-3">{items.map((item, index) => {
       const parsed = cardSchema.safeParse(item.card)
       const title = hidden ? `收藏 ${index + 1} 已隐藏` : parsed.success ? parsed.data.title : '此卡片数据无法展示'
