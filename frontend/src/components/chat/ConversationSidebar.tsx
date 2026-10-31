@@ -1,4 +1,4 @@
-import { Bookmark, CreditCard, History, LogOut, MessageSquareText, Plus, X } from 'lucide-react'
+import { Bookmark, CreditCard, History, LogOut, MessageSquareText, PanelLeftClose, Plus, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import type { WorkspacePanelName } from '@/app/workspace-state'
@@ -21,6 +21,7 @@ interface ConversationSidebarProps {
   onSelect: (id: number) => void
   onNew: () => void
   onOpenPanel: (panel: WorkspacePanelName | null) => void
+  onToggleDesktopSidebar: () => void
   onClose: () => void
   onLogout: () => void
 }
@@ -39,6 +40,7 @@ export function ConversationSidebar({
   onSelect,
   onNew,
   onOpenPanel,
+  onToggleDesktopSidebar,
   onClose,
   onLogout,
 }: ConversationSidebarProps) {
@@ -79,10 +81,30 @@ export function ConversationSidebar({
         style={{ transitionDuration: 'var(--sidebar-width-transition-duration, 200ms)' }}
       >
         <div className={cn('flex h-16 shrink-0 items-center gap-3 px-4', desktopCollapsed && 'lg:justify-center lg:px-0')}>
-          <BrandMark className="size-9 shrink-0 rounded-[10px]" />
+          {desktopCollapsed ? <>
+            <BrandMark className="size-9 shrink-0 rounded-[10px] lg:hidden" />
+            <button
+              type="button"
+              aria-label="展开侧栏"
+              title="展开侧栏"
+              onClick={onToggleDesktopSidebar}
+              className="hidden size-9 shrink-0 place-items-center rounded-[10px] transition hover:bg-[#f1f6f4] focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid"
+            >
+              <BrandMark className="size-9 rounded-[10px]" />
+            </button>
+          </> : <BrandMark className="size-9 shrink-0 rounded-[10px]" />}
           <div className={cn('min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-ink', desktopCollapsed && 'lg:hidden')}>
             微众银行 AI 智能体
           </div>
+          {!desktopCollapsed && <button
+            type="button"
+            aria-label="收起侧栏"
+            title="收起侧栏"
+            onClick={onToggleDesktopSidebar}
+            className="hidden size-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid"
+          >
+            <PanelLeftClose className="size-[18px]" />
+          </button>}
           <button
             ref={closeRef}
             type="button"

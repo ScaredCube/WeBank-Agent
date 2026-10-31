@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import { GripVertical, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { GripVertical, Menu } from 'lucide-react'
 
 const DEFAULT_SIDEBAR_WIDTH = 296
 const MIN_SIDEBAR_WIDTH = 240
@@ -98,21 +98,16 @@ export function BankWorkspace({ sidebar, panel, overlay, children, sidebarCollap
   </div>
 }
 
-export function WorkspaceHeader({ title, isHome = false, sidebarOpen, sidebarCollapsed, onOpenSidebar, onToggleSidebar, status }: {
+export function WorkspaceHeader({ title, isHome = false, sidebarOpen, onOpenSidebar, status }: {
   title: string
   isHome?: boolean
   sidebarOpen: boolean
-  sidebarCollapsed: boolean
   onOpenSidebar: () => void
-  onToggleSidebar: () => void
   status?: ReactNode
 }) {
   return <header className="flex h-16 shrink-0 items-center gap-1 border-b border-line bg-white px-3 sm:gap-3 md:px-6">
     <button id="open-sidebar-button" type="button" onClick={onOpenSidebar} aria-expanded={sidebarOpen} aria-controls="conversation-sidebar" aria-label="打开导航和会话列表" title="打开导航和会话列表" className="grid h-11 w-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden">
       <Menu className="size-[18px]" />
-    </button>
-    <button id="toggle-desktop-sidebar-button" type="button" onClick={onToggleSidebar} aria-expanded={!sidebarCollapsed} aria-controls="conversation-sidebar" aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} className="hidden size-10 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid">
-      {sidebarCollapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-[18px]" />}
     </button>
     <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight text-ink sm:text-[15px]">
       <span className={isHome ? 'lg:sr-only' : ''}>{title}</span>

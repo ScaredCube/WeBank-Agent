@@ -144,6 +144,7 @@ export function ChatPage() {
         onSelect={(id) => { setSourceNavigation(null); void openConversation(id) }}
         onNew={() => { setSourceNavigation(null); void createConversation() }}
         onOpenPanel={(panel) => { setSourceNavigation(null); setPanelOpenedByUser(true); setWorkspacePanel(panel); setSidebarOpen(false) }}
+        onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
         onClose={() => setSidebarOpen(false)}
         onLogout={handleLogout}
       />}
@@ -153,9 +154,7 @@ export function ChatPage() {
           title={activeConversation?.title ?? '新对话'}
           isHome={isHome}
           sidebarOpen={sidebarOpen}
-          sidebarCollapsed={desktopSidebarCollapsed}
           onOpenSidebar={() => setSidebarOpen(true)}
-          onToggleSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
         />
         {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
         <p role="status" className="sr-only">{sending ? '消息请求进行中' : ''}</p>

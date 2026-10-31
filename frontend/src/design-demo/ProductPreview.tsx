@@ -220,6 +220,7 @@ export default function ProductPreview() {
     onSelect={(id) => { setSourceTarget(null); setActiveId(id); resetScroll(); setNotice(''); setSourceError(''); setSidebarOpen(false) }}
     onNew={newConversation}
     onOpenPanel={(nextPanel) => { setSourceTarget(null); setSourceError(''); setPanelOpenedByUser(true); setPanel(nextPanel); setSidebarOpen(false) }}
+    onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
     onClose={() => setSidebarOpen(false)}
     onLogout={() => setNotice('合成预览无需登录。')}
   />
@@ -235,9 +236,7 @@ export default function ProductPreview() {
       title={conversations.find((item) => item.id === activeId)?.title ?? '新对话'}
       isHome={isHome}
       sidebarOpen={sidebarOpen}
-      sidebarCollapsed={desktopSidebarCollapsed}
       onOpenSidebar={() => setSidebarOpen(true)}
-      onToggleSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
       status={<PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
     />
     <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />

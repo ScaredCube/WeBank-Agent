@@ -39,18 +39,18 @@ export function ChatHome({
     <section
       ref={homeRef}
       aria-labelledby="chat-home-title"
-      className="mx-auto flex min-h-full w-full max-w-[820px] flex-col justify-center px-5 py-10 sm:px-8 xl:px-12"
+      className="mx-auto flex min-h-full w-full max-w-[820px] flex-col justify-center px-5 py-8 sm:px-8 lg:-translate-y-8 xl:px-12"
     >
       <div className="w-full max-w-[704px]">
-        <h2 id="chat-home-title" className="max-w-[610px] text-balance text-left text-[34px] font-bold leading-[1.13] tracking-[-0.035em] text-[#10231f] sm:text-[46px]">
-          让金融事务<br />变得更简单
+        <h2 id="chat-home-title" className="max-w-[704px] text-balance text-left text-[34px] font-bold leading-[1.1] tracking-[-0.035em] text-[#10231f] sm:text-[46px]">
+          让金融事务变得更简单
         </h2>
-        <p className="mt-4 max-w-[704px] text-pretty text-[14px] leading-7 text-muted sm:text-[16px]">
+        <p className="mt-3 max-w-[704px] text-pretty text-[14px] leading-7 text-muted sm:text-[16px]">
           账户、收支、资产可直接查询；转账需先确认。
         </p>
 
         {feedback}
-        <div className="mt-7">{composer}</div>
+        <div className="mt-5">{composer}</div>
 
         {suggestions.length > 0 && onPick && <div role="group" aria-label="示例问题" className="mt-5 flex w-full flex-wrap gap-2.5">
           {suggestions.map(({ label, prompt, icon: Icon }) => (
@@ -70,7 +70,7 @@ export function ChatHome({
         </div>}
 
         {disclaimer && (
-          <p className="mt-3 max-w-[704px] text-left text-xs leading-5 text-muted">
+          <p className="mt-2 max-w-[704px] text-left text-xs leading-5 text-muted">
             {disclaimer}
           </p>
         )}
