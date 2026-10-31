@@ -2,7 +2,6 @@ import { Bookmark, CreditCard, History, LogOut, MessageSquareText, PanelLeftClos
 import { useEffect, useRef } from 'react'
 
 import type { WorkspacePanelName } from '@/app/workspace-state'
-import { BrandMark } from '@/components/BrandMark'
 import { PenguinArt } from '@/features/theme/PenguinArt'
 import { MASCOT_NAME } from '@/features/theme/brand'
 import type { Conversation, User } from '@/lib/api'
@@ -84,15 +83,15 @@ export function ConversationSidebar({
       >
         <div className={cn('flex h-16 shrink-0 items-center gap-3 border-b border-line/65 px-5', desktopCollapsed && 'lg:justify-center lg:px-0')}>
           {desktopCollapsed ? <>
-            <BrandMark className="size-9 shrink-0 rounded-[11px] lg:hidden" />
+            <PenguinArt pose="avatar" className="size-9 shrink-0 lg:hidden" />
             <button
               type="button"
               aria-label="展开侧栏"
               title="展开侧栏"
               onClick={onToggleDesktopSidebar}
-              className="hidden size-9 shrink-0 place-items-center rounded-[10px] transition hover:bg-[#f1f6f4] focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid"
+              className="hidden size-9 shrink-0 place-items-center rounded-[10px] transition hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid"
             >
-              <BrandMark className="size-9 rounded-[10px]" />
+              <PenguinArt pose="avatar" className="size-9" />
             </button>
           </> : <PenguinArt pose="avatar" className="size-9 shrink-0" />}
           <div className={cn('min-w-0 flex-1 truncate text-[14px] font-bold tracking-[-0.025em] text-ink', desktopCollapsed && 'lg:hidden')}>

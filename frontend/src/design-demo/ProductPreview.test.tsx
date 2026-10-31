@@ -137,6 +137,8 @@ it('切换会话不会把尚未组合的账户选择带到另一会话', async (
   await user.click(screen.getByRole('button', { name: '资产' }))
   await user.click(screen.getByRole('button', { name: /^付款账户.*日常账户/ }))
   await user.click(screen.getByRole('button', { name: /卡片与账户/ }))
+  // A conversation selection now closes the resource panel; reopen it to continue the intent.
+  await user.click(screen.getByRole('button', { name: '资产' }))
   await user.click(screen.getByRole('button', { name: /^小林/ }))
   expect(screen.getByText('请先选择付款账户。')).toBeTruthy()
   expect(screen.queryByText('转账 · 日常账户 → 小林')).toBeNull()
@@ -264,4 +266,18 @@ it('空状态建议只填入草稿，发送后进入对话布局', async () => {
   await user.click(screen.getByRole('button', { name: '发送' }))
   expect(await screen.findByText('这是合成预览，消息不会发送给 Agent。')).toBeTruthy()
   expect(screen.queryByRole('heading', { name: /今天，想完成什么/ })).toBeNull()
+})
+
+it('最近对话切换关闭资产面板，再次点击当前会话不触发无谓切换', async () => {
+  const user = userEvent.setup()
+  render(<ProductPreview />)
+  await user.click(screen.getByRole('button', { name: '资产' }))
+  expect(screen.getByRole('region', { name: '资产' })).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: /卡片与账户/ }))
+  expect(screen.queryByRole('region', { name: '资产' })).toBeNull()
+  expect(screen.getByText('银行卡状态')).toBeTruthy()
+  const current = screen.getByRole('button', { name: /卡片与账户/ })
+  await user.click(current)
+  expect(screen.getByText('银行卡状态')).toBeTruthy()
+  expect(current.getAttribute('aria-current')).toBe('true')
 })

@@ -182,7 +182,7 @@ export function ChatPage() {
         disabled={sending || creatingConversation || actionPreparing || !!pendingAction}
         disabledReason={actionPreparing || pendingAction ? '请先处理当前操作，再切换或新建会话。' : undefined}
         newDisabled={loadingMessages}
-        onSelect={(id) => { setSourceNavigation(null); void openConversation(id) }}
+        onSelect={(id) => { setSourceNavigation(null); setWorkspacePanel(null); setPanelOpenedByUser(false); setSidebarOpen(false); void openConversation(id) }}
         onNew={() => { setSourceNavigation(null); void createConversation() }}
         onOpenPanel={(panel) => { setSourceNavigation(null); setPanelOpenedByUser(true); setWorkspacePanel(panel); setSidebarOpen(false) }}
         onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}

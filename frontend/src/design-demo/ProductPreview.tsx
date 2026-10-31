@@ -236,7 +236,7 @@ export default function ProductPreview() {
     desktopCollapsed={desktopSidebarCollapsed}
     activePanel={panel}
     hideActiveConversation={isHome && conversations.find((item) => item.id === activeId)?.title === '新对话'}
-    onSelect={(id) => { setSourceTarget(null); setActiveId(id); resetScroll(); setNotice(''); setSourceError(''); setSidebarOpen(false) }}
+    onSelect={(id) => { setSourceTarget(null); setPanel(null); setSidebarOpen(false); if (id !== activeId) { setActiveId(id); resetScroll('top'); setNotice(''); setSourceError('') } }}
     onNew={newConversation}
     onOpenPanel={(nextPanel) => { setSourceTarget(null); setSourceError(''); setPanelOpenedByUser(true); setPanel(nextPanel); setSidebarOpen(false) }}
     onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}

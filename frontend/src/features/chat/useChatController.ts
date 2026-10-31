@@ -94,11 +94,12 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const openConversation = useCallback(
     async (id: number) => {
       if (sending || actionBlocked || !token) return
+      if (id === activeId && !historyUnavailable) return
       const requestId = ++historyRequest.current
       drafts.current.set(activeId, draft)
       setDraft(drafts.current.get(id) ?? '')
       onConversationChange()
-      resetScroll()
+      resetScroll('top')
       setActiveId(id)
       setMessages([])
       setHistoryUnavailable(false)
@@ -116,7 +117,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (requestId === historyRequest.current) setLoadingMessages(false)
       }
     },
-    [activeId, draft, sending, actionBlocked, token, resetScroll, onConversationChange],
+    [activeId, draft, sending, actionBlocked, token, historyUnavailable, resetScroll, onConversationChange],
   )
 
   const createConversation = useCallback(async () => {
@@ -132,7 +133,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       drafts.current.set(activeId, draftDuringCreation.current)
       setConversations((prev) => [conversation, ...prev])
       setActiveId(conversation.id)
-      resetScroll()
+      resetScroll('top')
       setMessages([])
       setHistoryUnavailable(false)
       setDraft('')
