@@ -27,6 +27,18 @@ def render_tool_result(name: str, result: dict) -> str:
             return f"操作未完成：{result['error']}。"
         return f"操作未完成：{result['error']}。"
     data = result["data"]
+    if name == "get_latest_action_progress":
+        if not data:
+            return "当前会话没有找到可核验的聊天待确认操作；无法据此判断其他操作是否执行。"
+        stage = data.get("stage") if isinstance(data, dict) else None
+        messages = {
+            "awaiting_confirmation": "最近一项聊天操作仍待用户确认，尚未执行。",
+            "awaiting_execution": "最近一项聊天操作已记录确认或验证，但尚未执行。",
+            "completed": "最近一项聊天操作已记录完成，可核对操作记录。",
+            "cancelled": "最近一项聊天操作已取消，没有执行。",
+            "expired": "最近一项聊天操作已过期，不能使用原确认令牌继续。",
+        }
+        return messages.get(stage, "最近一项聊天操作状态暂时无法核验，请查看操作记录。")
     if name == "get_card_status":
         if not data:
             return "未找到模拟卡片。"

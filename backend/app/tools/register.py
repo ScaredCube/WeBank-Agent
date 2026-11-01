@@ -15,6 +15,7 @@ from app.tools.subscription_tools import (
     SubscriptionArguments, SubscriptionCancelArguments, detect_subscriptions,
     get_subscriptions, prepare_cancel_subscription,
 )
+from app.tools.progress_tools import LatestActionProgressArguments, get_latest_action_progress
 from app.tools.combo_tools import (
     CollectionArguments, ConversionArguments, InternalTransferArguments,
     prepare_collection_tool, prepare_conversion_tool, prepare_internal_transfer_tool,
@@ -32,6 +33,7 @@ def create_readonly_registry() -> ToolRegistry:
         ("get_wealth_products", "查询可申购的模拟理财产品及参考年化、风险等级和起购金额", WealthProductArguments, get_wealth_products),
         ("get_wealth_holdings", "查询本人模拟理财持仓和昨日收益", WealthHoldingArguments, get_wealth_holdings),
         ("get_wealth_risk_profile", "查询本人模拟理财风险测评等级", WealthRiskArguments, get_wealth_risk_profile),
+        ("get_latest_action_progress", "只读查询当前会话中最近一项由聊天准备的待确认操作的真实状态。已确认不代表已执行；无法查证即时完成的其他操作。无参数，不可执行操作。", LatestActionProgressArguments, get_latest_action_progress),
         ("get_subscriptions", "查询本人模拟订阅、下次扣费日期和续费提醒", SubscriptionArguments, get_subscriptions),
         ("detect_subscriptions", "从最近模拟消费流水中识别可能的重复订阅", SubscriptionArguments, detect_subscriptions),
     ):

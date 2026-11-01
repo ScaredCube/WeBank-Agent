@@ -6,6 +6,9 @@ from sqlmodel import Session, select
 from app.agent.loop import AgentLoop
 from app.agent.tool_executor import VerifiedToolContext
 from app.services.chat_turn import ChatTurn, stream_chat_turn
+from app.services.action_progress import (
+    action_progress_for_submission, latest_action_progress, replay_status_message,
+)
 from app.services.chat_messages import present_message, present_messages
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
@@ -130,6 +133,10 @@ def read_submission_status(
         "state": attempt.state,
         "user_message_id": attempt.user_message_id,
         "pending_action_id": attempt.pending_action_id,
+        "action_progress": action_progress_for_submission(
+            session, submission=attempt, user_id=user.id,
+            conversation_id=conversation_id,
+        ),
         "message": None,
     }
     if attempt.state == "completed" and attempt.assistant_message_id is not None:
@@ -137,6 +144,21 @@ def read_submission_status(
         if message is not None and message.conversation_id == conversation_id:
             result["message"] = present_message(session, message).model_dump(mode="json")
     return result
+
+
+@router.get("/conversations/{conversation_id}/action-progress")
+def read_latest_action_progress(
+    conversation_id: int,
+    session: SessionDep,
+    user: CurrentUser,
+    response: Response,
+) -> dict:
+    """Recover the newest verified action state without a saved client request ID."""
+    _require_conversation(session, user, conversation_id)
+    response.headers["Cache-Control"] = "no-store"
+    return {"action_progress": latest_action_progress(
+        session, user_id=user.id, conversation_id=conversation_id,
+    )}
 
 
 @router.post("/conversations/{conversation_id}/messages")
@@ -239,9 +261,13 @@ async def send_message(
                 return EventSourceResponse(replay_completed(), ping=15,
                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
             if attempt.state == "action_pending":
+                progress = action_progress_for_submission(
+                    session, submission=attempt, user_id=user.id,
+                    conversation_id=conversation_id,
+                )
+                warning = replay_status_message(progress)
                 async def replay_action_warning():
-                    yield _sse({"type": "action_warning", "message":
-                        "此请求已创建待确认操作，确认令牌不会重新发送。请查看操作记录；不要重新创建。"})
+                    yield _sse({"type": "action_warning", "message": warning})
                     yield _sse({"type": "done", "message": None})
                 return EventSourceResponse(replay_action_warning(), ping=15,
                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

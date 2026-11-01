@@ -47,6 +47,7 @@ class VerifiedToolContext:
     """Values populated by the authenticated Chat route, never model-generated."""
 
     user_id: int
+    conversation_id: int | None = None
     verified_account_token: str | None = None
     verified_card_id: int | None = None
     verified_contact_token: str | None = None
@@ -129,6 +130,13 @@ class ToolExecutor:
                     args["amount_fen"] = context.intent_amount_fen
                     if context.intent_action == "transfer":
                         args.pop("target_token", None)
+
+            # Validate scope here; inject it only at handler dispatch, after
+            # the Guard sees the model-authored arguments (not private scope).
+            if (argument_error is None and spec is not None
+                    and spec.name == "get_latest_action_progress"
+                    and context.conversation_id is None):
+                argument_error = "会话范围不可用，请重新发起查询"
 
             # Read-only selections are rebound from server-verified objects.
             if (argument_error is None and context.verified_account_token is not None
@@ -243,7 +251,13 @@ class ToolExecutor:
                 else:
                     try:
                         with session_scope() as session:
-                            result = await spec.handler(session=session, user_id=user_id, **args)
+                            handler_args = (
+                                {**args, "conversation_id": context.conversation_id}
+                                if spec.name == "get_latest_action_progress" else args
+                            )
+                            result = await spec.handler(
+                                session=session, user_id=user_id, **handler_args,
+                            )
                             record(
                                 session, user_id=user_id, event_type="risk_assessed",
                                 tool=audit_tool, risk_level=decision.level.value,

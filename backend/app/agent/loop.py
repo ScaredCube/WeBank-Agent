@@ -41,7 +41,8 @@ class AgentLoop:
                      intent_action: str | None = None,
                      intent_tokens: tuple[str, str] | None = None,
                      intent_amount_fen: int | None = None,
-                     original_request: str | None = None) -> AsyncIterator[AgentEvent]:
+                     original_request: str | None = None,
+                     conversation_id: int | None = None) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         if required_intent_tool(intent_action) is not None:
@@ -54,6 +55,7 @@ class AgentLoop:
         executor = ToolExecutor(registry, self.guard)
         trusted = VerifiedToolContext(
             user_id=user_id,
+            conversation_id=conversation_id,
             verified_account_token=verified_account_token,
             verified_card_id=verified_card_id,
             verified_contact_token=verified_contact_token,

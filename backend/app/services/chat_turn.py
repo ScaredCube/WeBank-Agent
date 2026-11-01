@@ -87,6 +87,7 @@ async def stream_chat_turn(
             intent_tokens=turn.verified.intent_tokens,
             intent_amount_fen=turn.verified.intent_amount_fen,
             original_request=turn.original_request,
+            conversation_id=conversation_id,
         ):
             if await is_disconnected():
                 # The model/tool may already have completed a side effect.
