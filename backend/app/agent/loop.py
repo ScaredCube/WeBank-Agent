@@ -9,6 +9,7 @@ from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.financial_summary import summarize_bill_comparison
 from app.agent.read_completion import completed_readonly_summary
+from app.agent.response_policy import tool_free_reply
 from app.schemas.card_results import from_card_tool_result
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
@@ -81,12 +82,14 @@ class AgentLoop:
                                 for name, result in tool_results)
                         yield AgentEvent("delta", {"text": summary})
                     else:
-                        # Model text is untrusted: without a tool result it cannot
-                        # establish any account, amount or transaction claim.
                         if getattr(self.llm, "mode", None) == "mock":
                             text = "当前是演示模式，离线 Mock 不会调用银行工具。"
                         else:
-                            text = "未能通过工具完成查询或准备模拟转账。请检查请求后重试；其他银行业务暂未开放。"
+                            # Model free text is useful for greetings, explaining
+                            # capabilities and asking for missing parameters.
+                            # A response without an authenticated Tool result
+                            # must never assert bank balances or executed actions.
+                            text = tool_free_reply("".join(content))
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
