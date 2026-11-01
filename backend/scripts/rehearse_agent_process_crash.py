@@ -53,7 +53,7 @@ def _safe_env(database: Path) -> dict[str, str]:
 def _worker(scenario: str) -> None:
     _safe_database()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     from sqlmodel import Session, SQLModel, select
     from app.core.config import settings
