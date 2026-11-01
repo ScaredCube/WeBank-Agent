@@ -42,7 +42,10 @@ class AgentLoop:
         self.guard = guard if guard is not None else get_guard()
 
     async def stream(self, history: list[dict[str, str]], user_id: int,
-                     verified_account_token: str | None = None) -> AsyncIterator[AgentEvent]:
+                     verified_account_token: str | None = None,
+                     verified_card_id: int | None = None,
+                     verified_contact_token: str | None = None,
+                     verified_recipient_name: str | None = None) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
@@ -116,6 +119,24 @@ class AgentLoop:
                         if (argument_error is None and verified_account_token is not None
                                 and spec is not None and spec.name == "get_monthly_bill"):
                             args["account_token"] = verified_account_token
+                        if (argument_error is None and verified_account_token is not None
+                                and verified_card_id is not None and spec is not None
+                                and spec.name == "get_card_status"):
+                            # Both fields come from the authenticated card-to-account join.
+                            # Never trust an unverified model-supplied card ID or token.
+                            args["account_token"] = verified_account_token
+                            args["card_id"] = verified_card_id
+                        if (argument_error is None and verified_account_token is not None
+                                and verified_contact_token is not None
+                                and verified_recipient_name is not None
+                                and spec is not None and spec.name == "prepare_transfer"):
+                            # The model determines whether to propose a transfer and
+                            # its amount. Only the authenticated route determines who
+                            # pays and receives; all actions still require confirmation.
+                            args.pop("target_token", None)
+                            args["source_token"] = verified_account_token
+                            args["recipient_contact_token"] = verified_contact_token
+                            args["recipient_name"] = verified_recipient_name
                         guard_blocked = None
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):

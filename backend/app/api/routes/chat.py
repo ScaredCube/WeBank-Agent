@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -188,6 +189,15 @@ async def send_message(
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
     injection = detect_injection(display_content)
     verified_account_token: str | None = None
+    verified_card_id: int | None = selected_card[0].id if selected_card is not None else None
+    verified_contact_token: str | None = None
+    verified_recipient_name: str | None = None
+    # Scope automated transfer binding to an explicit request that contains
+    # a transfer verb and an amount, in addition to verified account/contact IDs.
+    explicit_transfer = (
+        any(verb in display_content for verb in ("转账", "汇款", "打款"))
+        and re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|角|分)", display_content) is not None
+    )
     if payload.references and not injection.blocked and not uncertain:
         try:
             visible = []
@@ -209,6 +219,9 @@ async def send_message(
                 )
             if selected_contact is not None:
                 contact_token = create_contact_token(session, user.id, selected_contact.id)
+                if explicit_transfer and account is not None:
+                    verified_contact_token = contact_token
+                    verified_recipient_name = selected_contact.name
                 visible.append(f"联系人：{mask_text(selected_contact.name)} · {mask_text(selected_contact.bank_name)}")
                 trusted.append(
                     "用户选择的收款联系人已核验，其显示名为 "
@@ -263,7 +276,10 @@ async def send_message(
                 yield _sse({"type": "done", "message": None})
                 return
             async for event in loop.stream(
-                history, user_id=user.id, verified_account_token=verified_account_token
+                history, user_id=user.id, verified_account_token=verified_account_token,
+                verified_card_id=verified_card_id,
+                verified_contact_token=verified_contact_token,
+                verified_recipient_name=verified_recipient_name
             ):
                 if await request.is_disconnected():
                     break
@@ -299,7 +315,19 @@ async def send_message(
                 elif event.type == "action_required":
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
-                    yield _sse({"type": "error", "message": event.data["message"]})
+                    if not trusted_results:
+                        # Preserve the established explicit-error contract for
+                        # requests which produced no trustworthy bank result.
+                        yield _sse({"type": "error", "message": event.data["message"]})
+                        return
+                    # An already verified card/bill must survive later model
+                    # failures and be restorable from encrypted chat history.
+                    explanation = "部分查询已完成，其余步骤未成功。已完成的结果见下方卡片。"
+                    collected.append(explanation)
+                    yield _sse({"type": "delta", "text": explanation})
+                    yield _sse({"type": "done", "message": _persist_assistant(
+                        conversation_id, "".join(collected), trusted_bill,
+                        trusted_cards, trusted_results)})
                     return
 
             message = _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
