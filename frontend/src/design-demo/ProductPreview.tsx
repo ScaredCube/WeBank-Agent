@@ -79,7 +79,7 @@ function PreviewStatus({ scenario, onChange }: {
 }) {
   return (
     <div title="合成数据，不连接 Agent 或业务接口" className="ml-auto hidden shrink-0 items-center gap-2 rounded-full bg-jade-50 px-2.5 py-1 text-xs text-jade-800 sm:flex">
-      <span>合成预览</span>
+      <span>开发视图</span>
       <PreviewScenarioSelect scenario={scenario} onChange={onChange} />
     </div>
   )
@@ -91,7 +91,7 @@ function MobilePreviewStatus({ scenario, onChange }: {
 }) {
   return (
     <div title="合成数据，不连接 Agent 或业务接口" className="flex min-h-9 shrink-0 items-center justify-center gap-2 border-b border-line bg-panel px-3 text-[10.5px] text-muted sm:hidden">
-      <span>合成数据 · 不连接 Agent 或业务接口</span>
+      <span>开发视图 · 模拟银行数据</span>
       <PreviewScenarioSelect mobile scenario={scenario} onChange={onChange} />
     </div>
   )
@@ -162,7 +162,7 @@ export default function ProductPreview() {
       [conversationId]: [
         ...(scenario === 'normal' ? current[conversationId] ?? [] : []),
         { id, role: 'user', content, created_at: createdAt },
-        { id: id + 1, role: 'assistant', content: '这是合成预览，消息不会发送给 Agent。', created_at: createdAt },
+        { id: id + 1, role: 'assistant', content: '已收到你的问题。此页面用于查看交互，真实 Agent 请在正式对话中使用。', created_at: createdAt },
       ],
     }))
     setDrafts((current) => ({ ...current, [activeId]: '', [conversationId]: '' }))
@@ -189,7 +189,7 @@ export default function ProductPreview() {
       const messageId = previewCardMessageIds[activeId]
       const origin = messageId ? { conversationId: activeId, messageId } : undefined
       await saveSnapshot(1, currentCard, previewDatabase, origin)
-      setNotice('已收藏合成卡片。')
+      setNotice('卡片已收藏。')
     } catch {
       setNotice('收藏失败，请检查浏览器存储后重试。')
     } finally {
@@ -238,19 +238,20 @@ export default function ProductPreview() {
     hideActiveConversation={isHome && conversations.find((item) => item.id === activeId)?.title === '新对话'}
     onSelect={(id) => { setSourceTarget(null); setPanel(null); setSidebarOpen(false); if (id !== activeId) { setActiveId(id); resetScroll('top'); setNotice(''); setSourceError('') } }}
     onNew={newConversation}
+    onRename={async (id, title) => { setConversations(current => current.map(item => item.id === id ? {...item, title} : item)) }}
     onOpenPanel={(nextPanel) => { setSourceTarget(null); setSourceError(''); setPanelOpenedByUser(true); setPanel(nextPanel); setSidebarOpen(false) }}
     onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
     onClose={() => setSidebarOpen(false)}
-    onLogout={() => setNotice('合成预览无需登录。')}
+    onLogout={() => setNotice('此页面用于查看交互，正式使用请进入登录页。')}
   />
   const workspace = panel && <WorkspacePanelFrame key={panel} panel={panel} focusOnMount={panelOpenedByUser} onClose={() => setPanel(null)} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)}>
     {panel === 'assets' && scenario === 'error' && <p role="alert" className="text-sm text-muted">样例：资产加载失败，请重试。</p>}
     {panel === 'assets' && scenario === 'loading' && <p role="status" className="text-sm text-muted">样例：正在加载资产…</p>}
     {panel === 'assets' && (scenario === 'empty' || scenario === 'normal') && <PreviewAssets key={activeId} hidden={hidden} onReference={addReference} onIntent={(intent) => { setIntents((current) => ({ ...current, [activeId]: intent })); setNotice(''); setPanel(null) }} />}
-    {panel === 'collections' && <><p className="mb-5 text-xs text-muted">合成预览使用独立收藏空间。</p>{sourceError && <p role="alert" className="mb-4 text-sm text-red-700">{sourceError}</p>}<CollectionPanel userId={1} hidden={hidden} databaseName={previewDatabase} onOpenSource={openPreviewSource} /></>}
+    {panel === 'collections' && <>{sourceError && <p role="alert" className="mb-4 text-sm text-red-700">{sourceError}</p>}<CollectionPanel userId={1} hidden={hidden} databaseName={previewDatabase} onOpenSource={openPreviewSource} /></>}
     {panel === 'activity' && <ActivityList entries={previewActivity} />}
   </WorkspacePanelFrame>
-  return <BankWorkspace sidebarCollapsed={desktopSidebarCollapsed} sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="合成预览，操作及金额仅为样例。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
+  return <BankWorkspace sidebarCollapsed={desktopSidebarCollapsed} sidebar={sidebar} panel={workspace} overlay={previewAction && <PendingActionDialog event={previewAction.event} transport={previewAction.transport} hidden={hidden} onTogglePrivacy={() => setHidden((value) => !value)} supplementalDescription="当前为模拟业务数据，不会操作真实资金。" verificationHint="样例中输入任意数字即可。" onClose={() => setPreviewAction(null)} />}>
     <WorkspaceHeader
       title={conversations.find((item) => item.id === activeId)?.title ?? '新对话'}
       isHome={isHome}
@@ -264,10 +265,10 @@ export default function ProductPreview() {
           className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-jade-800 focus-visible:outline-2 focus-visible:outline-jade-700">
           {hidden ? <EyeOff size={17}/> : <Eye size={17}/>}
         </button>}
-        <PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />
+        {new URLSearchParams(window.location.search).get('debug') === '1' && <PreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
       </div>}
     />
-    <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />
+    {new URLSearchParams(window.location.search).get('debug') === '1' && <MobilePreviewStatus scenario={scenario} onChange={(nextScenario) => { setScenario(nextScenario); resetScroll() }} />}
     <LayoutGroup id="bank-agent-product-preview">
     <motion.div ref={scrollRef} layoutScroll onScroll={onScroll} role={isHome ? undefined : 'log'} aria-label={isHome ? undefined : '对话消息'} aria-live="off" className="scroll-thin flex-1 overflow-y-auto">
       {scenario === 'error' ? (

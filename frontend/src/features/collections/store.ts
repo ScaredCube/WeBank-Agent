@@ -1,6 +1,7 @@
 import { cardOriginSchema, cardSchema, type CardDescription, type CardOrigin } from '@/features/intelligent-ui/schema'
 
-export interface Snapshot { id: string; savedAt: string; card: unknown }
+export interface RefreshSpec { kind: 'monthly_bill'; month: string; accountId: number }
+export interface Snapshot { id: string; savedAt: string; card: unknown; refresh?: RefreshSpec }
 interface StoredSnapshot extends Snapshot { key: string; userId: number }
 
 function redact(value: string): string {
@@ -58,9 +59,11 @@ function requireUser(userId: number) {
   if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('无法识别当前用户')
 }
 
-export async function saveSnapshot(userId: number, value: unknown, databaseName?: string, trustedOrigin?: CardOrigin): Promise<Snapshot> {
+export async function saveSnapshot(userId: number, value: unknown, databaseName?: string, trustedOrigin?: CardOrigin, refresh?: RefreshSpec): Promise<Snapshot> {
   requireUser(userId)
-  const snapshot: Snapshot = { id: crypto.randomUUID(), savedAt: new Date().toISOString(), card: sanitize(value, trustedOrigin) }
+  if (refresh && (refresh.kind !== 'monthly_bill' || !/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(refresh.month) ||
+      !Number.isSafeInteger(refresh.accountId) || refresh.accountId <= 0)) throw new Error('刷新来源无效')
+  const snapshot: Snapshot = { id: crypto.randomUUID(), savedAt: new Date().toISOString(), card: sanitize(value, trustedOrigin), ...(refresh ? { refresh } : {}) }
   const stored: StoredSnapshot = { ...snapshot, key: `${userId}:${snapshot.id}`, userId }
   await run('readwrite', (store) => store.add(stored), databaseName)
   return snapshot
@@ -74,7 +77,19 @@ export async function listSnapshots(userId: number, databaseName?: string): Prom
     id: row.key.slice(prefix.length),
     savedAt: typeof row.savedAt === 'string' && Number.isFinite(Date.parse(row.savedAt)) ? row.savedAt : '',
     card: row.card,
+    ...(row.refresh?.kind === 'monthly_bill' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(row.refresh.month) && Number.isSafeInteger(row.refresh.accountId) && row.refresh.accountId > 0 ? { refresh: row.refresh } : {}),
   })).sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+}
+
+export async function refreshSnapshot(userId: number, id: string, value: unknown, databaseName?: string): Promise<Snapshot> {
+  requireUser(userId)
+  const stored = await run<StoredSnapshot | undefined>('readonly', store => store.get(`${userId}:${id}`), databaseName)
+  if (!stored || stored.userId !== userId || !stored.refresh) throw new Error('此收藏没有可用的刷新来源')
+  const original = cardSchema.safeParse(stored.card)
+  if (!original.success) throw new Error('原收藏无法验证，已保留')
+  const updated: StoredSnapshot = { ...stored, card: sanitize(value, original.data.origin) }
+  await run('readwrite', store => store.put(updated), databaseName)
+  return { id, savedAt: updated.savedAt, card: updated.card, refresh: updated.refresh }
 }
 
 export async function deleteSnapshot(userId: number, id: string, databaseName?: string): Promise<void> {

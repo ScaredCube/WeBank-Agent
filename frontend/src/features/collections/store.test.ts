@@ -1,10 +1,28 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
-import { clearSnapshots, listSnapshots, saveSnapshot, deleteSnapshot } from './store'
+import { clearSnapshots, listSnapshots, saveSnapshot, deleteSnapshot, refreshSnapshot } from './store'
 
 const card = { version: 1, id: 'bill-2026', title: '账单', source: '账户 ****1234', observedAt: '2026-01-01T00:00:00Z', blocks: [{ type: 'text', text: '消费' }] }
 
 describe('本地卡片快照', () => {
+  it('保存经过验证的刷新规范，按用户隔离并更新卡片内容', async () => {
+    const saved = await saveSnapshot(2201, card, undefined, { conversationId: 3, messageId: 11 },
+      { kind: 'monthly_bill', month: '2026-01', accountId: 7 })
+    expect((await listSnapshots(2201))[0].refresh).toEqual({ kind: 'monthly_bill', month: '2026-01', accountId: 7 })
+    await expect(refreshSnapshot(2202, saved.id, { ...card, title: '伪造更新' })).rejects.toThrow()
+    const updated = await refreshSnapshot(2201, saved.id, { ...card, title: '新账单', blocks: [{ type: 'text', text: '已更新' }] })
+    expect(updated.card).toMatchObject({ title: '新账单', origin: { conversationId: 3, messageId: 11 } })
+    expect((await listSnapshots(2201))[0].card).toMatchObject({ title: '新账单' })
+    expect(updated.savedAt).toBe(saved.savedAt)
+  })
+  it('非法刷新来源或卡片无法替换旧收藏', async () => {
+    await expect(saveSnapshot(2203, card, undefined, undefined,
+      { kind: 'monthly_bill', month: '2026-99', accountId: 7 })).rejects.toThrow()
+    const saved = await saveSnapshot(2203, card, undefined, undefined, { kind: 'monthly_bill', month: '2026-01', accountId: 1 })
+    await expect(refreshSnapshot(2203, saved.id, { version: 99 })).rejects.toThrow()
+    expect((await listSnapshots(2203))[0].card).toMatchObject({ title: '账单' })
+  })
+
   it('合成预览和真实收藏使用独立数据库', async () => {
     const saved = await saveSnapshot(1100, card, 'webank-ui-preview-test')
     expect((await listSnapshots(1100, 'webank-ui-preview-test')).some((item) => item.id === saved.id)).toBe(true)

@@ -19,11 +19,11 @@ export function HomeAccountSummary({ overview, hidden, onTogglePrivacy, onOpenAs
     : null
 
   return (
-    <section aria-label="账户速览" className="border-t border-line pt-4">
+    <section aria-label="账户速览" className="mt-9 border-t border-line pt-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h3 className="text-[13px] font-semibold text-ink">账户速览</h3>
-          <span className="text-[10px] tabular-nums text-muted">{overview.status === 'ready' ? accounts.length + ' 个账户' : '—'}</span>
+          <h3 className="text-[16px] font-semibold tracking-tight text-ink">账户速览</h3>
+          <span className="text-xs tabular-nums text-muted">{overview.status === 'ready' ? accounts.length + ' 个账户' : '—'}</span>
         </div>
         <div className="flex items-center gap-2">
           {onTogglePrivacy && <button type="button"
@@ -45,16 +45,16 @@ export function HomeAccountSummary({ overview, hidden, onTogglePrivacy, onOpenAs
         {overview.status === 'error' && <p role="status" className="py-7 text-[13px] text-muted">账户信息暂不可用</p>}
         {overview.status === 'ready' && accounts.length === 0 && <p className="py-7 text-[13px] text-muted">暂无可展示的账户</p>}
         {overview.status === 'ready' && accounts.length > 0 && (
-          <div className="grid border-t border-line md:grid-cols-2 md:divide-x md:divide-line">
+          <div className="grid gap-3 md:grid-cols-2">
             {accounts.slice(0, 2).map((account, index) => (
-              <div key={account.account_id} className="border-b border-line py-4 md:border-b-0 md:px-6 md:first:pl-0">
-                <div className="flex items-center justify-between gap-4 text-[11px] text-muted">
+              <div key={account.account_id} className="min-w-0 rounded-[20px] border border-line bg-panel px-5 py-5 shadow-[0_12px_28px_-25px_rgba(0,40,31,.3)] sm:px-6">
+                <div className="flex items-center justify-between gap-4 text-[12px] text-muted">
                   <span className="truncate">{hidden ? '账户 ' + (index + 1) : account.name}</span>
                   <span className="font-mono tracking-[0.05em]">{hidden ? '••••' : account.masked_number}</span>
                 </div>
-                <div className="mt-3 flex items-baseline justify-between gap-3">
+                <div className="mt-6 flex items-baseline justify-between gap-3">
                   <p aria-label={hidden ? '金额已隐藏' : account.currency === 'CNY' ? formatCnyFen(account.balance_fen) : '非人民币账户'}
-                    className="min-w-0 break-all text-[clamp(1.45rem,2.3vw,2rem)] font-semibold tracking-[-0.047em] tabular-nums text-ink">
+                    className="min-w-0 break-all text-[clamp(1.5rem,2.4vw,2.2rem)] font-semibold tracking-[-0.047em] tabular-nums text-ink">
                     {hidden ? '••••••' : account.currency === 'CNY' ? formatCnyFen(account.balance_fen) : '—'}
                   </p>
                   <span className="shrink-0 text-[10px] text-muted">{account.currency}</span>
@@ -65,7 +65,7 @@ export function HomeAccountSummary({ overview, hidden, onTogglePrivacy, onOpenAs
           </div>
         )}
       </div>
-      <p className="mt-3 text-[10px] leading-5 text-muted/70">
+      <p className="mt-4 text-xs leading-5 text-muted/70">
         {queryTime ? '模拟银行数据 · 查询于 ' + queryTime : '模拟银行数据 · 以实际查询结果为准'}
       </p>
     </section>

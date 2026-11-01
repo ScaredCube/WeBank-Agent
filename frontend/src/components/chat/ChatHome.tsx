@@ -80,10 +80,10 @@ export function ChatHome({
 
               {!compact && onPick && suggestions.length > 0 && (
                 <nav className="mt-10" aria-label="常用事务，选择后填入输入框">
-                  <div className="flex items-center justify-between border-b border-line pb-3">
-                    <h3 className="text-[12px] font-semibold text-ink">常用事务</h3>
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-[16px] font-semibold tracking-tight text-ink">常用事务</h3>
                   </div>
-                  <div className="grid md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-3">
                     {suggestions.map(({ label, prompt, art }) => (
                       <motion.button
                         key={prompt}
@@ -92,14 +92,13 @@ export function ChatHome({
                         whileHover={reduceMotion ? undefined : { y: -2 }}
                         whileTap={reduceMotion ? undefined : { scale: 0.985 }}
                         transition={{ type: 'spring', stiffness: 430, damping: 32 }}
-                        className={'group relative flex min-h-[76px] w-full items-center gap-3 border-b border-line py-3 text-left transition-colors hover:bg-jade-50/45 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-jade-700 ' +
-                          'px-2 md:border-r md:px-4 md:first:pl-0 md:last:border-r-0'}
+                        className={'group relative flex min-h-[96px] w-full items-center gap-4 rounded-[18px] border border-line bg-panel px-5 py-4 text-left shadow-[0_8px_25px_-24px_rgba(0,40,31,.3)] transition hover:border-jade-300 hover:bg-jade-50/30 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-jade-700'}
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                          <FinanceSticker kind={art} className="size-9 shrink-0" />
-                          <span className="text-[13px] font-medium tracking-[-0.02em] text-ink">{label}</span>
+                          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-jade-50"><FinanceSticker kind={art} className="size-9" /></span>
+                          <span className="text-[14px] font-semibold tracking-[-0.02em] text-ink">{label}</span>
                         </span>
-                        <ArrowUpRight aria-hidden="true" size={15} className="shrink-0 text-muted/50 transition-colors group-hover:text-jade-700" />
+                        <ArrowUpRight aria-hidden="true" size={17} className="shrink-0 text-muted/65 transition-colors group-hover:text-jade-700" />
                       </motion.button>
                     ))}
                   </div>

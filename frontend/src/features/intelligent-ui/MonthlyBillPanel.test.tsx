@@ -167,7 +167,7 @@ it('收藏来源保存服务端脱敏账户身份，隐私模式隐藏来源但�
   await user.click(screen.getByRole('button', { name: '查询' }))
   expect(await screen.findByText(sourceLabel)).toBeTruthy()
   await user.click(await screen.findByRole('button', { name: '收藏快照' }))
-  expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ source }))
+  expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ source }), undefined, undefined, { kind: 'monthly_bill', month: expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/), accountId: 1234 })
 
   view.rerender(<MonthlyBillPanel token="test" userId={1} hidden accounts={[account(1234, '测试账户')]} />)
   expect(screen.queryByText(sourceLabel)).toBeNull()

@@ -9,8 +9,7 @@ import { ChatHome, type ChatStarterPrompt } from '@/components/chat/ChatHome'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
 import { MessageList } from '@/components/chat/MessageList'
-import { IntelligentCard } from '@/features/intelligent-ui/Renderer'
-import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
+import { SaveBillCard } from '@/features/collections/SaveBillCard'
 import { CardStatusResult } from '@/features/intelligent-ui/CardStatusResult'
 import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/card-status-schema'
 import { messageToolResults } from '@/features/intelligent-ui/tool-results'
@@ -105,7 +104,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
+  const { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -212,12 +211,13 @@ export function ChatPage() {
         newDisabled={loadingMessages}
         onSelect={(id) => { setSourceNavigation(null); setWorkspacePanel(null); setPanelOpenedByUser(false); setSidebarOpen(false); void openConversation(id) }}
         onNew={() => { setSourceNavigation(null); void createConversation() }}
+        onRename={renameConversation}
         onOpenPanel={(panel) => { setSourceNavigation(null); setPanelOpenedByUser(true); setWorkspacePanel(panel); setSidebarOpen(false) }}
         onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
         onClose={() => setSidebarOpen(false)}
         onLogout={handleLogout}
       />}
-      panel={workspacePanel && token && user && <WorkspacePanel key={workspacePanel} token={token} userId={user.id} panel={workspacePanel} focusOnMount={panelOpenedByUser} hidden={privacyHidden} refreshSignal={workspaceRevision} actionDisabled={sending || actionPreparing || !!pendingAction} cardLossRecovery={cardLossRecovery} onCardLossRecoveryChange={onCardLossRecoveryChange} onCardLossResolved={onCardLossResolved} onActionBusy={setActionPreparing} onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onOpenSource={openSavedSource} onReference={addReference} sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} onClose={() => setWorkspacePanel(null)} />}
+      panel={workspacePanel && token && user && <WorkspacePanel key={workspacePanel} token={token} userId={user.id} panel={workspacePanel} focusOnMount={panelOpenedByUser} hidden={privacyHidden} refreshSignal={workspaceRevision} actionDisabled={sending || actionPreparing || !!pendingAction} cardLossRecovery={cardLossRecovery} onCardLossRecoveryChange={onCardLossRecoveryChange} onCardLossResolved={onCardLossResolved} onActionBusy={setActionPreparing} onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onOpenSource={openSavedSource} onStartChat={() => { setWorkspacePanel(null); updateDraft('请帮我查询本月账单，并生成一张消费分析卡片。') }} onReference={addReference} sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} onClose={() => setWorkspacePanel(null)} />}
       overlay={pendingAction && token && <PendingActionDialog key={pendingAction.action.id} event={pendingAction} token={token} open={actionOpen} hidden={privacyHidden} onTogglePrivacy={() => setPrivacyHidden((value) => !value)} onClose={() => setActionOpen(false)} onResolved={() => { if (pendingAction.action.action_type === 'card_loss' && typeof pendingAction.action.details.card_id === 'number') onCardLossRecoveryChange(pendingAction.action.details.card_id, null) }} onFinish={() => { setActionOpen(false); setPendingAction(null); setWorkspaceRevision((value) => value + 1) }} />}>
         <WorkspaceHeader
           title={activeConversation?.title ?? '新对话'}
@@ -268,8 +268,7 @@ export function ChatPage() {
                 const list = toolResultLists[message.id] ?? messageToolResults(message)
                 if (list.length) return <div className="space-y-4">{list.map((result, index) => {
                   if (result.kind === 'monthly_bill') {
-                    const card = billResultCard(result.data)
-                    return card ? <IntelligentCard key={index} value={card} hidden={privacyHidden}/> : null
+                    return token && user && activeId && message.id > 0 ? <SaveBillCard key={`${message.id}-${index}`} value={result.data} hidden={privacyHidden} userId={user.id} token={token} origin={{conversationId: activeId, messageId: message.id}}/> : null
                   }
                   if (cardStatusSnapshotSchema.safeParse(result.data).success)
                     return <CardStatusResult key={index} value={result.data} hidden={privacyHidden}

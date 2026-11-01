@@ -12,7 +12,7 @@ import type { StreamEvent } from '@/lib/sse'
 
 type Panel = 'assets' | 'activity' | 'collections'
 
-export function WorkspacePanel({ token, userId, panel, onClose, hidden, onTogglePrivacy, focusOnMount = true, refreshSignal = 0, actionDisabled = false, onActionBusy = () => {}, onActionPrepared = () => {}, cardLossRecovery = new Map<number, CardLossRecovery>(), onCardLossRecoveryChange = () => {}, onCardLossResolved = () => {}, onOpenSource, sourceDisabled = false, onReference }: { token: string; userId: number; panel: Panel; onClose: () => void; hidden: boolean; onTogglePrivacy: () => void; focusOnMount?: boolean; refreshSignal?: number; actionDisabled?: boolean; onActionBusy?: (busy: boolean) => void; onActionPrepared?: (event: Extract<StreamEvent, { type: 'action_required' }>) => void; cardLossRecovery?: ReadonlyMap<number, CardLossRecovery>; onCardLossRecoveryChange?: (cardId: number, recovery: CardLossRecovery | null) => void; onCardLossResolved?: (cardId: number) => void; onOpenSource?: (origin: CardOrigin) => void; sourceDisabled?: boolean; onReference?: (reference: BankObjectReference) => void }) {
+export function WorkspacePanel({ token, userId, panel, onClose, hidden, onTogglePrivacy, focusOnMount = true, refreshSignal = 0, actionDisabled = false, onActionBusy = () => {}, onActionPrepared = () => {}, cardLossRecovery = new Map<number, CardLossRecovery>(), onCardLossRecoveryChange = () => {}, onCardLossResolved = () => {}, onOpenSource, onStartChat, sourceDisabled = false, onReference }: { token: string; userId: number; panel: Panel; onClose: () => void; hidden: boolean; onTogglePrivacy: () => void; focusOnMount?: boolean; refreshSignal?: number; actionDisabled?: boolean; onActionBusy?: (busy: boolean) => void; onActionPrepared?: (event: Extract<StreamEvent, { type: 'action_required' }>) => void; cardLossRecovery?: ReadonlyMap<number, CardLossRecovery>; onCardLossRecoveryChange?: (cardId: number, recovery: CardLossRecovery | null) => void; onCardLossResolved?: (cardId: number) => void; onOpenSource?: (origin: CardOrigin) => void; onStartChat?: () => void; sourceDisabled?: boolean; onReference?: (reference: BankObjectReference) => void }) {
   const [cards, setCards] = useState<BankCard[]>([])
   const [dashboard, setDashboard] = useState<BankDashboardData | null>(null)
   const [entries, setEntries] = useState<AuditEntry[]>([])
@@ -99,7 +99,7 @@ export function WorkspacePanel({ token, userId, panel, onClose, hidden, onToggle
         {error && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
         {panel !== 'collections' && isLoading && <p className="text-sm text-muted" role="status">加载中…</p>}
         {hidden && <p className="mb-4 text-xs text-muted">金额已隐藏；姓名、卡片尾号与对话文字仍会显示。</p>}
-        {panel === 'collections' && <CollectionPanel userId={userId} hidden={hidden} onOpenSource={onOpenSource} sourceDisabled={sourceDisabled} />}
+        {panel === 'collections' && <CollectionPanel userId={userId} hidden={hidden} token={token} onStartChat={onStartChat} onOpenSource={onOpenSource} sourceDisabled={sourceDisabled} />}
         {panel === 'assets' && <AssetWorkspace
           token={token}
           userId={userId}
@@ -112,6 +112,7 @@ export function WorkspacePanel({ token, userId, panel, onClose, hidden, onToggle
           actionDisabled={actionDisabled}
           cardLossRecovery={cardLossRecovery}
           onRetry={refreshPanel}
+          onAccountCreated={refreshPanel}
           onCardLossRecoveryChange={onCardLossRecoveryChange}
           onCardLossResolved={onCardLossResolved}
           onActionBusy={onActionBusy}

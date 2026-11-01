@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+beforeEach(() => { window.history.replaceState(null, '', '/product-preview?debug=1') })
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ProductPreview from './ProductPreview'
@@ -17,6 +18,7 @@ afterEach(async () => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
   originalScrollIntoView = undefined
   await store.clearSnapshots(1, 'webank-ui-preview-snapshots')
+  window.history.replaceState(null, '', '/')
 })
 
 it('合成预览可以查看资产与收藏，且不访问业务接口', async () => {
@@ -25,17 +27,18 @@ it('合成预览可以查看资产与收藏，且不访问业务接口', async (
   const firstRender = render(<ProductPreview />)
   await user.click(screen.getByRole('button', { name: '资产' }))
   const assets = screen.getByRole('region', { name: '资产' })
-  const categories = within(assets).getByRole('navigation', { name: '资产分类' })
-  expect(within(categories).getByRole('button', { name: '账户' })).toBeTruthy()
-  expect(within(categories).getByRole('button', { name: '联系人' })).toBeTruthy()
-  expect(within(categories).getByRole('button', { name: '持仓' })).toBeTruthy()
+  const categories = within(assets).getByRole('tablist', { name: '资产分类' })
+  expect(within(categories).getByRole('tab', { name: '账户' })).toBeTruthy()
+  expect(within(categories).getByRole('tab', { name: '联系人' })).toBeTruthy()
+  expect(within(categories).getByRole('tab', { name: '持仓' })).toBeTruthy()
   await user.click(within(assets).getByRole('button', { name: '查看备用账户详情' }))
-  expect(within(assets).getByText('样例卡片状态：正常')).toBeTruthy()
+  expect(within(assets).getAllByText(/备用账户 ·/).length).toBeGreaterThan(0)
   await user.click(within(assets).getByRole('button', { name: /^付款账户.*日常账户/ }))
+  await user.click(within(categories).getByRole('tab', { name: '联系人' }))
   await user.click(within(assets).getByRole('button', { name: /^小林/ }))
   expect(screen.getByText('转账 · 日常账户 → 小林')).toBeTruthy()
   await user.click(screen.getByRole('button', { name: '查看模拟确认' }))
-  expect(screen.getByText(/合成预览，操作及金额仅为样例/)).toBeTruthy()
+  expect(screen.getByText(/当前为模拟业务数据，不会操作真实资金/)).toBeTruthy()
   await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
   expect(await screen.findByText('模拟验证已开始，操作尚未执行。')).toBeTruthy()
   await user.type(screen.getByLabelText('模拟验证码'), 'a')
@@ -52,7 +55,7 @@ it('合成预览可以查看资产与收藏，且不访问业务接口', async (
   await user.click(screen.getByRole('button', { name: '发送' }))
   expect(screen.getByText('转账 · 日常账户 → 小林')).toBeTruthy()
   await user.click(screen.getByRole('button', { name: '收藏卡片' }))
-  await screen.findByText('已收藏合成卡片。')
+  await screen.findByText('卡片已收藏。')
   await user.click(screen.getByRole('button', { name: '收藏' }))
   expect(await within(screen.getByRole('region', { name: '收藏' })).findByText('本月消费概览')).toBeTruthy()
   firstRender.unmount()
@@ -69,7 +72,7 @@ it('合成收藏返回原会话并定位到生成卡片的消息', async () => {
   const view = render(<ProductPreview />)
 
   await user.click(screen.getByRole('button', { name: '收藏卡片' }))
-  await screen.findByText('已收藏合成卡片。')
+  await screen.findByText('卡片已收藏。')
   await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
   await user.click(screen.getByRole('button', { name: /卡片与账户/ }))
   await user.click(screen.getByRole('button', { name: '收藏' }))
@@ -128,7 +131,7 @@ it('合成卡片保存失败时不声称收藏成功', async () => {
   render(<ProductPreview />)
   await user.click(screen.getByRole('button', { name: '收藏卡片' }))
   expect(await screen.findByText('收藏失败，请检查浏览器存储后重试。')).toBeTruthy()
-  expect(screen.queryByText('已收藏合成卡片。')).toBeNull()
+  expect(screen.queryByText('卡片已收藏。')).toBeNull()
 })
 
 it('切换会话不会把尚未组合的账户选择带到另一会话', async () => {
@@ -139,6 +142,7 @@ it('切换会话不会把尚未组合的账户选择带到另一会话', async (
   await user.click(screen.getByRole('button', { name: /卡片与账户/ }))
   // A conversation selection now closes the resource panel; reopen it to continue the intent.
   await user.click(screen.getByRole('button', { name: '资产' }))
+  await user.click(screen.getByRole('tab', { name: '联系人' }))
   await user.click(screen.getByRole('button', { name: /^小林/ }))
   expect(screen.getByText('请先选择付款账户。')).toBeTruthy()
   expect(screen.queryByText('转账 · 日常账户 → 小林')).toBeNull()
@@ -149,6 +153,7 @@ it('已组合的意图按会话隔离，返回原会话后仍可移除', async (
   render(<ProductPreview />)
   await user.click(screen.getByRole('button', { name: '资产' }))
   await user.click(screen.getByRole('button', { name: /^付款账户.*日常账户/ }))
+  await user.click(screen.getByRole('tab', { name: '联系人' }))
   await user.click(screen.getByRole('button', { name: /^小林/ }))
   await user.click(screen.getByRole('button', { name: /卡片与账户/ }))
   expect(screen.queryByText('转账 · 日常账户 → 小林')).toBeNull()
@@ -163,6 +168,7 @@ it('不同账户与联系人组合后，确认样例展示对应对象', async (
   render(<ProductPreview />)
   await user.click(screen.getByRole('button', { name: '资产' }))
   await user.click(screen.getByRole('button', { name: /^付款账户.*备用账户/ }))
+  await user.click(screen.getByRole('tab', { name: '联系人' }))
   await user.click(screen.getByRole('button', { name: /^小周/ }))
   expect(screen.getByText('转账 · 备用账户 → 小周')).toBeTruthy()
   await user.click(screen.getByRole('button', { name: '查看模拟确认' }))
@@ -175,6 +181,7 @@ it('查看账户详情不会隐式选中账户或创建意图', async () => {
   render(<ProductPreview />)
   await user.click(screen.getByRole('button', { name: '资产' }))
   await user.click(screen.getByRole('button', { name: '查看备用账户详情' }))
+  await user.click(screen.getByRole('tab', { name: '联系人' }))
   await user.click(screen.getByRole('button', { name: /^小周/ }))
   expect(screen.getByText('请先选择付款账户。')).toBeTruthy()
   expect(screen.queryByText('转账 · 备用账户 → 小周')).toBeNull()
@@ -187,6 +194,7 @@ it('隐藏模式中多个资产可区分但不显示名称与尾号', async () =
   await user.click(screen.getByRole('button', { name: '资产' }))
   expect(screen.getByRole('button', { name: /账户 1 已隐藏/ })).toBeTruthy()
   expect(screen.getByRole('button', { name: /账户 2 已隐藏/ })).toBeTruthy()
+  await user.click(screen.getByRole('tab', { name: '联系人' }))
   expect(screen.getByRole('button', { name: /联系人 1 已隐藏/ })).toBeTruthy()
   expect(screen.getByRole('button', { name: /联系人 2 已隐藏/ })).toBeTruthy()
   expect(screen.queryByText(/日常账户|备用账户|小林|小周|8899|2631/)).toBeNull()
@@ -262,9 +270,9 @@ it('空状态建议只填入草稿，发送后进入对话布局', async () => {
   await user.selectOptions(screen.getByLabelText('选择预览状态'), 'empty')
   await user.click(screen.getByRole('button', { name: /分析本月收支/ }))
   expect((screen.getByPlaceholderText('说说你想办的事') as HTMLTextAreaElement).value).toBe('看看这个月的消费')
-  expect(screen.queryByText('这是合成预览，消息不会发送给 Agent。')).toBeNull()
+  expect(screen.queryByText('已收到你的问题。此页面用于查看交互，真实 Agent 请在正式对话中使用。')).toBeNull()
   await user.click(screen.getByRole('button', { name: '发送' }))
-  expect(await screen.findByText('这是合成预览，消息不会发送给 Agent。')).toBeTruthy()
+  expect(await screen.findByText('已收到你的问题。此页面用于查看交互，真实 Agent 请在正式对话中使用。')).toBeTruthy()
   expect(screen.queryByRole('heading', { name: /今天，想完成什么/ })).toBeNull()
 })
 
@@ -280,4 +288,26 @@ it('最近对话切换关闭资产面板，再次点击当前会话不触发无�
   await user.click(current)
   expect(screen.getByText('银行卡状态')).toBeTruthy()
   expect(current.getAttribute('aria-current')).toBe('true')
+})
+
+it('默认产品预览不出现开发状态栏，资产五分类切换真正改变内容', async () => {
+  window.history.replaceState(null, '', '/product-preview')
+  const user = userEvent.setup()
+  render(<ProductPreview />)
+  expect(screen.queryByText('合成预览')).toBeNull()
+  expect(screen.queryByText('开发视图')).toBeNull()
+  expect(screen.queryByText('合成数据 · 不连接 Agent 或业务接口')).toBeNull()
+  await user.click(screen.getByRole('button', { name: '资产' }))
+  const panel = screen.getByRole('region', { name: '资产' })
+  const tabs = within(panel).getByRole('tablist', { name: '资产分类' })
+  expect(within(panel).getByRole('heading', { name: /银行账户/ })).toBeTruthy()
+  await user.click(within(tabs).getByRole('tab', { name: '银行卡' }))
+  expect(within(panel).getByRole('heading', { name: /银行卡/ })).toBeTruthy()
+  expect(within(panel).queryByRole('heading', { name: /银行账户/ })).toBeNull()
+  await user.click(within(tabs).getByRole('tab', { name: '联系人' }))
+  expect(within(panel).getByRole('heading', { name: /联系人/ })).toBeTruthy()
+  await user.click(within(tabs).getByRole('tab', { name: '持仓' }))
+  expect(within(panel).getByRole('heading', { name: /理财持仓/ })).toBeTruthy()
+  await user.click(within(tabs).getByRole('tab', { name: '账单' }))
+  expect(within(panel).getByRole('heading', { name: '账单' })).toBeTruthy()
 })

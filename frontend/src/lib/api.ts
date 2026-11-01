@@ -240,6 +240,12 @@ export const api = {
     )
   },
 
+  renameConversation(token: string, conversationId: number, title: string) {
+    return request<Conversation>(`/chat/conversations/${conversationId}`, {
+      method: 'PATCH', body: JSON.stringify({ title }),
+    }, token)
+  },
+
   async submissionStatus(token: string, conversationId: number, requestId: string): Promise<ChatSubmissionStatus> {
     const raw = await request<unknown>(
       `/chat/conversations/${conversationId}/requests/${encodeURIComponent(requestId)}`, {}, token,
@@ -270,6 +276,15 @@ export const api = {
     const data = bankDashboardSchema.safeParse(await request<unknown>('/bank/dashboard', {}, token))
     if (!data.success) throw new Error('账户与资产数据格式异常，请稍后重试。')
     return data.data
+  },
+
+  async createDemoAccount(token: string, name: string): Promise<BankAccountOverview> {
+    const raw = await request<unknown>('/bank/accounts/demo', {
+      method: 'POST', body: JSON.stringify({ name }),
+    }, token)
+    const parsed = bankDashboardSchema.shape.accounts.element.safeParse(raw)
+    if (!parsed.success) throw new Error('新增账户结果格式异常，请刷新资产确认。')
+    return parsed.data
   },
 
   prepareCardLoss(token: string, cardId: number, idempotencyKey: string) {

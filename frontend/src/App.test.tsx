@@ -25,7 +25,8 @@ it('登录后按需加载对话页面', async () => {
 it('合成预览不初始化鉴权或读取浏览器会话', async () => {
   const read = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue(null)
   render(<MemoryRouter initialEntries={['/product-preview']}><App /></MemoryRouter>)
-  expect(await screen.findByText(/不连接 Agent 或业务接口/, {}, { timeout: 10000 })).toBeTruthy()
+  expect(await screen.findByText('本月消费概览', {}, { timeout: 10000 })).toBeTruthy()
+  expect(screen.queryByText('合成预览')).toBeNull()
   // Visual preferences can be read in preview; authentication/session state
   // must remain untouched. This allowlist catches accidental auth reads.
   expect(read.mock.calls.map(([key]) => key).every(

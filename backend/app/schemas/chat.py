@@ -11,6 +11,9 @@ class ConversationCreate(BaseModel):
     title: str = Field(default="新对话", max_length=120)
 
 
+class ConversationRename(BaseModel):
+    title: str = Field(min_length=1, max_length=60)
+
 class ConversationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

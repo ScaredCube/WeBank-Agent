@@ -119,7 +119,7 @@ export function MonthlyBillPanel({ token, userId, hidden, accounts = null, accou
     if (!card || loading || saving || saved) return
     setSaving(true)
     setError(null)
-    try { await saveSnapshot(userId, card); setSaved(true) } catch { setError('保存失败，请检查本地存储后重试。') } finally { setSaving(false) }
+    try { await saveSnapshot(userId, card, undefined, undefined, accountId ? { kind: 'monthly_bill', month, accountId } : undefined); setSaved(true) } catch { setError('保存失败，请检查本地存储后重试。') } finally { setSaving(false) }
   }
 
   return <section id="asset-section-bill" className="scroll-mt-[68px] border-t border-line pt-5">

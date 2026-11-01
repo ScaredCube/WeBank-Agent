@@ -390,6 +390,12 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
     if (creatingRef.current) draftDuringCreation.current = value
     setDraft(value)
   }
+  const renameConversation = useCallback(async (conversationId: number, title: string) => {
+    if (!token || sending || actionBlocked) throw new Error('当前操作完成后才能修改会话名称')
+    const renamed = await api.renameConversation(token, conversationId, title)
+    setConversations(current => current.map(item => item.id === conversationId ? renamed : item))
+  }, [token, sending, actionBlocked])
+
   function stopReceiving() { receiveController.current?.abort() }
-  return { conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

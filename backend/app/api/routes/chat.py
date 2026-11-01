@@ -14,6 +14,7 @@ from app.models import Conversation, Account, Card, Contact, Message, MessageRes
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
+    ConversationRename,
     ConversationOut,
     MessageOut,
 )
@@ -145,6 +146,27 @@ def new_conversation(
     user: CurrentUser,
 ) -> ConversationOut:
     conversation = create_conversation(session, user, mask_text(payload.title))
+    return ConversationOut.model_validate(conversation)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+def rename_conversation(
+    conversation_id: int,
+    payload: ConversationRename,
+    session: SessionDep,
+    user: CurrentUser,
+    response: Response,
+) -> ConversationOut:
+    """Change only a title. Never rewrite history, tool calls or banking state."""
+    conversation = _require_conversation(session, user, conversation_id)
+    title = mask_text(payload.title.strip())
+    if not title:
+        raise HTTPException(status_code=422, detail="请输入有效的会话名称")
+    conversation.title = title
+    session.add(conversation)
+    session.commit()
+    session.refresh(conversation)
+    response.headers["Cache-Control"] = "no-store"
     return ConversationOut.model_validate(conversation)
 
 

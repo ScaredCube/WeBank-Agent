@@ -37,7 +37,8 @@ export function DraggableAccount({ onDrop, onChoose, onMove, onCancel, label, se
 
   function down(event: PointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) return
-    if (event.pointerType === 'touch' && !(event.target instanceof Element && event.target.closest('[data-drag-handle]'))) return
+    // Touch devices use an explicit selection / ask action, not an unmarked drag target.
+    if (event.pointerType === 'touch') return
     x.stop()
     y.stop()
     origin.current = { x: event.clientX, y: event.clientY }
@@ -59,6 +60,6 @@ export function DraggableAccount({ onDrop, onChoose, onMove, onCancel, label, se
     onClick={() => { if (!suppressClick.current) onChoose(); suppressClick.current = false }}
     animate={{ scale: active && !reduced ? 1.03 : 1 }} transition={{ type: 'spring', stiffness: 420, damping: 32 }}
     className={`relative z-10 w-full rounded-2xl border p-4 text-left shadow-sm focus-visible:outline-2 focus-visible:outline-jade-700 ${selected ? 'border-jade-600 bg-jade-50' : 'border-jade-200 bg-white'}`}>
-    <span className="flex items-center justify-between gap-3"><span className="text-xs text-muted">付款账户</span><span data-drag-handle aria-hidden="true" className="touch-none rounded-lg bg-jade-50 px-3 py-2 text-xs text-jade-800">长按拖动</span></span><span className="mt-2 block text-sm font-medium">{label}</span>
+    <span className="flex items-center justify-between gap-3"><span className="text-xs text-muted">付款账户</span><span data-drag-handle aria-hidden="true" className="hidden touch-none rounded-lg bg-jade-50 px-3 py-2 text-xs text-jade-800 md:block">长按拖动</span></span><span className="mt-2 block text-sm font-medium">{label}</span>
   </motion.button>
 }
