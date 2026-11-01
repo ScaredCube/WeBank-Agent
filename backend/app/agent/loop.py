@@ -1,5 +1,6 @@
 """Bounded model/tool loop. Financial Tool execution belongs to ToolExecutor."""
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +10,10 @@ from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
 from app.agent.financial_summary import summarize_bill_comparison
 from app.agent.read_completion import completed_readonly_summary
-from app.agent.response_policy import ReplyRoute, decide_no_tool_reply
+from app.agent.response_policy import (
+    NoToolScope, ReplyRoute, classify_no_tool_request,
+    decide_no_tool_reply, tool_free_reply,
+)
 from app.agent.response_recovery import recover_no_tool_reply
 from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
 from app.tools.register import create_agent_registry
@@ -80,6 +84,43 @@ class AgentLoop:
                         tool_calls = chunk.tool_calls
                 if not tool_calls:
                     if tool_results:
+                        # Calculator-only educational turns may retain a safe
+                        # explanation. Account, payment and other bank Tool
+                        # results continue to use deterministic presentation.
+                        request = original_request or ""
+                        candidate = "".join(content).strip()
+                        general_education = (
+                            classify_no_tool_request(request) == NoToolScope.EDUCATIONAL
+                            and not any(cue in request for cue in (
+                                "我的", "本人", "这笔", "这张", "该账户", "我的账户",
+                                "本月", "上个月", "刚才", "刚刚", "上次", "之前",
+                            ))
+                        )
+                        if (general_education and candidate
+                                and all(name == "calculate" and result.get("ok")
+                                        for name, result in tool_results)):
+                            # The model may explain a concept, but it cannot
+                            # certify newly authored numerical conclusions.
+                            # Render every calculation from the Tool instead.
+                            explanation = "\n".join(
+                                line for line in candidate.splitlines()
+                                if not any(ch.isdigit() for ch in line)
+                                and not re.search(r"[￥¥]|[零一二两三四五六七八九十百千万亿]+(?:元|块|分)", line)
+                                and not line.lstrip().startswith(("计算结果", "|"))
+                                and not (line.lstrip().startswith("#") and any(
+                                    cue in line for cue in ("算一遍", "表格", "代入数字")
+                                ))
+                            ).strip()
+                            checked = tool_free_reply(explanation, user_request=request)
+                            if explanation and checked == explanation:
+                                verified_calculations = "\n".join(
+                                    render_tool_result(name, result)
+                                    for name, result in tool_results
+                                )
+                                yield AgentEvent("delta", {
+                                    "text": explanation + "\n\n" + verified_calculations,
+                                })
+                                return
                         fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
                                               for name, result in tool_results)
                         if fully_supported and len(tool_results) > 1:
