@@ -1,0 +1,37 @@
+"""Conservative extraction of an explicit CNY amount from the CURRENT user request.
+
+This is an additional server-side constraint for typed account+contact references,
+not an authorization to execute transactions. Ambiguous wording fails closed.
+"""
+from decimal import Decimal
+import re
+
+_VERBS = ("转账", "汇款", "打款")
+# Reject an explicit negation in the same clause as the transaction verb.
+# Intent ambiguity fails closed: the user can clarify rather than create a
+# financial action on the basis of a loose keyword match.
+_NEGATED_REQUEST = re.compile(r"(?:不|无|别|取消|停止|拒绝|禁止)[^，。；;]{0,24}(?:转账|汇款|打款)")
+
+
+def is_transfer_request(text: str) -> bool:
+    return any(verb in text for verb in _VERBS) and _NEGATED_REQUEST.search(text) is None
+
+
+_AMOUNTS = re.compile(r"(?<![\d.])([0-9]+(?:\.[0-9]{1,2})?)\s*(元|角|分)(?![\d.])")
+_FEN = {"元": 100, "角": 10, "分": 1}
+
+
+def requested_transfer_amount_fen(text: str) -> int | None:
+    if not is_transfer_request(text):
+        return None
+    amounts = list(_AMOUNTS.finditer(text))
+    if len(amounts) != 1:
+        return None
+    # Reject signed amounts, including separated minus signs like '- 1元'.
+    if text[:amounts[0].start()].rstrip().endswith(('-', '−', '－')):
+        return None
+    value = Decimal(amounts[0].group(1)) * _FEN[amounts[0].group(2)]
+    if value != value.to_integral_value():
+        return None
+    fen = int(value)
+    return fen if 0 < fen <= 100_000_000_000 else None

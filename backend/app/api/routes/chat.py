@@ -1,6 +1,5 @@
 import asyncio
 import json
-import re
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -31,6 +30,7 @@ from app.services.chat_service import (
     recent_messages,
 )
 from app.risk.injection import detect_injection
+from app.risk.transfer_intent import is_transfer_request, requested_transfer_amount_fen
 from app.core.time import utcnow
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
@@ -192,11 +192,12 @@ async def send_message(
     verified_card_id: int | None = selected_card[0].id if selected_card is not None else None
     verified_contact_token: str | None = None
     verified_recipient_name: str | None = None
-    # Scope automated transfer binding to an explicit request that contains
-    # a transfer verb and an amount, in addition to verified account/contact IDs.
-    explicit_transfer = (
-        any(verb in display_content for verb in ("转账", "汇款", "打款"))
-        and re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|角|分)", display_content) is not None
+    # Only the user's CURRENT request can authorize amount binding. A missing,
+    # ambiguous or malformed amount must never be filled in by the model.
+    verified_transfer_amount_fen = requested_transfer_amount_fen(display_content)
+    transfer_needs_amount = bool(
+        selected_contact is not None and is_transfer_request(display_content)
+        and verified_transfer_amount_fen is None
     )
     if payload.references and not injection.blocked and not uncertain:
         try:
@@ -219,7 +220,7 @@ async def send_message(
                 )
             if selected_contact is not None:
                 contact_token = create_contact_token(session, user.id, selected_contact.id)
-                if explicit_transfer and account is not None:
+                if verified_transfer_amount_fen is not None and account is not None:
                     verified_contact_token = contact_token
                     verified_recipient_name = selected_contact.name
                 visible.append(f"联系人：{mask_text(selected_contact.name)} · {mask_text(selected_contact.bank_name)}")
@@ -275,11 +276,19 @@ async def send_message(
                 yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
                 yield _sse({"type": "done", "message": None})
                 return
+            if transfer_needs_amount:
+                clarification = "请提供明确的一笔转账金额（例如 1 元），我会先生成待确认操作供你核对。"
+                yield _sse({"type": "delta", "text": clarification})
+                yield _sse({"type": "done", "message": _persist_assistant(
+                    conversation_id, clarification)})
+                return
             async for event in loop.stream(
                 history, user_id=user.id, verified_account_token=verified_account_token,
                 verified_card_id=verified_card_id,
                 verified_contact_token=verified_contact_token,
-                verified_recipient_name=verified_recipient_name
+                verified_recipient_name=verified_recipient_name,
+                verified_transfer_amount_fen=verified_transfer_amount_fen,
+                has_selected_contact=selected_contact is not None
             ):
                 if await request.is_disconnected():
                     break

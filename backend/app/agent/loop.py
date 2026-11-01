@@ -45,7 +45,9 @@ class AgentLoop:
                      verified_account_token: str | None = None,
                      verified_card_id: int | None = None,
                      verified_contact_token: str | None = None,
-                     verified_recipient_name: str | None = None) -> AsyncIterator[AgentEvent]:
+                     verified_recipient_name: str | None = None,
+                     verified_transfer_amount_fen: int | None = None,
+                     has_selected_contact: bool = False) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
@@ -126,17 +128,20 @@ class AgentLoop:
                             # Never trust an unverified model-supplied card ID or token.
                             args["account_token"] = verified_account_token
                             args["card_id"] = verified_card_id
-                        if (argument_error is None and verified_account_token is not None
-                                and verified_contact_token is not None
-                                and verified_recipient_name is not None
-                                and spec is not None and spec.name == "prepare_transfer"):
-                            # The model determines whether to propose a transfer and
-                            # its amount. Only the authenticated route determines who
-                            # pays and receives; all actions still require confirmation.
-                            args.pop("target_token", None)
-                            args["source_token"] = verified_account_token
-                            args["recipient_contact_token"] = verified_contact_token
-                            args["recipient_name"] = verified_recipient_name
+                        if argument_error is None and spec is not None and spec.name == "prepare_transfer" and has_selected_contact:
+                            if (verified_account_token is None or verified_contact_token is None
+                                    or verified_recipient_name is None or verified_transfer_amount_fen is None):
+                                argument_error = "请明确填写本次转账金额并核对所选账户和联系人"
+                            elif (type(args.get("amount_fen")) is not int
+                                    or args["amount_fen"] != verified_transfer_amount_fen):
+                                argument_error = "模型金额与用户请求不一致，请核对后重新提交"
+                            else:
+                                # Model chooses the operation, but neither the amount
+                                # nor the payer/payee identity can be silently changed.
+                                args.pop("target_token", None)
+                                args["source_token"] = verified_account_token
+                                args["recipient_contact_token"] = verified_contact_token
+                                args["recipient_name"] = verified_recipient_name
                         guard_blocked = None
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):
