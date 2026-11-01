@@ -236,6 +236,53 @@ def tool_free_reply(
     return reply
 
 
+
+# A no-Tool action turn may still ask for missing information. Such a question
+# is not an assertion that an operation was created or executed. Keep the
+# acceptance predicate deliberately narrower than general natural-language
+# validation, and never use it to infer bank authorisation.
+_UNVERIFIED_PROGRESS = re.compile(
+    r"(?:已|已经|成功|完成|办好|到账|扣款|扣除|操作成功|系统显示|查到|"
+    r"绕过|跳过|无需确认|不用确认|无需验证|免验证|无需核对|直接执行|"
+    r"无需授权|不必授权|验证码|密码|完整卡号)"
+)
+_CLARIFICATION_CUES = (
+    "账户", "银行卡", "联系人", "收款人", "金额", "附言",
+    "哪一", "哪个", "哪张", "谁", "多少", "订阅", "理财产品",
+    "持仓", "什么", "业务",
+)
+
+
+def safe_action_clarification(candidate: str) -> bool:
+    """Accept a concise question about missing inputs, never a bank outcome.
+
+    This is a presentation gate only. A successfully authorised write must
+    still be proved by its separate business receipt.
+    """
+    if not isinstance(candidate, str):
+        return False
+    text = candidate.strip()
+    if (len(text) < 6 or len(text) > 180 or chr(10) in text or chr(13) in text
+            or not text.endswith(("？", "?"))
+            or text.count("？") + text.count("?") != 1):
+        return False
+    if not text.startswith((
+        "请问", "请告诉我", "请先", "你想", "您想", "你希望", "您希望",
+        "需要", "想用", "哪", "哪个", "哪张", "想从",
+    )):
+        return False
+    if not any(cue in text for cue in _CLARIFICATION_CUES):
+        return False
+    if any(c.isdigit() for c in text) or any(c in text for c in "<>{}￥¥"):
+        return False
+    if (_UNVERIFIED_PROGRESS.search(text) or _INTERNAL.search(text)
+            or _ACTION_COMPLETION.search(text) or _UNVERIFIED_ORDER.search(text)
+            or _UNVERIFIED_LOOKUP.search(text) or _BANK_FACT.search(text)
+            or _AMOUNT_CLAIM.search(text)):
+        return False
+    return True
+
+
 class ReplyRoute(str, Enum):
     """What a Runtime can do next without accepting an unverified model claim."""
 
@@ -267,7 +314,7 @@ def decide_no_tool_reply(
 ) -> ReplyDecision:
     """Expose deterministic reply safety as a structured Runtime decision.
 
-    Compatible by construction with tool_free_reply; this function never
+    Follows the legacy fallback except safe action clarification questions. Never
     invokes an LLM or dispatches a banking operation.
     """
     scope = classify_no_tool_request(user_request)
@@ -290,6 +337,10 @@ def decide_no_tool_reply(
             recovery_topic="operation_status",
         )
     if scope == NoToolScope.ACTION:
+        if safe_action_clarification(candidate):
+            return ReplyDecision(
+                ReplyRoute.ACCEPT, scope, candidate.strip(), "safe_action_clarification",
+            )
         topics = {
             _NO_TRANSFER: "transfer",
             _NO_CARD_ACTION: "card_action",

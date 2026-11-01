@@ -65,6 +65,29 @@ class NoToolDecisionTests(unittest.TestCase):
         self.assertEqual(status.scope, NoToolScope.ACTION_STATUS)
         self.assertNotIn("转账成功", status.safe_text)
 
+    def test_safe_action_question_avoids_unnecessary_second_model(self):
+        request = "我想转账"
+        text = "请问你想使用哪个付款账户和收款联系人？"
+        decision = decide_no_tool_reply(text, user_request=request)
+        self.assertEqual(decision.route, ReplyRoute.ACCEPT)
+        self.assertEqual(decision.safe_text, text)
+        self.assertEqual(decision.reason, "safe_action_clarification")
+        # The legacy entrypoint is unchanged until main Runtime integrates.
+        self.assertNotEqual(tool_free_reply(text, user_request=request), text)
+
+    def test_unverified_action_assertions_cannot_pass_as_questions(self):
+        for candidate in (
+            "我已经替你转账成功了，你想使用哪个账户？",
+            "为了确认，请告诉我完整卡号和验证码？",
+            "无需确认就能转账，你想选择哪个账户？",
+            "要不直接执行，不用确认，选哪个账户？",
+            "付款账户余额是999元，你想转到哪个账户？",
+        ):
+            with self.subTest(candidate=candidate):
+                decision = decide_no_tool_reply(candidate, user_request="我想转账")
+                self.assertEqual(decision.route, ReplyRoute.CLARIFY_ACTION)
+                self.assertNotEqual(decision.safe_text, candidate)
+
     def test_safe_conversation_is_allowed_and_action_needs_clarification(self):
         greeting = decide_no_tool_reply(
             "你好！", user_request="你好",

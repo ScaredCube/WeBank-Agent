@@ -63,7 +63,7 @@ original_request_for_policy = compiled.original_request
 新增 `decide_no_tool_reply(candidate, *, user_request, financial_context=False)` 返回 `ReplyDecision`，字段包括：
 
 - `route`：`ACCEPT`、`QUERY_REQUIRED`、`VERIFY_STATUS`、`CLARIFY_ACTION`、`REJECT_CANDIDATE`。
-- `safe_text`：旧策略会返回的最终保底文本。
+- `safe_text`：默认是旧策略的保底文本；若当前属于操作澄清且模型给出**已验证为安全的短问句**，则保留该自然追问而不额外调用 Recovery。
 - `reason` / `recovery_topic`：非敏感决策标识，用来决定是否可进行简短追问。
 
 `QUERY_REQUIRED` / `VERIFY_STATUS` **首先由 Runtime 判断能否执行真实工具查询**。若合法范围内可查，则优先调用工具，切勿以一次补写回复替代实际任务。只有本轮无法安全补查且需要进一步沟通时，才可选用：
