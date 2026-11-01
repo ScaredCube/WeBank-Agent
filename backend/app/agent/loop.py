@@ -40,7 +40,8 @@ class AgentLoop:
                      context_readonly_only: bool = False,
                      intent_action: str | None = None,
                      intent_tokens: tuple[str, str] | None = None,
-                     intent_amount_fen: int | None = None) -> AsyncIterator[AgentEvent]:
+                     intent_amount_fen: int | None = None,
+                     original_request: str | None = None) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         if required_intent_tool(intent_action) is not None:
@@ -149,7 +150,9 @@ class AgentLoop:
                 # When the requested verified read-only results are already complete,
                 # the server can finish deterministically. A further model round may
                 # otherwise produce redundant/unsafe tool calls without new value.
-                final_readonly_text = completed_readonly_summary(history, tool_results)
+                final_readonly_text = completed_readonly_summary(
+                    history, tool_results, user_request=original_request,
+                )
                 if final_readonly_text is not None:
                     yield AgentEvent("delta", {"text": final_readonly_text})
                     return

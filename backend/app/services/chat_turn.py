@@ -26,6 +26,7 @@ class ChatTurn:
     conversation_id: int
     submission_id: int | None
     history: list[dict[str, str]]
+    original_request: str
     verified: VerifiedToolContext
     injection_blocked: bool = False
     transfer_needs_amount: bool = False
@@ -85,6 +86,7 @@ async def stream_chat_turn(
             intent_action=turn.verified.intent_action,
             intent_tokens=turn.verified.intent_tokens,
             intent_amount_fen=turn.verified.intent_amount_fen,
+            original_request=turn.original_request,
         ):
             if await is_disconnected():
                 # The model/tool may already have completed a side effect.

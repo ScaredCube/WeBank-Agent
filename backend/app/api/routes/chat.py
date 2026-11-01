@@ -355,6 +355,7 @@ async def send_message(
         conversation_id=conversation_id,
         submission_id=submission_id,
         history=history,
+        original_request=payload.content,
         verified=VerifiedToolContext(
             user_id=user.id,
             verified_account_token=verified_account_token,
