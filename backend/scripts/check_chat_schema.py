@@ -1,4 +1,4 @@
-"""Check or create only the two additive Agent chat tables (SQLite).
+"""Check or create the three additive Agent chat tables (SQLite).
 
 Dry-run by default. --apply requires an existing SQLite file, makes a backup
 using sqlite3.backup, then creates ONLY missing tables. Existing schema drift
@@ -17,36 +17,10 @@ from sqlmodel import SQLModel
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import models  # noqa: E402,F401
 from app.db.session import get_engine  # noqa: E402
-
-
-TARGETS = ("conversationselection", "chatsubmission")
-REQUIRED_EXISTING = ("user", "conversation", "account", "card", "message", "pendingaction")
-
-
-def schema_status(engine: Engine) -> tuple[list[str], list[str]]:
-    inspector = inspect(engine)
-    existing = set(inspector.get_table_names())
-    missing = [name for name in TARGETS if name not in existing]
-    drift = []
-    for name in TARGETS:
-        if name not in existing:
-            continue
-        required_cols = {column.name for column in SQLModel.metadata.tables[name].columns}
-        actual_cols = {column["name"] for column in inspector.get_columns(name)}
-        absent = required_cols - actual_cols
-        if absent:
-            drift.append(name + ": missing columns " + ",".join(sorted(absent)))
-    if "chatsubmission" in existing:
-        uniqueness = [
-            tuple(constraint.get("column_names") or ())
-            for constraint in inspector.get_unique_constraints("chatsubmission")
-        ] + [
-            tuple(index.get("column_names") or ())
-            for index in inspector.get_indexes("chatsubmission") if index.get("unique")
-        ]
-        if not any(set(cols) == {"user_id", "request_id"} for cols in uniqueness):
-            drift.append("chatsubmission: missing user_id/request_id UNIQUE constraint")
-    return missing, drift
+from app.db.schema_guard import (  # noqa: E402
+    CHAT_TABLES as TARGETS, REQUIRED_BASE as REQUIRED_EXISTING,
+    chat_schema_status as schema_status,
+)
 
 
 def backup_sqlite_file(engine: Engine) -> Path:

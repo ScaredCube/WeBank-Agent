@@ -84,7 +84,7 @@ def exercise_migration(tmp: Path) -> dict:
     initial = snapshot(legacy_file)
     missing, drift = schema_status(engine)
     if set(missing) != set(TARGETS) or drift:
-        raise AssertionError("Legacy preflight did not identify both new tables")
+        raise AssertionError("Legacy preflight did not identify all new tables")
     if list(tmp.glob("*.bak")):
         raise AssertionError("Dry-run unexpectedly wrote a backup")
     backup = apply_additive_chat_schema(engine)
