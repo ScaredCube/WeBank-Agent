@@ -89,7 +89,19 @@ class AgentLoop:
                             # capabilities and asking for missing parameters.
                             # A response without an authenticated Tool result
                             # must never assert bank balances or executed actions.
-                            text = tool_free_reply("".join(content))
+                            # Scope is derived from the user's current message,
+                            # never from an LLM's assertion that it used a bank Tool.
+                            latest_request = next(
+                                (str(item.get("content") or "") for item in reversed(history)
+                                 if item.get("role") == "user"), ""
+                            )
+                            text = tool_free_reply(
+                                "".join(content), user_request=latest_request,
+                                financial_context=bool(
+                                    verified_account_token or verified_card_id
+                                    or verified_contact_token or has_selected_contact
+                                ),
+                            )
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
