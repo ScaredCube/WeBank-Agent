@@ -1,0 +1,20 @@
+{
+  "source_revision": "87a0d9d54fa1dd5150569f8375b543d70e48a200",
+  "static_prompts": {
+    "SYSTEM_PROMPT": "976ac34290cb8a39",
+    "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
+    "RESPONSE_RECOVERY_PROMPT": "b6fe66023300d62a"
+  },
+  "effective_versions": {
+    "agent": "agent:976ac34290cb8a39",
+    "guard": "guard:3637e17f6d8f8e21",
+    "recovery": "recovery:b6fe66023300d62a",
+    "agent:transfer": "agent:5702dbd3ebea98b6",
+    "agent:internal_transfer": "agent:5f88f97514f7cec4",
+    "agent:collect": "agent:cb004ee5d68762a7",
+    "agent:purchase": "agent:293f98322a40e2ce",
+    "agent:redeem": "agent:99b476628139c9cc",
+    "agent:convert": "agent:67b9da4bc7f8c6ba",
+    "tools": "tools:2b40e468b5c5436a"
+  }
+}
