@@ -421,7 +421,9 @@ async def send_message(
                 context_readonly_only=reused_readonly_selection
             ):
                 if await request.is_disconnected():
-                    break
+                    # The model/tool may already have completed a side effect.
+                    # Never mark an undelivered SSE stream as completed or retry it.
+                    raise asyncio.CancelledError
                 if event.type == "delta":
                     text = event.data["text"]
                     collected.append(text)
