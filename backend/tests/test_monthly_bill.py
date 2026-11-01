@@ -177,8 +177,10 @@ def test_bill_masks_sensitive_fields_in_api_model_and_chat(client, auth_headers,
     assert chat.status_code == 200
     events = [json.loads(line[6:]) for line in chat.text.splitlines() if line.startswith("data: ")]
     assert events[-1]["type"] == "done"
-    assert llm.tool_result is not None
-    assert_private(llm.tool_result)
+    # The server now finishes a fulfilled read-only request without a second
+    # LLM round. Sensitive Tool payload therefore never reaches the model.
+    assert llm.calls == 1
+    assert llm.tool_result is None
     assert events[-1]["message"]["content"] == "账单已查询，明细见下方结果卡。"
     assert_private(json.dumps(events[0]["data"], ensure_ascii=False))
     assert len(events[0]["data"]["anomalies"]) == 1

@@ -78,7 +78,7 @@ def test_agent_error_after_valid_bill_preserves_trusted_partial_history(client, 
     cid = _conversation(client, auth_headers)
     url = f"/api/chat/conversations/{cid}/messages"
     events = _events(client.post(url, headers=auth_headers, json={
-        "content": "查 2026-01 月账单", "references":[{"kind":"account","id":account_id}]
+        "content": "查 2026-01 月账单，并核查银行卡状态", "references":[{"kind":"account","id":account_id}]
     }))
     assert [e["type"] for e in events] == ["bill_result","delta","done"]
     assert events[-1]["message"]["bill_result"]["month"] == "2026-01"

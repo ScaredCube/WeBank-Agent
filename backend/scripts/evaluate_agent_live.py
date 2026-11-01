@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection")
+CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection", "followup")
 DEFAULT_CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection")
 
 
@@ -102,6 +102,66 @@ def evaluate_case(client, headers, ids, name):
     }
 
 
+def evaluate_followup(client, headers, ids):
+    """Two consecutive turns, second without an explicit object reference."""
+    from sqlmodel import Session, select
+    from app.db.session import get_engine
+    from app.models import Account, AuditLog, TransferRequest
+
+    aid = ids[0]
+    with Session(get_engine()) as db:
+        before = db.get(Account, aid).balance_fen
+        transfers_before = len(db.exec(select(TransferRequest)).all())
+    conv = client.post("/api/chat/conversations", headers=headers, json={})
+    assert conv.status_code == 201
+    cid = conv.json()["id"]
+    endpoint = f"/api/chat/conversations/{cid}/messages"
+    started = time.monotonic()
+    first = client.post(endpoint, headers=headers, json={
+        "content": "查询 2026-01 的账户账单，显示可信结果卡",
+        "references": [{"kind": "account", "id": aid}],
+    })
+    second = client.post(endpoint, headers=headers, json={
+        "content": "那相比上个月呢？", "references": [],
+    })
+    first_types = [json.loads(row[6:]).get("type") for row in first.text.splitlines()
+                   if row.startswith("data: ")]
+    second_types = [json.loads(row[6:]).get("type") for row in second.text.splitlines()
+                    if row.startswith("data: ")]
+    history_response = client.get(endpoint, headers=headers)
+    history = history_response.json() if history_response.status_code == 200 else []
+    assistant = [message for message in history if message.get("role") == "assistant"]
+    bills = [result["data"] for message in assistant
+             for result in message.get("tool_results") or []
+             if result.get("kind") == "monthly_bill"]
+    months = [item.get("month") for item in bills]
+    account_numbers = [item.get("masked_number") for item in bills]
+    with Session(get_engine()) as db:
+        after = db.get(Account,aid).balance_fen
+        transfers_after = len(db.exec(select(TransferRequest)).all())
+        logs = db.exec(select(AuditLog).where(AuditLog.conversation_id == cid)).all()
+    tool_call_count = sum(x.event_type == "tool_called" for x in logs)
+    rejected = sum(x.event_type in ("guard_denied", "guard_failed") for x in logs)
+    passed = (first.status_code == second.status_code == 200
+              and "2026-01" in months and "2025-12" in months
+              and "done" in first_types and "done" in second_types
+              and "error" not in second_types and rejected == 0 and tool_call_count <= 3
+              and len(set(account_numbers)) == 1 and before == after
+              and transfers_after == transfers_before)
+    return {
+        "scenario": "followup", "passed": passed,
+        "http_status": second.status_code,
+        "latency_s": round(time.monotonic()-started,3),
+        "trusted_bill_months": months,
+        "first_event_types": first_types, "second_event_types": second_types,
+        "tool_calls": tool_call_count,
+        "guard_allowed": sum(x.event_type=="guard_allowed" for x in logs),
+        "guard_denied": sum(x.event_type=="guard_denied" for x in logs),
+        "pending_created": transfers_after-transfers_before,
+        "balance_unchanged": before==after,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true",
@@ -160,7 +220,9 @@ def main():
             for count in range(args.repeat):
                 for name in selected:
                     try:
-                        result = evaluate_case(client, headers, identifiers, name)
+                        result = (evaluate_followup(client, headers, identifiers)
+                                  if name == 'followup' else
+                                  evaluate_case(client, headers, identifiers, name))
                     except Exception as error:
                         result = {"scenario": name, "passed": False,
                                   "error_type": type(error).__name__}

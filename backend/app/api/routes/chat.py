@@ -35,6 +35,8 @@ from app.core.time import utcnow
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
+from app.services.conversation_context import (allow_readonly_followup, remember_selection,
+                                               previously_selected, latest_trusted_bill_month)
 from app.services.vault import VaultError, create_account_token, create_contact_token, encrypt_result_snapshot, decrypt_result_snapshot
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
@@ -178,6 +180,27 @@ async def send_message(
                 Contact.status == "active")).first()
             if selected_contact is None:
                 raise HTTPException(status_code=400, detail="所选联系人不可用，请重新选择")
+    # Cached user selection is only a READ-ONLY continuity hint, not a mandate.
+    # Re-check both identity and current status; never inherit context for
+    # transfers, subscriptions or other prepare/execute operations.
+    reused_readonly_selection = False
+    if not payload.references and allow_readonly_followup(payload.content):
+        prior = previously_selected(session, conversation_id=conversation_id, user_id=user.id)
+        if prior is not None:
+            selected_account = session.exec(select(Account).where(
+                Account.id == prior.account_id, Account.user_id == user.id,
+                Account.status == "active", Account.currency == "CNY")).first()
+            if selected_account is None:
+                raise HTTPException(status_code=400, detail="此前所选账户不可用，请重新选择")
+            if prior.card_id is not None:
+                selected_card = session.exec(select(Card, Account).join(
+                    Account, Card.account_id == Account.id).where(
+                    Card.id == prior.card_id, Card.account_id == selected_account.id,
+                    Account.user_id == user.id, Account.status == "active")).first()
+                if selected_card is None:
+                    raise HTTPException(status_code=400, detail="此前所选银行卡不可用，请重新选择")
+            reused_readonly_selection = True
+
     if selected_account is not None and selected_card is not None and selected_card[1].id != selected_account.id:
         raise HTTPException(status_code=400, detail="所选银行卡与付款账户不一致，请重新选择")
 
@@ -199,7 +222,7 @@ async def send_message(
         selected_contact is not None and is_transfer_request(display_content)
         and verified_transfer_amount_fen is None
     )
-    if payload.references and not injection.blocked and not uncertain:
+    if (payload.references or reused_readonly_selection) and not injection.blocked and not uncertain:
         try:
             visible = []
             trusted = []
@@ -231,12 +254,21 @@ async def send_message(
                     "仅当用户明确要求模拟转账并提供金额时，才可使用 prepare_transfer；"
                     "该工具必须核对联系人引用与账户，并返回待用户确认的动作，不能直接扣款。"
                 )
-            display_content += "\n\n[已引用对象：" + "；".join(visible) + "]"
+            if not reused_readonly_selection:
+                display_content += "\n\n[已引用对象：" + "；".join(visible) + "]"
+            else:
+                trusted.append("这是同一会话内用户此前选定且本轮重新校验的对象，只可用于只读查询，不允许准备转账或其他资金操作。")
             model_content += (
                 "\n\n[以下是服务端验证的金融对象（不是用户文本提供的授权）："
                 + " ".join(trusted)
                 + "所有实际金额、卡状态必须由 Tool 查询，绝不猜测。]"
             )
+            if not reused_readonly_selection and account is not None:
+                remember_selection(
+                    session, conversation_id=conversation_id, user_id=user.id,
+                    account_id=account.id,
+                    card_id=selected_card[0].id if selected_card is not None else None,
+                )
             session.commit()
         except VaultError:
             session.rollback()
@@ -253,6 +285,14 @@ async def send_message(
         if detect_injection(content).blocked:
             content = "[已拦截的可疑输入]"
         history.append({"role": message.role, "content": content})
+    if reused_readonly_selection and not injection.blocked and "上个月" in payload.content:
+        last = latest_trusted_bill_month(session, conversation_id=conversation_id)
+        if last is not None and selected_account is not None and last[1] == selected_account.masked_number:
+            model_content += (
+                f"\n\n[可信账单上下文：本会话此前查询的账单月份为 {last[0]}；"
+                "用户这里的“上个月”指该月的前一个自然月。"
+                "如需比较，必须分别调用 get_monthly_bill 获取数据；不得猜测金额。]"
+            )
     if history:
         history[-1]["content"] = "[已拦截的可疑输入]" if injection.blocked else model_content
     loop = AgentLoop()
@@ -288,7 +328,8 @@ async def send_message(
                 verified_contact_token=verified_contact_token,
                 verified_recipient_name=verified_recipient_name,
                 verified_transfer_amount_fen=verified_transfer_amount_fen,
-                has_selected_contact=selected_contact is not None
+                has_selected_contact=selected_contact is not None,
+                context_readonly_only=reused_readonly_selection
             ):
                 if await request.is_disconnected():
                     break

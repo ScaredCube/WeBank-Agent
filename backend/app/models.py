@@ -30,6 +30,19 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class ConversationSelection(SQLModel, table=True):
+    """Last explicitly selected read-only bank object; never a payment mandate.
+
+    IDs contain no authorization tokens. Every use must re-check the owning
+    account/card state in the current authenticated user's session.
+    """
+    conversation_id: int = Field(foreign_key="conversation.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    account_id: int = Field(foreign_key="account.id")
+    card_id: int | None = Field(default=None, foreign_key="card.id")
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class MessageResult(SQLModel, table=True):
     """Encrypted server-authored read-only banking snapshot associated with a reply."""
     id: int | None = Field(default=None, primary_key=True)

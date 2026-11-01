@@ -7,6 +7,8 @@ from typing import Any
 from app.agent.guard import GuardProvider, GuardVerdict, build_guard_call, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.financial_summary import summarize_bill_comparison
+from app.agent.read_completion import completed_readonly_summary
 from app.schemas.card_results import from_card_tool_result
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
@@ -47,7 +49,8 @@ class AgentLoop:
                      verified_contact_token: str | None = None,
                      verified_recipient_name: str | None = None,
                      verified_transfer_amount_fen: int | None = None,
-                     has_selected_contact: bool = False) -> AsyncIterator[AgentEvent]:
+                     has_selected_contact: bool = False,
+                     context_readonly_only: bool = False) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
@@ -68,7 +71,8 @@ class AgentLoop:
                         fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
                                               for name, result in tool_results)
                         if fully_supported and len(tool_results) > 1:
-                            summary = f"已完成 {len(tool_results)} 项查询，结果见下方。"
+                            summary = (summarize_bill_comparison(tool_results)
+                                       or f"已完成 {len(tool_results)} 项查询，结果见下方。")
                         else:
                             summary = "\n\n".join(
                                 ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
@@ -142,6 +146,9 @@ class AgentLoop:
                                 args["source_token"] = verified_account_token
                                 args["recipient_contact_token"] = verified_contact_token
                                 args["recipient_name"] = verified_recipient_name
+                        if (argument_error is None and context_readonly_only
+                                and spec is not None and spec.name in _PREPARE_TOOLS):
+                            argument_error = "请在本轮明确选择金融对象后再准备操作"
                         guard_blocked = None
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):
@@ -236,6 +243,13 @@ class AgentLoop:
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
                     prior_calls.append(f"{function['name']}:{'success' if result.get('ok') else 'denied'}")
+                # When the requested verified read-only results are already complete,
+                # the server can finish deterministically. A further model round may
+                # otherwise produce redundant/unsafe tool calls without new value.
+                final_readonly_text = completed_readonly_summary(history, tool_results)
+                if final_readonly_text is not None:
+                    yield AgentEvent("delta", {"text": final_readonly_text})
+                    return
         except Exception:
             yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
             return
