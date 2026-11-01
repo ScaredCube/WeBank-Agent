@@ -1,13 +1,13 @@
 # AI 银行智能体
 
-银行 AI 智能体参赛项目的模拟演示。后端包含登录、会话、模拟查询与业务操作、固定风控和审计；前端提供对话、资产、账单、收藏、操作记录及模拟业务确认流程。前后端真实链路联调与整体验收仍未完成；Agent 结构化界面及前置意图绑定有待协商。当前业务数据与验证均为模拟，不连接真实银行。
+小We · 银行 AI Agent 比赛演示项目。前端包括对话、资产、账单、收藏和操作记录；后端提供 Agent、银行 Tool、可信结果、风险确认及审计。独立开发分支已完成真实大模型与隔离模拟银行数据的只读联调，但**尚未完成团队 PR 合并、正式部署和真实银行业务接入**。具体交付现状和合并前问题见 `docs/项目汇报.md` 和 `docs/frontend/2026-11-01-pre-pr-engineering-review.md`。
 
 ## 技术栈
 
 | 层 | 选型 |
 | --- | --- |
 | 后端 | Python 3.11+ · FastAPI · Pydantic · SQLModel · uv |
-| 数据库 | SQLite（可切换 PostgreSQL） |
+| 数据库 | SQLite（当前模拟资金事务依赖 SQLite；PostgreSQL 尚未完成适配） |
 | 大模型 | OpenAI 兼容接口（DeepSeek / 通义 / vLLM / Ollama），无 Key 时自动使用离线 Mock |
 | 前端 | React 19 · TypeScript · Vite · Tailwind CSS v4 · shadcn/ui 风格组件 |
 | 通信 | REST + SSE 流式输出 |
@@ -54,6 +54,26 @@ uv run uvicorn app.main:app --reload
 - 未配置 `LLM_API_KEY` 时自动进入 Mock 模式，可离线测试基础对话；Mock 不调用银行查询工具
 - 演示夜间风控默认使用北京时间 00:00–06:00；可通过 `RISK_NIGHT_START_HOUR` 和 `RISK_NIGHT_END_HOUR` 调整起止整点，具体业务时段尚待确认
 
+### 已有数据库升级与启动门禁（SQLite）
+
+全新、没有任何业务表的 SQLite 数据库可由首次启动自动初始化。**已经存在业务表的数据库不会再由启动流程悄悄补建 Agent 聊天表。** 更新后端代码后，请先停止旧服务，在 `backend` 目录执行显式预检：
+
+```powershell
+uv run python scripts/check_chat_schema.py
+# 如果提示缺少表，先在离线环境确认升级范围与停机窗口，再执行：
+uv run python scripts/check_chat_schema.py --apply
+# 输出同目录 SQLite .bak 备份，升级完成后再次执行不带 --apply 的预检
+uv run python scripts/check_chat_schema.py
+```
+
+迁移管理三张新增表：`conversationselection`、`chatsubmission`、`messageresult`；发现缺少约束/字段时拒绝自动修复。升级与回滚演练：
+
+```powershell
+uv run python scripts/rehearse_chat_schema.py --json
+```
+
+此工具**只支持 SQLite 的增量建表**，不覆盖其他业务表字段演进、不提供 PostgreSQL 迁移或在线无停机升级；正式团队合并前必须确认当前目标数据库的版本、完整备份、升级和回滚责任。
+
 接入真实模型时修改 `backend/.env`：
 
 ```env
@@ -88,7 +108,7 @@ npm run test
 npm run build
 ```
 
-浏览器测试覆盖合成预览及正式 `/chat` 的隔离 API 替身场景；模拟登录和业务响应均由本地浏览器路由提供，不连接真实后端、模型或银行接口。首次运行时安装 Playwright 的 Chromium：
+常规前端 Playwright 用例覆盖合成预览以及正式 `/chat` 的隔离 API 替身；这类用例不连接真实模型。独立的 `backend/scripts/run_competition_e2e.py --live` 则显式使用本机已有真实模型配置，在全新合成 SQLite + 隔离 HTTP 端口上执行**只读**浏览器联调，不会自动确认或执行模拟转账；运行会产生模型 API 调用成本。首次安装前端 Playwright 的 Chromium：
 
 ```powershell
 cd frontend
@@ -111,6 +131,12 @@ npm run test:e2e
 - [CLAUDE.md](CLAUDE.md)：协作规范、开工前阅读要求与文档同步义务
 - [docs/项目汇报.md](docs/项目汇报.md)：当前架构、已完成工作、验证结果与已知限制
 - [docs/TODO.md](docs/TODO.md)：任务编号、优先级、验收标准与里程碑
+- [docs/frontend/2026-11-01-pre-pr-engineering-review.md](docs/frontend/2026-11-01-pre-pr-engineering-review.md)：候选分支的架构、安全、性能和团队集成审查；此文档含待整改问题
+- [docs/frontend/2026-11-01-chat-history-performance-review.md](docs/frontend/2026-11-01-chat-history-performance-review.md)：会话历史分页、加密快照批量读取及剩余容量边界
+- [docs/frontend/2026-11-01-collection-privacy-decision.md](docs/frontend/2026-11-01-collection-privacy-decision.md)：收藏的浏览器本地存储风险与后续服务端加密方案决策
+- [docs/frontend/2026-11-01-pre-pr-round-two.md](docs/frontend/2026-11-01-pre-pr-round-two.md)：第二轮静态工程质量审查、真实缺陷样例及合并门槛
+- [docs/frontend/2026-11-01-pr-handoff-draft.md](docs/frontend/2026-11-01-pr-handoff-draft.md)：依赖分层 PR 提交边界、审查职责与交接正文模板
+- [docs/frontend/2026-11-01-mixed-intent-trust-remediation.md](docs/frontend/2026-11-01-mixed-intent-trust-remediation.md)：混合金融意图、口语省略和伪造附注的可信输出修复与剩余审查门槛
 - [docs/赛题解析.md](docs/赛题解析.md)：赛题背景与强制要求
 - [docs/设计思路.md](docs/设计思路.md)：零信任架构与产品设计
 - [docs/设计细化.md](docs/设计细化.md)：双屏交互与数据令牌化目标设计（部分实现）
@@ -131,16 +157,16 @@ npm run test:e2e
 ## 已实现
 
 - 单演示用户 JWT 登录，接口鉴权
-- 会话列表 / 新建会话 / 历史消息持久化
+- 会话列表 / 新建会话 / 历史消息持久化；新版聊天默认每页加载最近 50 条、按需加载更早历史，历史接口兼容 `limit` 和 `before_id` 游标；详见 `docs/frontend/2026-11-01-chat-history-performance-review.md`
 - AgentLoop 对话与 SSE 协议；当前每轮先缓冲，暂不实时逐字输出
 - LLM 适配层：OpenAI 兼容接口 + 离线 Mock，自动切换
 - 前端聊天界面、Markdown 渲染、流式光标、移动端侧栏
 - 硬编码操作确认弹窗（非 Generative UI，AI 无法代为确认）
 - 模拟账户余额、最近交易、月度账单和卡片状态只读工具，接入 AgentLoop；查询结果由后端固定格式输出
 - 受限计算工具 `calculate`：仅支持数值与基本运算，限制长度、节点、时限和数值范围，结果由后端固定渲染
-- 未调用工具时使用固定提示，离线 Mock 不调用银行工具
+- 未调用工具时允许经过服务端输出策略检查的自然语言问候/参数追问；无银行 Tool 结果不得宣称已查到真实账户数值或已执行金融操作；离线 Mock 不调用银行工具
 - 固定代码风控规则已接入模拟转账后端，执行前重新检查日累计、时间和余额
-- 前端已接入模拟转账、卡片挂失、理财和订阅动作的确认／验证／执行界面；当前浏览器回归使用隔离 API 替身，真实服务联调仍待完成
+- 前端已接入模拟转账、卡片挂失、理财和订阅动作的确认／验证／执行界面；核心只读对话已进行真实 LLM + 模拟银行隔离 HTTP 浏览器联调；完整转账授权的真实浏览器验收仍待进行
 - 模拟理财产品/持仓/风险测评查询，以及红色验证后的模拟申购/赎回；银行数据只读接口 `/api/bank/wealth/*` 与 Agent 操作接口 `/api/wealth/*` 分离，Tool 不经过 HTTP 数据接口
 - 接口分层约定：`/api/bank/*` 仅供前端负一屏和服务层封装使用，不注册为 Agent Tool；LLM 不能直接调用银行数据接口
 - 负一屏只读数据接口：账户、联系人、理财持仓、风险测评聚合；按用户隔离，不返回令牌或明文号码，联系人只读
