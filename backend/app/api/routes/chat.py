@@ -10,7 +10,7 @@ from app.agent.loop import AgentLoop
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Conversation, Account, Card, Contact, Message, MessageResult
+from app.models import Conversation, Account, Card, Contact, Message, MessageResult, ChatSubmission
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -35,6 +35,8 @@ from app.core.time import utcnow
 from app.services.audit_service import conversation_context, record_separately, request_context
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
+from app.services.chat_submissions import (SubmissionConflict, fingerprint,
+    claim_submission, advance_submission)
 from app.services.conversation_context import (allow_readonly_followup, remember_selection,
                                                previously_selected, latest_trusted_bill_month)
 from app.services.vault import VaultError, create_account_token, create_contact_token, encrypt_result_snapshot, decrypt_result_snapshot
@@ -145,6 +147,38 @@ def read_messages(
     return [_present_message(session, message) for message in list_messages(session, conversation_id)]
 
 
+@router.get("/conversations/{conversation_id}/requests/{request_id}")
+def read_submission_status(
+    conversation_id: int,
+    request_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+    response: Response,
+) -> dict:
+    """Safe retry inspection: never returns Tool tokens or confirmation tokens."""
+    _require_conversation(session, user, conversation_id)
+    response.headers["Cache-Control"] = "no-store"
+    attempt = session.exec(select(ChatSubmission).where(
+        ChatSubmission.user_id == user.id,
+        ChatSubmission.conversation_id == conversation_id,
+        ChatSubmission.request_id == request_id,
+    )).first()
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="请求不存在")
+    result: dict = {
+        "request_id": attempt.request_id,
+        "state": attempt.state,
+        "user_message_id": attempt.user_message_id,
+        "pending_action_id": attempt.pending_action_id,
+        "message": None,
+    }
+    if attempt.state == "completed" and attempt.assistant_message_id is not None:
+        message = session.get(Message, attempt.assistant_message_id)
+        if message is not None and message.conversation_id == conversation_id:
+            result["message"] = _present_message(session, message).model_dump(mode="json")
+    return result
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(
     conversation_id: int,
@@ -211,6 +245,39 @@ async def send_message(
         session.rollback()
         raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
     injection = detect_injection(display_content)
+    # Claim before minting object tokens, saving chat history or executing the
+    # model. Database uniqueness protects against simultaneous duplicate POSTs.
+    submission_id: int | None = None
+    if payload.request_id:
+        try:
+            attempt, claimed = claim_submission(
+                session, user_id=user.id, conversation_id=conversation_id,
+                request_id=payload.request_id,
+                payload_digest=fingerprint(payload.content, payload.references),
+            )
+        except SubmissionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        submission_id = attempt.id
+        if not claimed:
+            if attempt.state == "completed":
+                with session_scope() as previous_session:
+                    previous_message = (previous_session.get(Message, attempt.assistant_message_id)
+                                        if attempt.assistant_message_id is not None else None)
+                    cached = (_present_message(previous_session, previous_message).model_dump(mode="json")
+                              if previous_message is not None else None)
+                async def replay_completed():
+                    yield _sse({"type": "done", "message": cached})
+                return EventSourceResponse(replay_completed(), ping=15,
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+            if attempt.state == "action_pending":
+                async def replay_action_warning():
+                    yield _sse({"type": "action_warning", "message":
+                        "此请求已创建待确认操作，确认令牌不会重新发送。请查看操作记录；不要重新创建。"})
+                    yield _sse({"type": "done", "message": None})
+                return EventSourceResponse(replay_action_warning(), ping=15,
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+            raise HTTPException(status_code=409,
+                detail="此请求已接收或结果尚未确定。请核对会话及操作记录，不要重复发起。")
     verified_account_token: str | None = None
     verified_card_id: int | None = selected_card[0].id if selected_card is not None else None
     verified_contact_token: str | None = None
@@ -273,7 +340,9 @@ async def send_message(
         except VaultError:
             session.rollback()
             raise HTTPException(status_code=503, detail="对象引用服务暂时不可用") from None
-    append_message(session, conversation, "user", display_content)
+    user_message = append_message(session, conversation, "user", display_content)
+    advance_submission(submission_id=submission_id, state="processing",
+                       user_message_id=user_message.id)
     if conversation.title == "新对话":
         conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content.split("\n\n[已引用对象：", 1)[0])
         session.add(conversation)
@@ -298,6 +367,13 @@ async def send_message(
     loop = AgentLoop()
 
     async def event_stream() -> AsyncIterator[ServerSentEvent]:
+        def finish_reply(content: str, bill: dict | None = None,
+                         cards: dict | None = None,
+                         results: list[dict] | None = None) -> dict | None:
+            saved = _persist_assistant(conversation_id, content, bill, cards, results)
+            advance_submission(submission_id=submission_id, state="completed",
+                               assistant_message_id=saved["id"] if saved else None)
+            return saved
         collected: list[str] = []
         trusted_bill: dict | None = None
         trusted_cards: dict | None = None
@@ -310,17 +386,17 @@ async def send_message(
                 record_failure(user.id)
                 text = "检测到试图绕过安全规则的请求，已拒绝。"
                 yield _sse({"type": "delta", "text": text})
-                yield _sse({"type": "done", "message": _persist_assistant(conversation_id, text)})
+                yield _sse({"type": "done", "message": finish_reply(text)})
                 return
             if uncertain:
+                advance_submission(submission_id=submission_id, state="completed")
                 yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
                 yield _sse({"type": "done", "message": None})
                 return
             if transfer_needs_amount:
                 clarification = "请提供明确的一笔转账金额（例如 1 元），我会先生成待确认操作供你核对。"
                 yield _sse({"type": "delta", "text": clarification})
-                yield _sse({"type": "done", "message": _persist_assistant(
-                    conversation_id, clarification)})
+                yield _sse({"type": "done", "message": finish_reply(clarification)})
                 return
             async for event in loop.stream(
                 history, user_id=user.id, verified_account_token=verified_account_token,
@@ -343,6 +419,7 @@ async def send_message(
                     validated = MonthlyBill.model_validate(event.data["data"])
                     trusted_bill = validated.model_dump()
                     if len(trusted_results) >= 8:
+                        advance_submission(submission_id=submission_id, state="failed")
                         yield _sse({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
                         return
                     trusted_results.append({"kind": "monthly_bill", "data": trusted_bill})
@@ -353,21 +430,27 @@ async def send_message(
                         selected_card_id = selected_card[0].id
                         matching = [item for item in validated_cards.cards if item.card_id == selected_card_id]
                         if len(matching) != 1:
+                            advance_submission(submission_id=submission_id, state="failed")
                             yield _sse({"type": "error", "message": "未能核对所选银行卡，请重试查询。"})
                             return
                         validated_cards = CardStatusSnapshot(cards=matching)
                     trusted_cards = validated_cards.model_dump()
                     if len(trusted_results) >= 8:
+                        advance_submission(submission_id=submission_id, state="failed")
                         yield _sse({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
                         return
                     trusted_results.append({"kind": "card_status", "data": trusted_cards})
                     yield _sse({"type": "card_result", "data": trusted_cards})
                 elif event.type == "action_required":
+                    pending = event.data.get("action") or {}
+                    advance_submission(submission_id=submission_id, state="action_pending",
+                                       pending_action_id=pending.get("id"))
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
                     if not trusted_results:
                         # Preserve the established explicit-error contract for
                         # requests which produced no trustworthy bank result.
+                        advance_submission(submission_id=submission_id, state="failed")
                         yield _sse({"type": "error", "message": event.data["message"]})
                         return
                     # An already verified card/bill must survive later model
@@ -375,17 +458,20 @@ async def send_message(
                     explanation = "部分查询已完成，其余步骤未成功。已完成的结果见下方卡片。"
                     collected.append(explanation)
                     yield _sse({"type": "delta", "text": explanation})
-                    yield _sse({"type": "done", "message": _persist_assistant(
-                        conversation_id, "".join(collected), trusted_bill,
-                        trusted_cards, trusted_results)})
+                    yield _sse({"type": "done", "message": finish_reply(
+                        "".join(collected), trusted_bill, trusted_cards, trusted_results)})
                     return
 
-            message = _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
+            message = finish_reply("".join(collected), trusted_bill, trusted_cards, trusted_results)
             yield _sse({"type": "done", "message": message})
         except asyncio.CancelledError:
+            # The request was accepted, but the connection ended before the
+            # client received completion. Never execute this ID twice.
+            advance_submission(submission_id=submission_id, state="interrupted")
             _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
             raise
         except Exception:
+            advance_submission(submission_id=submission_id, state="failed")
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})
         finally:
             conversation_context.reset(audit_token)

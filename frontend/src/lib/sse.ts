@@ -78,6 +78,7 @@ interface StreamChatOptions {
   conversationId: number
   content: string
   references?: BankObjectReference[]
+  requestId?: string
   signal?: AbortSignal
   onEvent: (event: StreamEvent) => void
 }
@@ -105,6 +106,7 @@ export async function streamChat({
   conversationId,
   content,
   references = [],
+  requestId,
   signal,
   onEvent,
 }: StreamChatOptions) {
@@ -118,7 +120,7 @@ export async function streamChat({
       },
       // Only typed IDs cross the trust boundary; names and display labels are ignored.
       // The server validates ownership, state and card-to-account relationships.
-      body: JSON.stringify({ content, references: references
+      body: JSON.stringify({ content, request_id: requestId, references: references
         .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
         .map(ref => ({ kind: ref.kind, id: ref.id })) }),
       signal,

@@ -32,6 +32,14 @@ export interface Health {
   llm: { mode: string; model: string }
 }
 
+export interface ChatSubmissionStatus {
+  request_id: string
+  state: 'processing' | 'completed' | 'action_pending' | 'interrupted' | 'failed'
+  user_message_id: number | null
+  pending_action_id: number | null
+  message: Message | null
+}
+
 export interface BankCard {
   card_id: number
   account_name: string
@@ -112,6 +120,13 @@ export interface SubscriptionCancelExecution {
 
 const positiveId = z.number().int().safe().positive()
 const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional(), card_result: z.unknown().optional(), tool_results: z.unknown().optional() })
+const submissionStatusSchema = z.object({
+  request_id: z.string().min(8),
+  state: z.enum(['processing', 'completed', 'action_pending', 'interrupted', 'failed']),
+  user_message_id: positiveId.nullable(),
+  pending_action_id: positiveId.nullable(),
+  message: messageSchema.nullable(),
+})
 const cardListSchema = z.array(z.object({ card_id: positiveId, account_name: z.string(), masked_number: z.string(), status: z.string(), account_status: z.string() }))
 const bankDashboardSchema = z.object({
   accounts: z.array(z.object({
@@ -223,6 +238,15 @@ export const api = {
       { method: 'POST', body: JSON.stringify({}) },
       token,
     )
+  },
+
+  async submissionStatus(token: string, conversationId: number, requestId: string): Promise<ChatSubmissionStatus> {
+    const raw = await request<unknown>(
+      `/chat/conversations/${conversationId}/requests/${encodeURIComponent(requestId)}`, {}, token,
+    )
+    const result = submissionStatusSchema.safeParse(raw)
+    if (!result.success) throw new Error('请求状态数据异常，请核对历史。')
+    return result.data
   },
 
   async messages(token: string, conversationId: number): Promise<Message[]> {

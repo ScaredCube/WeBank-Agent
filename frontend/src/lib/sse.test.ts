@@ -123,3 +123,18 @@ describe('对话流协议', () => {
     await expect(streamChat({ token: 'test', conversationId: 1, content: '测试', onEvent: () => {} })).rejects.toThrow(/连接中断/)
   })
 })
+
+it('提交附带稳定 requestId，不在 SSE 内容中泄露金融对象描述', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(response(['data: {"type":"done","message":null}\n\n']))
+  vi.stubGlobal('fetch', fetchMock)
+  await streamChat({
+    token:'synthetic-token',conversationId:8,content:'查询账单',
+    requestId:'req-sse-unchanged-123',
+    references:[{kind:'account',id:12,label:'私人账户',detail:'hidden'}],
+    onEvent:()=>{},
+  })
+  const payload = JSON.parse(fetchMock.mock.calls[0][1].body)
+  expect(payload).toEqual({content:'查询账单',request_id:'req-sse-unchanged-123',
+    references:[{kind:'account',id:12}]})
+  expect(JSON.stringify(payload)).not.toContain('私人账户')
+})

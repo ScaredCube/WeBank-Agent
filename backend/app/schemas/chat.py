@@ -57,6 +57,9 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1, max_length=4000)
     references: list[BankReference] = Field(default_factory=list, max_length=3)
+    # Required for retriable clients; optional for backwards-compatible legacy calls.
+    request_id: str | None = Field(default=None, min_length=8, max_length=64,
+                                   pattern=r"^[A-Za-z0-9_-]+$")
 
     @model_validator(mode="after")
     def unique_kinds(self):

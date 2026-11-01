@@ -30,6 +30,26 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class ChatSubmission(SQLModel, table=True):
+    """Deduplicates one client-authored Agent request across SSE retries.
+
+    Only a SHA256 payload fingerprint and message/action IDs are persisted;
+    no raw request text, confirmation token, API credential or bank token.
+    """
+    __table_args__ = (UniqueConstraint("user_id", "request_id"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    conversation_id: int = Field(foreign_key="conversation.id", index=True)
+    request_id: str = Field(max_length=64)
+    payload_digest: str
+    state: str = "processing"
+    user_message_id: int | None = Field(default=None, foreign_key="message.id")
+    assistant_message_id: int | None = Field(default=None, foreign_key="message.id")
+    pending_action_id: int | None = Field(default=None, foreign_key="pendingaction.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class ConversationSelection(SQLModel, table=True):
     """Last explicitly selected read-only bank object; never a payment mandate.
 

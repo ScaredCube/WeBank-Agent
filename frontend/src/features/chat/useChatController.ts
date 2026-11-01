@@ -45,6 +45,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const historyRequest = useRef(0)
   const sessionGeneration = useRef(0)
   const drafts = useRef(new Map<number | null, string>())
+  // Preserve the opaque request identity when a send is interrupted. An exact
+  // retry in this mounted session must never create a second bank operation.
+  const pendingRequest = useRef<{signature:string; requestId:string} | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -176,6 +179,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       let sendFailure: string | null = null
       let actionWarningMessage: string | null = null
       let optimisticId: number | null = null
+      let submittedRequestId: string | null = null
       const generation = sessionGeneration.current
       const isCurrent = () => sessionGeneration.current === generation
       const previousMessageIds = new Set(messages.map((item) => item.id))
@@ -203,6 +207,13 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (raw === draft) setDraft((current) => current.startsWith(raw) ? current.slice(raw.length) : current)
         drafts.current.delete(conversationId)
 
+        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id])])
+        const requestId = pendingRequest.current?.signature === signature
+          ? pendingRequest.current.requestId : crypto.randomUUID()
+        pendingRequest.current = { signature, requestId }
+        submittedRequestId = requestId
+        let receivedDone = false
+
         const controller = new AbortController()
         receiveController.current = controller
         setReceiving(true)
@@ -211,6 +222,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           conversationId,
           content,
           references,
+          requestId,
           signal: controller.signal,
           onEvent: (event) => {
             if (!isCurrent()) return
@@ -232,7 +244,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
               onActionWarning(event.message)
             } else if (event.type === 'action_required') {
               onActionRequired(event)
-            } else if (event.type === 'done' && event.message) {
+            } else if (event.type === 'done') {
+              receivedDone = true
+              if (!event.message) return
               savedReply = event.message
               const validated = toolResultListSchema.safeParse(pendingToolResults)
               if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[event.message!.id]:validated.data}))
@@ -240,6 +254,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             }
           },
         })
+        if (receivedDone) pendingRequest.current = null
       } catch (err) {
         if (!isCurrent()) return
         if (receiveController.current?.signal.aborted) {
@@ -259,6 +274,25 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           }
         }
       } finally {
+        if (isCurrent() && conversationId && submittedRequestId && !sessionExpired &&
+            (sendFailure !== null || receiveController.current?.signal.aborted)) {
+          try {
+            const status = await api.submissionStatus(token, conversationId, submittedRequestId)
+            if (status.state === 'completed') {
+              savedReply = status.message
+              sendFailure = null
+              pendingRequest.current = null
+              setError(null)
+            } else if (status.state === 'action_pending') {
+              sendFailure = null
+              pendingRequest.current = null
+              onActionWarning('待确认操作已在服务端创建。请到操作记录核对，原确认令牌不能重新获取。')
+              setError(null)
+            }
+          } catch {
+            // Lookup is optional; preserve the original uncertain-send warning.
+          }
+        }
         if (isCurrent()) {
           receiveController.current = null
           setReceiving(false)

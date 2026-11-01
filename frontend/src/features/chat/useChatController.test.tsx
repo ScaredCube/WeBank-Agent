@@ -278,3 +278,65 @@ it('异常没有错误文案时仍保留草稿并显示通用结果提示', asyn
   expect(result.current.error).toBe('消息发送失败')
   expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('发送结果暂不确定'))
 })
+
+it('网络失败后同一条消息重试沿用 requestId，新内容改用新 ID', async () => {
+  vi.spyOn(api, 'submissionStatus').mockRejectedValue(new ApiError('查询暂不可用', 503))
+  const stream = vi.spyOn(sse, 'streamChat').mockRejectedValue(new TypeError('模拟网络中断'))
+  const { result } = renderHook(() => useChatController({
+    token: 'synthetic-token', actionBlocked: false,
+    onActionRequired: vi.fn(), onActionWarning: vi.fn(),
+    onConversationChange: vi.fn(),
+  }))
+  await waitFor(() => expect(result.current.loadingMessages).toBe(false))
+  act(() => result.current.updateDraft('查询这个账户的账单'))
+  await act(async () => { await result.current.sendMessage('查询这个账户的账单') })
+  const firstId = stream.mock.calls[0][0].requestId
+  expect(firstId).toMatch(/^[\da-f-]{36}$/i)
+
+  await act(async () => { await result.current.sendMessage('查询这个账户的账单') })
+  expect(stream.mock.calls[1][0].requestId).toBe(firstId)
+
+  await act(async () => { await result.current.sendMessage('另一条问题') })
+  expect(stream.mock.calls[2][0].requestId).not.toBe(firstId)
+})
+
+it('断线后状态查询确认回复已经保存，就恢复历史并消除不确定告警', async () => {
+  const saved: Message = { id: 82, role: 'assistant', content: '可信查询完成', created_at: '2026-11-01T00:00:00Z' }
+  vi.spyOn(api, 'submissionStatus').mockResolvedValue({
+    request_id: 'req-status-test', state: 'completed',
+    user_message_id: 42, pending_action_id: null, message: saved,
+  })
+  const existing: Message = { id: 42, role: 'user', content: '查询消费', created_at: '2026-11-01T00:00:00Z' }
+  vi.mocked(api.messages).mockResolvedValueOnce([])
+    .mockResolvedValueOnce([existing, saved])
+  vi.spyOn(sse, 'streamChat').mockRejectedValueOnce(new TypeError('连接被切断'))
+  const onActionWarning = vi.fn()
+  const { result } = renderHook(() => useChatController({
+    token: 'synthetic-token', actionBlocked: false,
+    onActionRequired: vi.fn(), onActionWarning, onConversationChange: vi.fn(),
+  }))
+  await waitFor(() => expect(result.current.loadingMessages).toBe(false))
+  act(() => result.current.updateDraft('查询消费'))
+  await act(async () => { await result.current.sendMessage('查询消费') })
+  expect(api.submissionStatus).toHaveBeenCalledWith('synthetic-token', 1, expect.any(String))
+  expect(result.current.error).toBeNull()
+  expect(result.current.messages).toEqual([existing, saved])
+  expect(onActionWarning).not.toHaveBeenCalledWith(expect.stringContaining('发送结果暂不确定'))
+})
+
+it('断线后查询得知动作已待确认时，提醒查看操作记录而不重复发起', async () => {
+  vi.spyOn(api, 'submissionStatus').mockResolvedValue({
+    request_id: 'req-action-test', state: 'action_pending',
+    user_message_id: 31, pending_action_id: 99, message: null,
+  })
+  vi.spyOn(sse, 'streamChat').mockRejectedValueOnce(new TypeError('连接中断'))
+  const onActionWarning = vi.fn()
+  const { result } = renderHook(() => useChatController({
+    token: 'synthetic-token', actionBlocked: false,
+    onActionRequired: vi.fn(), onActionWarning, onConversationChange: vi.fn(),
+  }))
+  await waitFor(() => expect(result.current.loadingMessages).toBe(false))
+  await act(async () => { await result.current.sendMessage('准备一笔模拟转账') })
+  expect(result.current.error).toBeNull()
+  expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('待确认操作已在服务端创建'))
+})
