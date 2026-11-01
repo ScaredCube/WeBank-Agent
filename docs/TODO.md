@@ -355,3 +355,16 @@
   - 验收：资产在左、工具抽屉在右；手机一步打开资产并可在意图生成后回到对话；收藏与操作记录在抽屉内可切换；Escape 与焦点返回可用；无横向溢出；不改变服务端确认、风控、令牌化和拖拽碰撞矩阵。
   - 验证：前端 32 个 Vitest 文件 / **207 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过；Playwright（Chrome，本地 5199）**3 passed**，覆盖手机资产胶囊、桌面隐私、左右布局与抽屉分段切换。未做真实设备与真实后端连续联调。
   - 限制：抽屉和手机资产页不是完整焦点陷阱，Tab 仍可能离开浮层；收藏仍为本机未加密存储；真实设备手感与生产验收未完成。
+
+- [x] **T-UX-422 移除前端过渡与切换动画**：
+  - 范围：删除 CSS 关键帧、弹窗/面板/主题切换/悬停/弹簧/布局联动等过渡与切换动画；主题切换改为即时生效；消息定位改为即时滚动；保留加载转圈、骨架屏 pulse、思考企鹅与圆点、流式光标闪烁。
+  - 代码：`frontend/src/index.css`、`AppShell.tsx`、`pages/Chat.tsx`、`ChatComposer.tsx`、`ChatHome.tsx`、`IntentCapsule.tsx`、`ThemeProvider.tsx`、`ThemeToggle.tsx`、`MascotStage.tsx`、`MessageList.tsx` 及各组件样式类；`motion` 依赖按用户要求保留但源码已无引用。
+  - 验收：页面切换、弹窗、抽屉、资产面板、主题切换均为即时呈现；无 `transition-*`/`animate-[slide-*]`/`motion/react` 过渡用法残留；加载类动画仍在。
+  - 验证：`npm run test` 32 个文件 / **206 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过。未做真实设备与真实后端连续联调。
+
+- [x] **T-UX-423 前端关键动效回补**：
+  - 范围：在 `T-UX-422` 的静态基线上，按用户确认恢复关键交互动效：右侧工具抽屉与手机资产页进退场、确认/验证/资产详情弹窗、操作流程步骤与完成态、资产拖拽抬升/目标呼吸/回弹、意图胶囊与引用/`@` 下拉、新消息与可信结果卡入场、隐私金额揭示、主按钮按压反馈、主题缩短版圆形揭幕、登录/首页吉祥物轻微 idle。
+  - 代码：新增 `frontend/src/lib/motion.ts` 统一动效 token；修改 `index.css`、`AppShell.tsx`、`pages/Chat.tsx`、`ui/dialog.tsx`、`ActionJourney.tsx`、`PendingActionDialog.tsx`、`useAssetDrag.ts`、`DragGhost.tsx`、`AssetCards.tsx`、`AssetsPane.tsx`、`ChatComposer.tsx`、`MessageList.tsx`、`Money.tsx`、`MascotStage.tsx`、`ThemeProvider.tsx`、`ThemeToggle.tsx`、`ui/button.tsx`、`ChatHome.tsx`；同步更新 `ThemeProvider.test.tsx`、`Chat.test.tsx`、`ChatComposer.test.tsx`。
+  - 决策：弹窗外壳使用 Radix `data-state` + CSS 进退场，避免与 Radix Presence 的卸载时机冲突；抽屉/手机资产页、动作状态、消息、拖拽浮层、输入区使用 `motion/react`；主题圆形揭幕 460ms，减少动效时同步切换；不恢复鼠标跟随吉祥物、桌面栏宽度折叠动画和逐 token 动画。
+  - 验收：抽屉/Escape/焦点返回、弹窗确认与验证、拖拽六动作、胶囊发送、隐私揭示、主题切换均可用；无新增接口、SSE、风控、令牌化或业务状态变化；`prefers-reduced-motion` 下无大幅位移/呼吸/圆形揭幕。
+  - 验证：`npm run test` 32 个文件 / **207 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过（保留 >500kB chunk 警告）；Playwright（Chrome，本地 5199）**3 passed**。未做真实设备手感、真实后端连续联调或真实模型下的动效验收。

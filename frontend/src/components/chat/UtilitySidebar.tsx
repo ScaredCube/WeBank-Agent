@@ -44,7 +44,7 @@ export function UtilitySidebar({
       <PenguinArt pose="avatar" className="size-9 shrink-0" />
       <div className="min-w-0 flex-1 truncate text-[14px] font-bold tracking-[-0.025em] text-ink">{MASCOT_NAME}</div>
       <button type="button" data-utility-close onClick={onClose} aria-label="收起侧栏" title="收起侧栏"
-        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-jade-700">
+        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-jade-700">
         <X className="size-4" />
       </button>
     </header>
@@ -55,7 +55,7 @@ export function UtilitySidebar({
           const active = id === tab
           return <button key={id} type="button" aria-current={active ? 'page' : undefined}
             aria-label={label} onClick={() => onTabChange(id)}
-            className={cn('flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-1 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-jade-700',
+            className={cn('flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-1 text-[12px] focus-visible:outline-2 focus-visible:outline-jade-700',
               active ? 'bg-panel font-semibold text-jade-900 shadow-sm' : 'text-muted hover:text-ink')}>
             <Icon className="size-[15px] shrink-0" strokeWidth={1.8} />
             <span className="truncate">{label}</span>
@@ -90,7 +90,7 @@ export function UtilitySidebar({
           <div className="mt-0.5 truncate text-[11px] text-muted">@{user?.username}</div>
         </div>
         <button type="button" onClick={onLogout} title="退出登录" aria-label="退出登录"
-          className="grid size-9 place-items-center rounded-lg text-muted transition hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
+          className="grid size-9 place-items-center rounded-lg text-muted hover:bg-[#f1f6f4] hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
           <LogOut className="size-[15px]" />
         </button>
       </div>

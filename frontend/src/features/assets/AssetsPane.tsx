@@ -122,21 +122,21 @@ export function AssetsPane({
   return <section aria-label="资产" className="flex h-full min-h-0 flex-col bg-workspace">
     <header className="flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-line px-4 pt-[env(safe-area-inset-top)] sm:px-6">
       <button type="button" data-assets-close onClick={onClose} aria-label="返回对话"
-        className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden">
+        className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:hidden">
         <ChevronLeft size={19} />
       </button>
       <button type="button" onClick={onClose} aria-label="收起资产"
-        className="hidden size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid">
+        className="hidden size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 lg:grid">
         <PanelLeftClose size={18} />
       </button>
       <h2 className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-tight text-ink">资产</h2>
       <button type="button" onClick={privacy.toggle} aria-pressed={privacy.hidden}
         aria-label={privacy.hidden ? '显示金额' : '隐藏金额'}
-        className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
+        className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
         {privacy.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
       </button>
       <button type="button" onClick={onRetry} aria-label="刷新资产"
-        className="grid size-10 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
+        className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
         <RefreshCw size={17} />
       </button>
     </header>
@@ -157,6 +157,8 @@ export function AssetsPane({
             return <AssetBankCard key={account.account_id} index={index} account={account} entity={entity}
               selected={selectedKey === `account:${account.account_id}`}
               dropActive={drag.activeTargetKey === `account:${account.account_id}` && selectedKey !== `account:${account.account_id}`}
+              dragging={drag.activeSourceKey === `account:${account.account_id}`}
+              settled={drag.settledKey === `account:${account.account_id}`}
               onSelect={() => choose(entity)}
               onDetails={() => setDetail({ kind: 'account', id: account.account_id })}
               onPointerDown={(event) => drag.start({ event, item: entity, element: event.currentTarget })} />
@@ -171,6 +173,8 @@ export function AssetsPane({
             return <AssetContactCard key={contact.contact_id} contact={contact} entity={entity}
               selected={selectedKey === `contact:${contact.contact_id}`}
               dropActive={drag.activeTargetKey === `contact:${contact.contact_id}` && selectedKey !== `contact:${contact.contact_id}`}
+              dragging={drag.activeSourceKey === `contact:${contact.contact_id}`}
+              settled={drag.settledKey === `contact:${contact.contact_id}`}
               onSelect={() => choose(entity)}
               onPointerDown={(event) => drag.start({ event, item: entity, element: event.currentTarget })} />
           })}
@@ -184,6 +188,8 @@ export function AssetsPane({
             return <AssetHoldingCard key={holding.holding_id} holding={holding} entity={entity}
               selected={selectedKey === `holding:${holding.holding_id}`}
               dropActive={drag.activeTargetKey === `holding:${holding.holding_id}` && selectedKey !== `holding:${holding.holding_id}`}
+              dragging={drag.activeSourceKey === `holding:${holding.holding_id}`}
+              settled={drag.settledKey === `holding:${holding.holding_id}`}
               onSelect={() => choose(entity)}
               onPointerDown={(event) => drag.start({ event, item: entity, element: event.currentTarget })} />
           })}

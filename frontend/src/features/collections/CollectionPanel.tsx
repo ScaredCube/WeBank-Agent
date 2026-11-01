@@ -95,7 +95,7 @@ function UserCollection({ userId, hidden, token, onStartChat, databaseName, onOp
     <div className="mt-5 grid gap-3 lg:grid-cols-2">{items.map((item, index) => {
       const parsed = cardSchema.safeParse(item.card)
       const title = hidden ? `收藏 ${index + 1} 已隐藏` : parsed.success ? parsed.data.title : '此卡片数据无法展示'
-      return <button key={item.id} ref={(element) => { if (element) itemButtons.current.set(item.id, element); else itemButtons.current.delete(item.id) }} type="button" onClick={() => setSelectedId(item.id)} className="flex min-h-[124px] w-full items-center gap-3 rounded-[20px] border border-line bg-panel px-5 py-5 text-left transition hover:border-jade-300 hover:shadow-[0_10px_25px_-24px_rgba(0,40,30,.4)] focus-visible:outline-2 focus-visible:outline-jade-700">
+      return <button key={item.id} ref={(element) => { if (element) itemButtons.current.set(item.id, element); else itemButtons.current.delete(item.id) }} type="button" onClick={() => setSelectedId(item.id)} className="flex min-h-[124px] w-full items-center gap-3 rounded-[20px] border border-line bg-panel px-5 py-5 text-left hover:border-jade-300 hover:shadow-[0_10px_25px_-24px_rgba(0,40,30,.4)] focus-visible:outline-2 focus-visible:outline-jade-700">
         <span className="min-w-0 flex-1"><span className="block break-words text-sm font-medium">{title}</span><span className="mt-2 block text-xs text-muted">{item.refresh ? '可更新数据' : '历史版本'} · {item.savedAt ? new Date(item.savedAt).toLocaleDateString('zh-CN') : '收藏时间未知'}</span></span><ChevronRight size={16} className="shrink-0 text-muted" />
       </button>
     })}</div>

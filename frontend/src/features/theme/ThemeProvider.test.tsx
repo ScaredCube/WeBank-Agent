@@ -50,42 +50,40 @@ it('系统主题由系统偏好决定，手动切换后退出系统模式', asyn
   expect(onChange).toBeDefined()
 })
 
-it('从切换按钮的右下角开始执行圆形 View Transition，而不是整页淡入淡出', async () => {
+it('支持时使用缩短的圆形揭幕过渡，主题仍然立即生效', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: false,
     media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
   }))
-  const animate = vi.fn(() => ({ finished: Promise.resolve() }))
-  const startViewTransition = vi.fn((update: () => void) => {
-    update()
+  const animate = vi.fn()
+  const startViewTransition = vi.fn((callback: () => void) => {
+    callback()
     return { ready: Promise.resolve(), finished: Promise.resolve() }
   })
   Object.defineProperty(document, 'startViewTransition', { configurable: true, value: startViewTransition })
   Object.defineProperty(document.documentElement, 'animate', { configurable: true, value: animate })
   try {
     render(<ThemeProvider><Probe /></ThemeProvider>)
-    const toggle = screen.getByRole('button', { name: '切换至深色主题' })
-    vi.spyOn(toggle, 'getBoundingClientRect').mockReturnValue(new DOMRect(930, 20, 52, 44))
-    fireEvent.click(toggle)
-    await waitFor(() => expect(animate).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '切换至深色主题' }))
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
     expect(startViewTransition).toHaveBeenCalledTimes(1)
-    const [frames, options] = animate.mock.calls[0] as unknown as [{ clipPath: string[] }, { pseudoElement: string; duration: number }]
-    expect(frames.clipPath[0]).toBe('circle(0px at 970px 52px)')
-    expect(frames.clipPath[1]).toMatch(/^circle\([\d.]+px at 970px 52px\)$/)
-    expect(options.pseudoElement).toBe('::view-transition-new(root)')
-    expect(options.duration).toBeGreaterThanOrEqual(600)
-    expect(document.documentElement.dataset.theme).toBe('dark')
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(1))
+    expect(animate.mock.calls[0]?.[1]).toMatchObject({
+      duration: 460,
+      pseudoElement: '::view-transition-new(root)',
+    })
   } finally {
     Reflect.deleteProperty(document, 'startViewTransition')
     Reflect.deleteProperty(document.documentElement, 'animate')
   }
 })
 
-it('减少动态效果时直接切换主题，不启动圆形过渡', async () => {
+it('减少动态效果时跳过圆形揭幕', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === '(prefers-reduced-motion: reduce)',
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
     addEventListener: () => {},
     removeEventListener: () => {},
   }))

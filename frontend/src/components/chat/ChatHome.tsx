@@ -1,6 +1,5 @@
 import { useRef, type ReactNode } from 'react'
 import { ArrowUpRight } from 'lucide-react'
-import { motion, useReducedMotion } from 'motion/react'
 
 import { MascotStage } from '@/features/theme/MascotStage'
 import { FinanceSticker, type StickerKind } from '@/features/theme/FinanceSticker'
@@ -24,7 +23,6 @@ export function ChatHome({
   composer, suggestions = [], onPick, feedback, disclaimer,
 }: ChatHomeProps) {
   const homeRef = useRef<HTMLElement>(null)
-  const reduceMotion = useReducedMotion()
 
   function pickPrompt(prompt: string) {
     if (!onPick) return
@@ -70,21 +68,18 @@ export function ChatHome({
                   </div>
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {suggestions.map(({ label, prompt, art }) => (
-                      <motion.button
+                      <button
                         key={prompt}
                         type="button"
                         onClick={() => pickPrompt(prompt)}
-                        whileHover={reduceMotion ? undefined : { y: -2 }}
-                        whileTap={reduceMotion ? undefined : { scale: 0.985 }}
-                        transition={{ type: 'spring', stiffness: 430, damping: 32 }}
-                        className={'group relative flex min-h-[96px] w-full items-center gap-4 rounded-[18px] border border-line bg-panel px-5 py-4 text-left shadow-[0_8px_25px_-24px_rgba(0,40,31,.3)] transition hover:border-jade-300 hover:bg-jade-50/30 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-jade-700'}
+                        className={'motion-press group relative flex min-h-[96px] w-full items-center gap-4 rounded-[18px] border border-line bg-panel px-5 py-4 text-left shadow-[0_8px_25px_-24px_rgba(0,40,31,.3)] hover:border-jade-300 hover:bg-jade-50/30 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-jade-700'}
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-2.5">
                           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-jade-50"><FinanceSticker kind={art} className="size-9" /></span>
                           <span className="text-[14px] font-semibold tracking-[-0.02em] text-ink">{label}</span>
                         </span>
-                        <ArrowUpRight aria-hidden="true" size={17} className="shrink-0 text-muted/65 transition-colors group-hover:text-jade-700" />
-                      </motion.button>
+                        <ArrowUpRight aria-hidden="true" size={17} className="shrink-0 text-muted/65 group-hover:text-jade-700" />
+                      </button>
                     ))}
                   </div>
                 </nav>

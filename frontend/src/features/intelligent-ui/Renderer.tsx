@@ -47,7 +47,7 @@ export function IntelligentCard({ value, hidden = false, onAction }: CardProps) 
 
     if (item.type === 'action') return <button type="button" key={index} disabled={!onAction}
       onClick={() => onAction?.(item.action)}
-      className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-[12px] font-semibold text-jade-800 transition-colors hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:opacity-50">
+      className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-[12px] font-semibold text-jade-800 hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:opacity-50">
       {actionLabels[item.action]} <ArrowUpRight size={15} aria-hidden="true"/>
     </button>
 

@@ -1,7 +1,9 @@
 import { Landmark, Menu, Plus, Sparkles } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, type ReactNode } from 'react'
 
 import { MASCOT_NAME } from '@/features/theme/brand'
+import { DURATION, EASE_DRAWER, EASE_IN_OUT, EASE_OUT, useMotionReduced } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 /**
@@ -9,8 +11,7 @@ import { cn } from '@/lib/utils'
  * utility drawer (conversations, collections, activity) on the right.
  *
  * Assets stay mounted by the page so dragging and card selection keep state.
- * The utility drawer only mounts while open so its focus trap and close
- * animation stay simple.
+ * The utility drawer only mounts while open so its focus trap stays simple.
  */
 export function AppShell({ assets, utility, utilityOpen, onCloseUtility, children }: {
   assets: ReactNode
@@ -22,6 +23,7 @@ export function AppShell({ assets, utility, utilityOpen, onCloseUtility, childre
   const drawerRef = useRef<HTMLDivElement>(null)
   const restoreFocus = useRef<HTMLElement | null>(null)
   const closeUtilityRef = useRef(onCloseUtility)
+  const reduced = useMotionReduced()
 
   useEffect(() => { closeUtilityRef.current = onCloseUtility }, [onCloseUtility])
 
@@ -47,13 +49,23 @@ export function AppShell({ assets, utility, utilityOpen, onCloseUtility, childre
   return <div className="bank-app relative flex h-dvh overflow-hidden bg-canvas text-ink">
     {assets}
     <main className="flex min-w-0 flex-1 flex-col bg-panel">{children}</main>
-    {utilityOpen && <>
-      <div className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px]" onClick={onCloseUtility} aria-hidden="true" />
-      <div ref={drawerRef}
-        className="fixed inset-y-0 right-0 z-40 flex w-[min(372px,88vw)] flex-col border-l border-line bg-sidebar shadow-2xl animate-[slide-in-right_.32s_cubic-bezier(.32,.72,0,1)]">
+    <AnimatePresence>
+      {utilityOpen && <motion.div key="utility-overlay"
+        className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px]"
+        onClick={onCloseUtility} aria-hidden="true"
+        initial={reduced ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }} />}
+      {utilityOpen && <motion.div key="utility-panel" ref={drawerRef}
+        className="fixed inset-y-0 right-0 z-40 flex w-[min(372px,88vw)] flex-col border-l border-line bg-sidebar shadow-2xl"
+        initial={reduced ? false : { x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%', transition: reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_IN_OUT } }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.drawer, ease: EASE_DRAWER }}>
         {utility}
-      </div>
-    </>}
+      </motion.div>}
+    </AnimatePresence>
   </div>
 }
 
@@ -70,7 +82,7 @@ export function AppHeader({ title, isHome, assetsOpen, onToggleAssets, onNewConv
   return <header className="relative z-10 flex h-[calc(4rem+env(safe-area-inset-top))] shrink-0 items-center gap-1.5 border-b border-line/70 bg-panel/90 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-5">
     <button type="button" onClick={onToggleAssets} aria-expanded={assetsOpen}
       aria-label={assetsOpen ? '收起资产' : '打开资产'} title={assetsOpen ? '收起资产' : '打开资产'}
-      className={cn('flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium transition focus-visible:outline-2 focus-visible:outline-jade-700',
+      className={cn('flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium focus-visible:outline-2 focus-visible:outline-jade-700',
         assetsOpen ? 'bg-jade-100 text-jade-900' : 'text-jade-800 hover:bg-jade-50')}>
       <Landmark className="size-[16px]" strokeWidth={1.8} />
       <span>资产</span>
@@ -83,12 +95,12 @@ export function AppHeader({ title, isHome, assetsOpen, onToggleAssets, onNewConv
     </div>
     <button type="button" onClick={onNewConversation} disabled={newConversationDisabled}
       title="新建对话" aria-label="新建对话"
-      className="grid size-10 shrink-0 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 disabled:opacity-40">
+      className="grid size-10 shrink-0 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700 disabled:opacity-40">
       <Plus size={19} />
     </button>
     <button type="button" onClick={onOpenUtility} aria-expanded={utilityOpen}
       aria-label="打开导航和会话列表" title="打开导航和会话列表"
-      className="grid size-10 shrink-0 place-items-center rounded-xl text-muted transition hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
+      className="grid size-10 shrink-0 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
       <Menu className="size-[18px]" />
     </button>
   </header>

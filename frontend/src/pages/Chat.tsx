@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle } from 'lucide-react'
-import { LayoutGroup, motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 
 import { AppHeader, AppShell } from '@/app/AppShell'
 import type { UtilityTabName } from '@/app/workspace-state'
@@ -28,6 +28,7 @@ import { useChatController } from '@/features/chat/useChatController'
 import { useAuth } from '@/lib/use-auth'
 import { api, type BankCard, type BankDashboardData } from '@/lib/api'
 import { PrivacyProvider, usePrivacy } from '@/features/privacy/PrivacyProvider'
+import { DURATION, EASE_DRAWER, EASE_IN_OUT, EASE_OUT, useMotionReduced } from '@/lib/motion'
 import type { ChatIntentPayload, StreamEvent } from '@/lib/sse'
 import type { CardOrigin } from '@/features/intelligent-ui/schema'
 import { addBankReference, type BankObjectReference } from '@/features/references/bank-object-reference'
@@ -64,6 +65,8 @@ function ChatWorkspace() {
   const { token, user, logout } = useAuth()
   const navigate = useNavigate()
   const privacy = usePrivacy()
+  const reduced = useMotionReduced()
+  const [compact, setCompact] = useState(() => !desktopViewport())
 
   const [assetsOpen, setAssetsOpen] = useState(desktopViewport)
   const [utilityOpen, setUtilityOpen] = useState(false)
@@ -87,6 +90,15 @@ function ChatWorkspace() {
   const [cardError, setCardError] = useState<string | null>(null)
   const referenceSearchCache = useRef<{ key: string; promise: Promise<BankObjectReference[]> } | null>(null)
   const assetsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia('(min-width: 1024px)')
+    const update = () => setCompact(!media.matches)
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
 
   const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => { setPendingAction(event); setActionOpen(true) }, [])
   const onConversationChange = useCallback(() => setUtilityOpen(false), [])
@@ -311,24 +323,46 @@ function ChatWorkspace() {
     onLogout={handleLogout}
   /> : null
 
-  const assets = token && assetsOpen ? <>
-    <div className="fixed inset-0 z-30 bg-ink/30 backdrop-blur-[2px] lg:hidden" onClick={() => setAssetsOpen(false)} aria-hidden="true" />
-    <div ref={assetsRef} data-assets-panel
-      onKeyDown={(event) => { if (event.key === 'Escape' && !desktopViewport()) setAssetsOpen(false) }}
-      className="z-40 min-h-0 shrink-0 fixed inset-0 lg:static lg:inset-auto lg:z-auto lg:w-[340px] lg:border-r lg:border-line xl:w-[380px]">
-      <div className="h-full bg-workspace animate-[slide-in-left_.32s_cubic-bezier(.32,.72,0,1)] lg:animate-none">
-        <AssetsPane token={token} dashboard={dashboard} cards={cards} loading={assetsLoading}
-          dashboardError={dashboardError} cardError={cardError}
-          actionDisabled={sending || actionPreparing || !!pendingAction}
-          cardLossRecovery={cardLossRecovery}
-          onCardLossRecoveryChange={onCardLossRecoveryChange}
-          onCardLossResolved={onCardLossResolved}
-          onActionBusy={setActionPreparing}
-          onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }}
-          onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
-      </div>
-    </div>
-  </> : null
+  const assetsContent = token && <div className="h-full bg-workspace">
+    <AssetsPane token={token} dashboard={dashboard} cards={cards} loading={assetsLoading}
+      dashboardError={dashboardError} cardError={cardError}
+      actionDisabled={sending || actionPreparing || !!pendingAction}
+      cardLossRecovery={cardLossRecovery}
+      onCardLossRecoveryChange={onCardLossRecoveryChange}
+      onCardLossResolved={onCardLossResolved}
+      onActionBusy={setActionPreparing}
+      onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }}
+      onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
+  </div>
+
+  const assetsPanel = token && assetsOpen ? <div ref={assetsRef} data-assets-panel
+    onKeyDown={(event) => { if (event.key === 'Escape' && !desktopViewport()) setAssetsOpen(false) }}
+    className="z-40 min-h-0 shrink-0 fixed inset-0 lg:static lg:inset-auto lg:z-auto lg:w-[340px] lg:border-r lg:border-line xl:w-[380px]">
+    {assetsContent}
+  </div> : null
+
+  const assets = token ? (compact
+    ? <AnimatePresence>
+        {assetsOpen && <motion.div key="assets-overlay"
+          className="fixed inset-0 z-30 bg-ink/30 backdrop-blur-[2px]"
+          onClick={() => setAssetsOpen(false)} aria-hidden="true"
+          initial={reduced ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }} />}
+        {assetsOpen && <motion.div key="assets-panel" ref={assetsRef} data-assets-panel
+          onKeyDown={(event) => { if (event.key === 'Escape') setAssetsOpen(false) }}
+          className="z-40 min-h-0 shrink-0 fixed inset-0"
+          initial={reduced ? false : { x: '-100%' }}
+          animate={{ x: 0 }}
+          exit={reduced
+            ? { opacity: 0, transition: { duration: 0 } }
+            : { x: '-100%', transition: { duration: DURATION.base, ease: EASE_IN_OUT } }}
+          transition={reduced ? { duration: 0 } : { duration: DURATION.drawer, ease: EASE_DRAWER }}>
+          {assetsContent}
+        </motion.div>}
+      </AnimatePresence>
+    : assetsPanel) : null
 
   return <AppShell assets={assets} utility={utility} utilityOpen={utilityOpen && !!utility} onCloseUtility={() => setUtilityOpen(false)}>
     <AppHeader title={activeConversation?.title ?? '新对话'} isHome={isHome}
@@ -342,8 +376,8 @@ function ChatWorkspace() {
       <button type="button" onClick={() => setSourceNavigation(null)} className="shrink-0 underline">已了解</button>
     </div>}
 
-    <LayoutGroup id="bank-agent-chat-page">
-      <motion.div ref={scrollRef} layoutScroll role={isHome ? undefined : 'log'} aria-label={isHome ? undefined : '对话消息'} aria-live="off" className="scroll-thin flex-1 overflow-y-auto" onScroll={onScroll}>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} role={isHome ? undefined : 'log'} aria-label={isHome ? undefined : '对话消息'} aria-live="off" className="scroll-thin flex-1 overflow-y-auto" onScroll={onScroll}>
         {loadingMessages ? <ConversationLoading />
           : historyUnavailable ? <div className="grid h-full place-items-center px-6"><div className="text-center"><p className="text-sm text-muted">无法读取此会话，请重试。</p><button type="button" className="mt-4 rounded-xl border border-line bg-white px-4 py-2 text-sm text-jade-800" onClick={() => activeId ? void openConversation(activeId) : void createConversation()}>{activeId ? '重试加载会话' : '新建会话'}</button></div></div>
           : isHome ? <ChatHome composer={composer} feedback={homeFeedback} suggestions={bankingStarters} onPick={updateDraft}
@@ -355,7 +389,11 @@ function ChatWorkspace() {
                 const list = toolResultLists[message.id] ?? messageToolResults(message)
                 const completed = completedByMessage[message.id] ?? []
                 if (!list.length && !completed.length) return null
-                return <div className="space-y-4">{list.map((result, index) => {
+                return <motion.div className="space-y-4"
+                  initial={reduced ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }}>
+                  {list.map((result, index) => {
                   if (result.kind === 'monthly_bill') {
                     return token && user && activeId && message.id > 0
                       ? <SaveBillCard key={`${message.id}-${index}`} value={result.data} hidden={privacy.hidden} userId={user.id} token={token} origin={{ conversationId: activeId, messageId: message.id }} />
@@ -367,13 +405,13 @@ function ChatWorkspace() {
                   return null
                 })}
                 {completed.map((event, index) => <CompletedActionCard key={`${message.id}-completed-${event.action.id}-${index}`} event={event} />)}
-                </div>
+                </motion.div>
               }}
               streamingText={streamingText} thinking={sending && !streamingText}
               focusMessageId={sourceTarget?.conversationId === activeId ? sourceTarget.messageId : null}
               onFocusMessageResolved={onFocusMessageResolved} />
         }
-      </motion.div>
+      </div>
 
       {!isHome && <div className="shrink-0 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 md:px-6">
         {actionWarning && <div role="alert" className="mx-auto mb-2 flex w-full max-w-[680px] items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span className="flex-1">{actionWarning}</span><button type="button" onClick={() => setActionWarning(null)} className="shrink-0 underline">已了解</button></div>}
@@ -383,7 +421,7 @@ function ChatWorkspace() {
         {composer}
         <p className="mx-auto mt-2.5 max-w-[680px] text-center text-[10.5px] text-muted/65">AI 生成内容仅供参考，重要信息请以银行正式记录为准</p>
       </div>}
-    </LayoutGroup>
+    </div>
 
     {pendingAction && token && <PendingActionDialog key={pendingAction.action.id} event={pendingAction} token={token} open={actionOpen} hidden={privacy.hidden} onTogglePrivacy={privacy.toggle}
       onClose={() => setActionOpen(false)}
@@ -406,7 +444,7 @@ function ChatWorkspace() {
           refreshAssets()
           window.requestAnimationFrame(() => {
             const root = scrollRef.current
-            if (root && typeof root.scrollTo === 'function') root.scrollTo({ top: root.scrollHeight, behavior: 'smooth' })
+            if (root && typeof root.scrollTo === 'function') root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
             else if (root) root.scrollTop = root.scrollHeight
           })
         }

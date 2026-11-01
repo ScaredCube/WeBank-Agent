@@ -67,7 +67,7 @@ export function ConversationList({
   return <div className="flex min-h-0 flex-1 flex-col">
     <div className="shrink-0 px-4 pt-4">
       <button type="button" aria-label="新对话" onClick={onNew} disabled={disabled || newDisabled}
-        className="flex h-11 w-full items-center gap-2.5 rounded-[11px] bg-jade-100 px-3.5 text-[13px] font-semibold text-jade-900 transition-colors hover:bg-jade-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:opacity-50">
+        className="flex h-11 w-full items-center gap-2.5 rounded-[11px] bg-jade-100 px-3.5 text-[13px] font-semibold text-jade-900 hover:bg-jade-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:opacity-50">
         <Plus className="size-[18px] shrink-0" />
         <span>新对话</span>
       </button>
@@ -90,7 +90,7 @@ export function ConversationList({
             {items.map(conversation => {
               const active = conversation.id === activeId
               const updatedLabel = formatRelativeTime(conversation.updated_at)
-              return <div key={conversation.id} className={cn('group/conversation relative rounded-xl transition-colors', active ? 'bg-jade-50 text-jade-900' : 'text-ink/80 hover:bg-jade-50/60')}>
+              return <div key={conversation.id} className={cn('group/conversation relative rounded-xl', active ? 'bg-jade-50 text-jade-900' : 'text-ink/80 hover:bg-jade-50/60')}>
                 {editingId === conversation.id ? <form onSubmit={event => { event.preventDefault(); void submitRename(conversation.id) }} className="p-2">
                   <label className="sr-only" htmlFor={`rename-${conversation.id}`}>会话名称</label>
                   <input id={`rename-${conversation.id}`} autoFocus maxLength={60} value={editingTitle} onChange={event => setEditingTitle(event.target.value)}

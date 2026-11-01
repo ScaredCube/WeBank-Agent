@@ -141,14 +141,14 @@ export function MonthlyBillPanel({ token, userId, hidden, accounts = null, accou
           <label htmlFor="bill-month" className="mb-1.5 block text-sm text-ink">月份 · 北京时间</label>
           <input id="bill-month" type="month" required value={month} disabled={loading || saving} onChange={(event) => { setMonth(event.target.value); resetResult() }} className="min-h-11 w-full min-w-0 rounded-xl border border-line bg-white px-3 text-base text-ink focus-visible:outline-2 focus-visible:outline-jade-700" />
         </div>
-        <button type="submit" disabled={queryDisabled} className="min-h-11 shrink-0 rounded-xl bg-jade-700 px-4 text-sm font-medium text-white transition hover:bg-jade-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:cursor-not-allowed disabled:opacity-50">{loading ? '查询中…' : '查询'}</button>
+        <button type="submit" disabled={queryDisabled} className="min-h-11 shrink-0 rounded-xl bg-jade-700 px-4 text-sm font-medium text-white hover:bg-jade-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700 disabled:cursor-not-allowed disabled:opacity-50">{loading ? '查询中…' : '查询'}</button>
       </div>
     </form>
     {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm leading-5 text-red-800">{error}</p>}
     {card && <div className="mt-4">
       {cardAccount && accounts === null && <p className="mb-2 truncate text-xs text-muted">账单账户 · {cardAccount.name} · {cardAccount.maskedNumber}</p>}
       <IntelligentCard value={card} hidden={hidden} />
-      <button type="button" disabled={loading || saving || saved} onClick={() => void save()} className="mt-3 min-h-11 rounded-xl border border-line bg-white px-4 text-sm font-medium text-ink transition hover:bg-[#f1f6f4] focus-visible:outline-2 focus-visible:outline-jade-700 disabled:cursor-not-allowed disabled:opacity-60">{saved ? '已收藏到此设备' : saving ? '保存中…' : '收藏快照'}</button>
+      <button type="button" disabled={loading || saving || saved} onClick={() => void save()} className="mt-3 min-h-11 rounded-xl border border-line bg-white px-4 text-sm font-medium text-ink hover:bg-[#f1f6f4] focus-visible:outline-2 focus-visible:outline-jade-700 disabled:cursor-not-allowed disabled:opacity-60">{saved ? '已收藏到此设备' : saving ? '保存中…' : '收藏快照'}</button>
       <p className="mt-2 text-xs leading-5 text-muted">快照仅保存在此设备；请确认展示内容后再收藏。</p>
     </div>}
   </section>

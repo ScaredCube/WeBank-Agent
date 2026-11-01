@@ -83,7 +83,7 @@ it('从收藏打开对应会话并定位到保存的消息', async () => {
   expect(targetMessage).not.toBeNull()
   expect(await screen.findByText('已定位到收藏的来源消息。')).toBeTruthy()
   expect(document.activeElement).toBe(targetMessage)
-  expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+  expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'center' })
 })
 
 it('来源消息不在会话历史时提示可能已删除或无法展示', async () => {
@@ -122,7 +122,7 @@ it('打开资产页后可用 Escape 返回原入口', async () => {
   await user.click(opener)
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '返回对话' })))
   await user.keyboard('{Escape}')
-  expect(screen.queryByRole('button', { name: '返回对话' })).toBeNull()
+  await waitFor(() => expect(screen.queryByRole('button', { name: '返回对话' })).toBeNull())
   await waitFor(() => expect(document.activeElement).toBe(opener))
 })
 
@@ -398,6 +398,7 @@ it('挂失准备结果未知时切换面板保留申请键，核对使用相同�
   await user.click(await screen.findByRole('button', { name: '模拟挂失' }))
   await screen.findByText(/准备结果暂不确定/)
   await user.click(screen.getByRole('button', { name: '返回对话' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '返回对话' })).toBeNull())
   await user.click(screen.getByRole('button', { name: '打开资产' }))
   await user.click(await screen.findByRole('button', { name: /测试卡/ }))
   await user.click(screen.getByRole('button', { name: '详情' }))
@@ -708,5 +709,5 @@ it('在资产页点选来源与联系人后生成胶囊，并只发送实体 ID'
   expect(await screen.findByText('收到')).toBeTruthy()
   expect(seen.intent).toEqual({ action: 'transfer', source: { kind: 'account', id: 1 }, target: { kind: 'contact', id: 7 } })
   expect(seen.references).toEqual([])
-  expect(screen.queryByRole('button', { name: '移除前置意图' })).toBeNull()
+  await waitFor(() => expect(screen.queryByRole('button', { name: '移除前置意图' })).toBeNull())
 })

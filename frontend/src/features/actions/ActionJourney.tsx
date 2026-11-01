@@ -1,4 +1,7 @@
 import { AlertTriangle, Check, CircleDot, Info, type LucideIcon } from 'lucide-react'
+import { motion } from 'motion/react'
+
+import { DURATION, EASE_OUT, useMotionReduced } from '@/lib/motion'
 
 /** Mirrors the verified local dialog state; it does not infer progress from elapsed time. */
 export type ActionStage = 'review' | 'code' | 'face' | 'ready' | 'recover_execute' | 'complete' |
@@ -50,7 +53,9 @@ export function ActionJourney({ stage, needsVerification, busy = false }: {
 }) {
   const state = resolveJourney(stage)
   const items = steps(needsVerification)
+  const reduced = useMotionReduced()
   const StatusIcon: LucideIcon = state.caution ? AlertTriangle : state.active === 3 ? Check : state.active === null ? Info : CircleDot
+  const statusKey = busy ? 'busy' : state.heading
 
   return <section aria-label="操作流程与当前状态" className="mt-5 rounded-[16px] border border-line bg-canvas/60 px-3 pb-4 pt-4 sm:px-4">
     <ol aria-label="操作步骤" className="grid grid-cols-4">
@@ -59,11 +64,15 @@ export function ActionJourney({ stage, needsVerification, busy = false }: {
         const current = index === state.active && !done
         return <li key={item.number} aria-current={current ? 'step' : undefined}
           className="relative min-w-0 text-center">
-          {index > 0 && <span aria-hidden="true" className={'absolute -left-1/2 top-[13px] h-px w-full ' +
+          {index > 0 && <span aria-hidden="true" className={'action-step-line absolute -left-1/2 top-[13px] h-px w-full ' +
             (index <= state.doneThrough ? 'bg-jade-600' : 'bg-line')}/>}
-          <span aria-hidden="true" className={'relative mx-auto grid size-[27px] place-items-center rounded-full border text-[11px] font-semibold tabular-nums ' +
+          <span aria-hidden="true" className={'action-step relative mx-auto grid size-[27px] place-items-center rounded-full border text-[11px] font-semibold tabular-nums ' +
             (done ? 'action-journey-done border-jade-700 bg-jade-700 text-white' : current ? 'border-jade-700 bg-panel text-jade-800' : 'border-line bg-panel text-muted')}>
-            {done ? <Check size={14} strokeWidth={2.3}/> : item.number}
+            {done ? <motion.span
+              initial={reduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}
+            ><Check size={14} strokeWidth={2.3}/></motion.span> : item.number}
           </span>
           <span className={'mt-2 block text-[10px] leading-[1.4] sm:text-[11px] ' +
             (done || current ? 'font-semibold text-ink' : 'text-muted')}>{item.label}</span>
@@ -73,12 +82,15 @@ export function ActionJourney({ stage, needsVerification, busy = false }: {
     <div className={'mt-4 flex items-start gap-2.5 rounded-xl px-3 py-3 ' +
       (state.caution ? 'action-caution bg-amber-50 text-amber-900' : 'bg-panel text-ink')}>
       <StatusIcon size={17} className="mt-0.5 shrink-0" aria-hidden="true"/>
-      <div className="min-w-0">
+      <motion.div key={statusKey} className="min-w-0"
+        initial={reduced ? false : { opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}>
         <p className="text-[12.5px] font-semibold">{busy ? '正在等待服务端响应' : state.heading}</p>
         <p className="mt-1 text-[11px] leading-[1.65] text-muted">
           {busy ? '请求仍在处理中，请勿重复操作或关闭窗口。' : state.explanation}
         </p>
-      </div>
+      </motion.div>
     </div>
   </section>
 }
