@@ -255,8 +255,12 @@ export const api = {
     return result.data
   },
 
-  async messages(token: string, conversationId: number): Promise<Message[]> {
-    const data = await request<unknown>(`/chat/conversations/${conversationId}/messages`, {}, token)
+  async messages(token: string, conversationId: number, options?: { limit?: number; beforeId?: number }): Promise<Message[]> {
+    const params = new URLSearchParams()
+    if (options?.limit !== undefined) params.set('limit', String(options.limit))
+    if (options?.beforeId !== undefined) params.set('before_id', String(options.beforeId))
+    const query = params.toString()
+    const data = await request<unknown>(`/chat/conversations/${conversationId}/messages${query ? `?${query}` : ''}`, {}, token)
     if (!Array.isArray(data)) throw new Error('历史消息数据格式异常，请稍后重试。')
     const seen = new Set<number>()
     return data.map((item, index) => {
@@ -264,6 +268,13 @@ export const api = {
       if (parsed.success && !seen.has(parsed.data.id)) { seen.add(parsed.data.id); return parsed.data }
       return { id: -(index + 1), role: 'system', content: '', created_at: '', unavailable: true }
     })
+  },
+
+  async messagesPage(token: string, conversationId: number, beforeId?: number): Promise<{ messages: Message[]; hasOlder: boolean }> {
+    // One lookahead entry establishes whether the "earlier messages" affordance
+    // is needed; the backend caps every page at 100 and uses an indexed ID cursor.
+    const batch = await api.messages(token, conversationId, { limit: 51, beforeId })
+    return { messages: batch.slice(-50), hasOlder: batch.length > 50 }
   },
 
   async cards(token: string): Promise<BankCard[]> {

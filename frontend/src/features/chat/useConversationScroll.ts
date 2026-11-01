@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type UIEvent } from 'react'
 import type { Message } from '@/lib/api'
 
 export function useConversationScroll(messages: Message[], streamingText: string, sending: boolean, loading: boolean) {
@@ -7,9 +7,27 @@ export function useConversationScroll(messages: Message[], streamingText: string
   // Opening a saved conversation begins at the first message, not the last.
   const pendingPosition = useRef<'top' | 'bottom' | null>('top')
   const previousMessages = useRef(messages)
+  const prependAnchor = useRef<{ top: number; height: number } | null>(null)
+  const justRestoredPrepend = useRef(false)
   const [hasNewContent, setHasNewContent] = useState(false)
 
+  useLayoutEffect(() => {
+    const container = scrollRef.current
+    const anchor = prependAnchor.current
+    if (container && anchor) {
+      container.scrollTop = anchor.top + container.scrollHeight - anchor.height
+      followScroll.current = false
+      justRestoredPrepend.current = true
+      prependAnchor.current = null
+    }
+  }, [messages])
+
   useEffect(() => {
+    if (justRestoredPrepend.current) {
+      justRestoredPrepend.current = false
+      previousMessages.current = messages
+      return
+    }
     const container = scrollRef.current
     if (container && pendingPosition.current !== null) {
       if (!loading) {
@@ -34,7 +52,15 @@ export function useConversationScroll(messages: Message[], streamingText: string
     if (followScroll.current) setHasNewContent(false)
   }
 
+  const preserveBeforePrepend = useCallback(() => {
+    const container = scrollRef.current
+    if (!container) return
+    prependAnchor.current = { top: container.scrollTop, height: container.scrollHeight }
+    followScroll.current = false
+  }, [])
+
   const resetScroll = useCallback((position: 'top' | 'bottom' = 'bottom') => {
+    prependAnchor.current = null
     pendingPosition.current = position
     followScroll.current = position === 'bottom'
     setHasNewContent(false)
@@ -47,5 +73,5 @@ export function useConversationScroll(messages: Message[], streamingText: string
     if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
   }
 
-  return { scrollRef, hasNewContent, onScroll, resetScroll, jumpToLatest }
+  return { scrollRef, hasNewContent, onScroll, resetScroll, jumpToLatest, preserveBeforePrepend }
 }

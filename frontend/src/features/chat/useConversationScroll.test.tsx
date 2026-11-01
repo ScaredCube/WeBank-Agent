@@ -6,8 +6,8 @@ import type { Message } from '@/lib/api'
 
 const message = (id:number):Message => ({id,role:'user',content:'历史消息',created_at:''})
 function Harness({ messages, loading }: {messages:Message[],loading:boolean}) {
-  const {scrollRef,onScroll,resetScroll}=useConversationScroll(messages,'',false,loading)
-  return <><div role="log" ref={scrollRef} onScroll={onScroll}/><button onClick={() => resetScroll('top')}>打开历史</button><button onClick={() => resetScroll()}>发送消息</button></>
+  const {scrollRef,onScroll,resetScroll,preserveBeforePrepend}=useConversationScroll(messages,'',false,loading)
+  return <><div role="log" ref={scrollRef} onScroll={onScroll}/><button onClick={() => resetScroll('top')}>打开历史</button><button onClick={() => resetScroll()}>发送消息</button><button onClick={preserveBeforePrepend}>载入之前保存位置</button></>
 }
 afterEach(cleanup)
 
@@ -35,4 +35,18 @@ it('正常发送仍可自动跟随最新回复', () => {
   fireEvent.click(view.getByRole('button',{name:'发送消息'}))
   view.rerender(<Harness messages={[message(1),message(2)]} loading={false}/>)
   expect(log.scrollTop).toBe(1200)
+})
+
+it('向前翻页后保持阅读位置，不跳到底部或宣布新增消息', () => {
+  const view=render(<Harness messages={[message(51),message(52)]} loading={false}/>)
+  const log=view.getByRole('log')
+  let height=1200
+  Object.defineProperty(log,'scrollHeight',{configurable:true,get:()=>height})
+  Object.defineProperty(log,'clientHeight',{configurable:true,value:400})
+  log.scrollTop=180
+  fireEvent.scroll(log)
+  fireEvent.click(view.getByRole('button',{name:'载入之前保存位置'}))
+  height=1750
+  view.rerender(<Harness messages={[message(1),message(51),message(52)]} loading={false}/>)
+  expect(log.scrollTop).toBe(730)
 })

@@ -120,3 +120,26 @@ describe('动作状态与理财、订阅执行响应', () => {
     await expect(api.executeSubscriptionCancel('test-token', 12, 31)).rejects.toThrow('订阅取消结果数据格式异常')
   })
 })
+
+describe('会话历史游标分页', () => {
+  const m = (id: number) => ({ id, role: 'assistant', content: String(id), created_at: '' })
+
+  it('读取最多50条并保留查找更早消息的标志', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(Array.from({ length: 51 }, (_, i) => m(40 + i))), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await api.messagesPage('token', 7)
+    expect(result.messages).toHaveLength(50)
+    expect(result.messages[0].id).toBe(41)
+    expect(result.hasOlder).toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/conversations/7/messages?limit=51', expect.anything())
+  })
+
+  it('把限定到本会话的游标原样传给后端', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([m(7), m(8)]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await api.messagesPage('token', 7, 40)
+    expect(result.messages.map(message => message.id)).toEqual([7, 8])
+    expect(result.hasOlder).toBe(false)
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/conversations/7/messages?limit=51&before_id=40', expect.anything())
+  })
+})

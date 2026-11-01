@@ -594,3 +594,71 @@ it('@搜索当前用户的联系人并按类型 ID 发给 Agent', async () => {
   await user.click(screen.getByRole('button',{name:'发送'}))
   expect(await screen.findByText('查询完成')).toBeTruthy()
 })
+
+it('长会话初次仅加载最近50条，点击按钮加载更早历史', async () => {
+  const user = userEvent.setup()
+  const all = Array.from({ length: 70 }, (_, i) => messageWithId(i + 1, '第' + (i + 1) + '条记录'))
+  vi.mocked(api.messages).mockImplementation(async (_token, id, options) => {
+    if (id !== 1) return [messageWithId(201, '其他会话')]
+    const filtered = all.filter(item => options?.beforeId === undefined || item.id < options.beforeId)
+    return filtered.slice(-(options?.limit ?? filtered.length))
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第70条记录')
+  expect(screen.queryByText('第20条记录')).toBeNull()
+  await user.click(screen.getByRole('button', { name: '加载更早消息' }))
+  expect(await screen.findByText('第1条记录')).toBeTruthy()
+  expect(screen.getByText('第70条记录')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '加载更早消息' })).toBeNull()
+  expect(vi.mocked(api.messages)).toHaveBeenCalledWith('test', 1, { limit: 51, beforeId: 21 })
+})
+
+it('收藏的来源在默认消息窗口之外时自动按需翻页并定位', async () => {
+  const user = userEvent.setup()
+  originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+  const all = Array.from({ length: 120 }, (_, i) => messageWithId(i + 1, '历史第' + (i + 1) + '条'))
+  vi.mocked(api.messages).mockImplementation(async (_token, id, options) => {
+    if (id !== 3) return [messageWithId(300, '当前会话')]
+    const filtered = all.filter(item => options?.beforeId === undefined || item.id < options.beforeId)
+    return filtered.slice(-(options?.limit ?? filtered.length))
+  })
+  vi.spyOn(collectionStore, 'listSnapshots').mockResolvedValueOnce([{
+    id: 'older-source', savedAt: '', card: { version: 1, id: 'saved',
+      title: '旧账单来源', source: '账单查询', observedAt: '2026-01-01T00:00:00Z',
+      origin: { conversationId: 3, messageId: 33 }, blocks: [] },
+  }])
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('当前会话')
+  await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
+  await user.click(screen.getByRole('button', { name: '收藏' }))
+  await user.click(await screen.findByRole('button', { name: /旧账单来源/ }))
+  await user.click(screen.getByRole('button', { name: '查看来源会话' }))
+  expect(await screen.findByText('历史第33条')).toBeTruthy()
+  expect(await screen.findByText('已定位到收藏的来源消息。')).toBeTruthy()
+  expect(vi.mocked(api.messages)).toHaveBeenCalledWith('test', 3, { limit: 51, beforeId: 71 })
+})
+
+it('发送后只回读最新一页，同时保留已展开的更早历史', async () => {
+  const user = userEvent.setup()
+  const all: Message[] = Array.from({ length: 70 }, (_, i) =>
+    messageWithId(i + 1, '可保留消息' + (i + 1)))
+  vi.mocked(api.messages).mockImplementation(async (_token, id, options) => {
+    if (id !== 1) return []
+    const filtered = all.filter(item => options?.beforeId === undefined || item.id < options.beforeId)
+    return filtered.slice(-(options?.limit ?? filtered.length))
+  })
+  vi.spyOn(sse, 'streamChat').mockImplementation(async ({ onEvent }) => {
+    const saved = messageWithId(71, '新回复在最新一页')
+    all.push(saved)
+    onEvent({ type: 'done', message: saved })
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('可保留消息70')
+  await user.click(screen.getByRole('button', { name: '加载更早消息' }))
+  await screen.findByText('可保留消息1')
+  await user.type(screen.getByRole('textbox', { name: '输入消息' }), '测试')
+  await user.click(screen.getByRole('button', { name: '发送' }))
+  expect(await screen.findByText('新回复在最新一页')).toBeTruthy()
+  expect(screen.getByText('可保留消息1')).toBeTruthy()
+})

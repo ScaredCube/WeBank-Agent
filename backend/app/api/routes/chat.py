@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from sqlmodel import Session, select
 
@@ -56,14 +56,21 @@ def _require_conversation(session: Session, user, conversation_id: int) -> Conve
     return conversation
 
 
-def _present_message(session: Session, message: Message, mask_content: bool = True) -> MessageOut:
+_UNSET_SNAPSHOT = object()
+
+
+def _present_message(
+    session: Session, message: Message, mask_content: bool = True,
+    snapshot: MessageResult | None | object = _UNSET_SNAPSHOT,
+) -> MessageOut:
     output = MessageOut.model_validate(message).model_copy(
         update={"content": mask_text(message.content) if mask_content else message.content}
     )
     if message.role != "assistant":
         return output
-    snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
-    if snapshot is None or snapshot.kind not in ("monthly_bill", "card_status", "tool_results"):
+    if snapshot is _UNSET_SNAPSHOT:
+        snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
+    if not isinstance(snapshot, MessageResult) or snapshot.kind not in ("monthly_bill", "card_status", "tool_results"):
         return output
     try:
         payload = decrypt_result_snapshot(snapshot.ciphertext, snapshot.key_version)
@@ -131,6 +138,24 @@ def _persist_assistant(conversation_id: int, content: str,
         return _present_message(session, message, mask_content=False).model_dump(mode="json")
 
 
+def _present_messages(session: Session, messages: list[Message]) -> list[MessageOut]:
+    # One batch instead of a SELECT per assistant message; preserve each
+    # message's historical encrypted result and the existing failure fallback.
+    assistant_ids = [message.id for message in messages if message.role == "assistant" and message.id is not None]
+    snapshots: dict[int, MessageResult] = {}
+    # Legacy clients may still request the entire transcript. Chunk the IN
+    # clause so even a very long conversation stays below SQLite bind limits.
+    for offset in range(0, len(assistant_ids), 400):
+        chunk = assistant_ids[offset:offset + 400]
+        snapshots.update({
+            row.message_id: row for row in session.exec(
+                select(MessageResult).where(MessageResult.message_id.in_(chunk))
+            ).all()
+        })
+    return [_present_message(session, message, snapshot=snapshots.get(message.id))
+            for message in messages]
+
+
 @router.get("/conversations", response_model=list[ConversationOut])
 def read_conversations(session: SessionDep, user: CurrentUser) -> list[ConversationOut]:
     return [
@@ -176,10 +201,15 @@ def read_messages(
     session: SessionDep,
     user: CurrentUser,
     response: Response,
+    limit: int | None = Query(default=None, ge=1, le=100),
+    before_id: int | None = Query(default=None, ge=1),
 ) -> list[MessageOut]:
     _require_conversation(session, user, conversation_id)
+    if before_id is not None and limit is None:
+        raise HTTPException(status_code=422, detail="历史消息游标必须同时指定 limit")
     response.headers["Cache-Control"] = "no-store"
-    return [_present_message(session, message) for message in list_messages(session, conversation_id)]
+    history = list_messages(session, conversation_id, limit=limit, before_id=before_id)
+    return _present_messages(session, history)
 
 
 @router.get("/conversations/{conversation_id}/requests/{request_id}")

@@ -10,6 +10,12 @@ import { composeReferenceContext, type BankObjectReference } from '@/features/re
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
 
+function mergeLatestHistory(existing: Message[], latest: Message[]): Message[] {
+  if (latest.length === 0) return []
+  const oldestLatest = latest[0].id
+  return [...existing.filter(item => item.id > 0 && item.id < oldestLatest), ...latest]
+}
+
 function restoreDraftBefore(current: string, content: string): string {
   if (!current) return content
   if (current === content || current.startsWith(`${content}\n`)) return current
@@ -33,12 +39,14 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const [receiving, setReceiving] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [loadingMessages, setLoadingMessages] = useState(true)
+  const [hasOlder, setHasOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [historyUnavailable, setHistoryUnavailable] = useState(false)
   const [creatingConversation, setCreatingConversation] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [healthUnavailable, setHealthUnavailable] = useState(false)
-  const { scrollRef, hasNewContent, onScroll, resetScroll, jumpToLatest } = useConversationScroll(messages, streamingText, sending, loadingMessages)
+  const { scrollRef, hasNewContent, onScroll, resetScroll, jumpToLatest, preserveBeforePrepend } = useConversationScroll(messages, streamingText, sending, loadingMessages)
   const sendingRef = useRef(false)
   const receiveController = useRef<AbortController | null>(null)
   const creatingRef = useRef(false)
@@ -120,8 +128,11 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (list.length > 0) {
           const first = list[0]
           setActiveId(first.id)
-          const history = await api.messages(token, first.id)
-          if (!cancelled && requestId === historyRequest.current) setMessages(history)
+          const page = await api.messagesPage(token, first.id)
+          if (!cancelled && requestId === historyRequest.current) {
+            setMessages(page.messages)
+            setHasOlder(page.hasOlder)
+          }
         }
       } catch (err) {
         if (!cancelled && requestId === historyRequest.current) { setHistoryUnavailable(true); setError(err instanceof Error ? err.message : '会话加载失败') }
@@ -136,9 +147,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [token])
 
   const openConversation = useCallback(
-    async (id: number) => {
+    async (id: number, focusMessageId?: number) => {
       if (sending || actionBlocked || !token) return
-      if (id === activeId && !historyUnavailable) return
+      if (id === activeId && !historyUnavailable && focusMessageId === undefined) return
       const requestId = ++historyRequest.current
       drafts.current.set(activeId, draft)
       setDraft(drafts.current.get(id) ?? '')
@@ -150,9 +161,26 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       setError(null)
       setLoadingMessages(true)
       try {
-        const history = await api.messages(token, id)
+        let page = await api.messagesPage(token, id)
+        let history = page.messages
+        let olderAvailable = page.hasOlder
+        // Explicit "open saved source" may target an older message than the
+        // default page. Walk the indexed cursor only for this user action.
+        // A finite cap prevents a corrupt/stale bookmark from forcing an
+        // unbounded cascade of reads.
+        for (let pageIndex = 0; focusMessageId !== undefined &&
+             olderAvailable && !history.some(item => item.id === focusMessageId) &&
+             pageIndex < 20 && requestId === historyRequest.current; pageIndex++) {
+          const cursor = history.find(item => item.id > 0)?.id
+          if (!cursor || focusMessageId >= cursor) break
+          page = await api.messagesPage(token, id, cursor)
+          if (!page.messages.length) { olderAvailable = false; break }
+          history = [...page.messages, ...history]
+          olderAvailable = page.hasOlder
+        }
         if (requestId === historyRequest.current) {
           setMessages(history)
+          setHasOlder(olderAvailable)
           setStreamingText('')
         }
       } catch (err) {
@@ -180,6 +208,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       onConversationCreated?.(conversation.id)
       resetScroll('top')
       setMessages([])
+      setHasOlder(false)
+      setLoadingOlder(false)
       setHistoryUnavailable(false)
       setDraft('')
       setLoadingMessages(false)
@@ -342,10 +372,16 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         }
         if (isCurrent() && conversationId && !sessionExpired) {
           try {
-            const [history, list] = await Promise.all([
-              api.messages(token, conversationId),
+            const [page, list] = await Promise.all([
+              api.messagesPage(token, conversationId),
               api.conversations(token),
             ])
+            // Retain earlier pages explicitly loaded by the user while only
+            // revalidating the newest page after sending a message.
+            const history = mergeLatestHistory(messages, page.messages)
+            if (isCurrent()) {
+              setHasOlder(current => history.length > page.messages.length ? current : page.hasOlder)
+            }
             if (isCurrent() && receivedText && !savedReply) {
               const matchingHistory = history.some((item) => item.role === 'assistant' && !previousMessageIds.has(item.id) && item.content.startsWith(receivedText))
               setMessages(matchingHistory ? history : [...history, { id: -Date.now(), role: 'assistant', content: receivedText, created_at: new Date().toISOString() }])
@@ -390,6 +426,35 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
     if (creatingRef.current) draftDuringCreation.current = value
     setDraft(value)
   }
+  const loadOlder = useCallback(async () => {
+    if (!token || activeId === null || sendingRef.current || loadingMessages ||
+        loadingOlder || !hasOlder || historyUnavailable) return
+    const oldestId = messages.find(item => item.id > 0)?.id
+    if (oldestId === undefined) return
+    const generation = historyRequest.current
+    setLoadingOlder(true)
+    try {
+      const page = await api.messagesPage(token, activeId, oldestId)
+      if (generation !== historyRequest.current || sendingRef.current) return
+      if (page.messages.length > 0) {
+        preserveBeforePrepend()
+        setMessages(current => {
+          const known = new Set(current.map(item => item.id))
+          const earlier = page.messages.filter(item =>
+            item.id > 0 && item.id < oldestId && !known.has(item.id))
+          return [...earlier, ...current]
+        })
+      }
+      setHasOlder(page.hasOlder)
+    } catch (err) {
+      if (generation === historyRequest.current) {
+        setError(err instanceof Error ? err.message : '更早的对话暂时无法加载')
+      }
+    } finally {
+      if (generation === historyRequest.current) setLoadingOlder(false)
+    }
+  }, [token, activeId, loadingMessages, loadingOlder, hasOlder, historyUnavailable, messages, preserveBeforePrepend])
+
   const renameConversation = useCallback(async (conversationId: number, title: string) => {
     if (!token || sending || actionBlocked) throw new Error('当前操作完成后才能修改会话名称')
     const renamed = await api.renameConversation(token, conversationId, title)
@@ -397,5 +462,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [token, sending, actionBlocked])
 
   function stopReceiving() { receiveController.current?.abort() }
-  return { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

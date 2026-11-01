@@ -11,6 +11,9 @@ interface MessageListProps {
   scrollRoot?: RefObject<HTMLDivElement | null>
   focusMessageId?: number | null
   onFocusMessageResolved?: (messageId: number, found: boolean) => void
+  hasOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void
 }
 
 type QuestionContext = { id: number; content: string } | null
@@ -27,7 +30,7 @@ function scrollBehavior(): ScrollBehavior {
  * permanently taking space away from the chat. Uses the existing scroll root
  * and message IDs; no new routing or global state.
  */
-export function MessageList({ messages, streamingText, thinking, renderAfterMessage, scrollRoot, focusMessageId, onFocusMessageResolved }: MessageListProps) {
+export function MessageList({ messages, streamingText, thinking, renderAfterMessage, scrollRoot, focusMessageId, onFocusMessageResolved, hasOlder, loadingOlder, onLoadOlder }: MessageListProps) {
   const messageRows = useRef(new Map<number, HTMLDivElement>())
   const resolvedFocusId = useRef<number | null>(null)
   const [activeQuestion, setActiveQuestion] = useState<QuestionContext>(null)
@@ -144,6 +147,10 @@ export function MessageList({ messages, streamingText, thinking, renderAfterMess
         </>}
       </div>}
       <div className="flex flex-col gap-8">
+        {hasOlder && onLoadOlder && <button type="button" disabled={loadingOlder} onClick={onLoadOlder}
+          className="mx-auto min-h-10 rounded-full border border-line bg-panel px-4 text-xs font-medium text-jade-800 hover:bg-jade-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-jade-700">
+          {loadingOlder ? '正在加载更早消息…' : '加载更早消息'}
+        </button>}
         {messages.map((message) => (
           <div
             key={message.id}

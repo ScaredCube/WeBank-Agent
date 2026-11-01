@@ -104,7 +104,7 @@ export function ChatPage() {
     onCardLossRecoveryChange(cardId, null)
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
-  const { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
+  const { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({ token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired, onActionWarning: setActionWarning, onConversationChange, onConversationCreated })
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -130,7 +130,7 @@ export function ChatPage() {
 
     setSourceNavigation({ origin, status: 'opening' })
     setWorkspacePanel(null)
-    void openConversation(sourceConversation.id)
+    void openConversation(sourceConversation.id, origin.messageId)
   }, [conversations, openConversation])
 
   const sourceMessageFound = !!sourceNavigation
@@ -263,6 +263,9 @@ export function ChatPage() {
               key={activeId ?? 'new'}
               scrollRoot={scrollRef}
               messages={messages}
+              hasOlder={hasOlder}
+              loadingOlder={loadingOlder}
+              onLoadOlder={() => void loadOlder()}
               renderAfterMessage={(message) => {
                 if (message.role !== 'assistant') return null
                 const list = toolResultLists[message.id] ?? messageToolResults(message)

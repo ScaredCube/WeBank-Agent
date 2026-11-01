@@ -29,13 +29,19 @@ def get_conversation(session: Session, user: User, conversation_id: int) -> Conv
     return session.exec(statement).first()
 
 
-def list_messages(session: Session, conversation_id: int) -> list[Message]:
-    statement = (
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(col(Message.id))
-    )
-    return list(session.exec(statement).all())
+def list_messages(
+    session: Session, conversation_id: int, *, limit: int | None = None,
+    before_id: int | None = None,
+) -> list[Message]:
+    statement = select(Message).where(Message.conversation_id == conversation_id)
+    if before_id is not None:
+        statement = statement.where(Message.id < before_id)
+    if limit is not None:
+        # Indexed keyset pagination: obtain the latest N before a cursor;
+        # return oldest-to-newest to preserve the chat rendering contract.
+        statement = statement.order_by(col(Message.id).desc()).limit(limit)
+        return list(reversed(session.exec(statement).all()))
+    return list(session.exec(statement.order_by(col(Message.id))).all())
 
 
 def recent_messages(session: Session, conversation_id: int, limit: int) -> list[Message]:
