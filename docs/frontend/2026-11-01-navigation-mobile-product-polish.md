@@ -1,7 +1,9 @@
 # 小We · 导航与手机端产品体验迭代
 
+> 历史状态说明（2026-11-01 补充）：本文改动已随 PR #3 合入 `main`（`007d7fb`）；文中“尚未发 PR／未合并”指撰写时状态。
+
 日期：2026-11-01
-分支：`feature/ip-object-workspace`（尚未向团队发 PR）
+分支：`feature/ip-object-workspace`（已随 PR #3 合并）
 
 ## 目标与实现
 

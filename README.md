@@ -1,6 +1,6 @@
 # AI 银行智能体
 
-小We · 银行 AI Agent 比赛演示项目。前端包括对话、资产、账单、收藏和操作记录；后端提供 Agent、银行 Tool、可信结果、风险确认及审计。独立开发分支已完成真实大模型与隔离模拟银行数据的只读联调，但**尚未完成团队 PR 合并、正式部署和真实银行业务接入**。具体交付现状和合并前问题见 `docs/项目汇报.md` 和 `docs/frontend/2026-11-01-pre-pr-engineering-review.md`。
+小We · 银行 AI Agent 比赛演示项目。前端包括对话、资产、账单、收藏和操作记录；后端提供 Agent、银行 Tool、可信结果、风险确认及审计。功能分支已通过 PR #3 合并到 `main`（提交 `007d7fb`，与 `origin/main` 一致），并已完成真实大模型与隔离模拟银行数据的只读/多工具联调；但**正式银行生产环境、跨设备收藏、实际开户、真实强验证和团队最终验收仍未完成**。当前真实进度、剩余审查项和已知限制见 `docs/项目汇报.md`，待办见 `docs/TODO.md`。
 
 ## 技术栈
 
@@ -72,7 +72,7 @@ uv run python scripts/check_chat_schema.py
 uv run python scripts/rehearse_chat_schema.py --json
 ```
 
-此工具**只支持 SQLite 的增量建表**，不覆盖其他业务表字段演进、不提供 PostgreSQL 迁移或在线无停机升级；正式团队合并前必须确认当前目标数据库的版本、完整备份、升级和回滚责任。
+此工具**只支持 SQLite 的增量建表**，不覆盖其他业务表字段演进、不提供 PostgreSQL 迁移或在线无停机升级；正式部署或对团队目标数据库升级前，必须确认数据库版本、完整备份、停机窗口以及升级和回滚责任。
 
 接入真实模型时修改 `backend/.env`：
 
@@ -131,7 +131,7 @@ npm run test:e2e
 - [CLAUDE.md](CLAUDE.md)：协作规范、开工前阅读要求与文档同步义务
 - [docs/项目汇报.md](docs/项目汇报.md)：当前架构、已完成工作、验证结果与已知限制
 - [docs/TODO.md](docs/TODO.md)：任务编号、优先级、验收标准与里程碑
-- [docs/frontend/2026-11-01-pre-pr-engineering-review.md](docs/frontend/2026-11-01-pre-pr-engineering-review.md)：候选分支的架构、安全、性能和团队集成审查；此文档含待整改问题
+- [docs/frontend/2026-11-01-pre-pr-engineering-review.md](docs/frontend/2026-11-01-pre-pr-engineering-review.md)：已合并分支的架构、安全、性能和团队集成审查记录；F-01～F-05 等剩余项仍未全部关闭
 - [docs/frontend/2026-11-01-chat-history-performance-review.md](docs/frontend/2026-11-01-chat-history-performance-review.md)：会话历史分页、加密快照批量读取及剩余容量边界
 - [docs/frontend/2026-11-01-collection-privacy-decision.md](docs/frontend/2026-11-01-collection-privacy-decision.md)：收藏的浏览器本地存储风险与后续服务端加密方案决策
 - [docs/frontend/2026-11-01-pre-pr-round-two.md](docs/frontend/2026-11-01-pre-pr-round-two.md)：第二轮静态工程质量审查、真实缺陷样例及合并门槛
@@ -158,15 +158,16 @@ npm run test:e2e
 
 - 单演示用户 JWT 登录，接口鉴权
 - 会话列表 / 新建会话 / 历史消息持久化；新版聊天默认每页加载最近 50 条、按需加载更早历史，历史接口兼容 `limit` 和 `before_id` 游标；详见 `docs/frontend/2026-11-01-chat-history-performance-review.md`
-- AgentLoop 对话与 SSE 协议；当前每轮先缓冲，暂不实时逐字输出
+- AgentLoop 对话与 SSE 协议；基础事件为 `delta` / `done` / `error` / `action_required`，另有可信结果与恢复事件 `bill_result`、`card_result`、`action_warning`；当前每轮先缓冲，暂不实时逐字输出
 - LLM 适配层：OpenAI 兼容接口 + 离线 Mock，自动切换
 - 前端聊天界面、Markdown 渲染、流式光标、移动端侧栏
 - 硬编码操作确认弹窗（非 Generative UI，AI 无法代为确认）
 - 模拟账户余额、最近交易、月度账单和卡片状态只读工具，接入 AgentLoop；查询结果由后端固定格式输出
 - 受限计算工具 `calculate`：仅支持数值与基本运算，限制长度、节点、时限和数值范围，结果由后端固定渲染
-- 未调用工具时允许经过服务端输出策略检查的自然语言问候/参数追问；无银行 Tool 结果不得宣称已查到真实账户数值或已执行金融操作；离线 Mock 不调用银行工具
+- 未调用工具时允许经过服务端输出策略检查的问候、能力说明、参数追问和纯知识解释；个人账户查询、资金操作和既往操作状态必须来自 Tool 或明确说明未核实；离线 Mock 不调用银行工具
 - 固定代码风控规则已接入模拟转账后端，执行前重新检查日累计、时间和余额
-- 前端已接入模拟转账、卡片挂失、理财和订阅动作的确认／验证／执行界面；核心只读对话已进行真实 LLM + 模拟银行隔离 HTTP 浏览器联调；完整转账授权的真实浏览器验收仍待进行
+- 前端已接入模拟转账、卡片挂失、理财和订阅动作的确认／验证／执行界面；核心只读对话及多工具查询已进行真实 LLM + 模拟银行隔离 HTTP 浏览器联调；真实模型下的转账准备已验证令牌与金额绑定，但完整转账授权的真实浏览器人工验收仍未完成
+- 结构化账户／银行卡／联系人引用经服务端归属校验后绑定到工具调用，客户端伪造 ID 不能越权；完整的 `pre_intent`（动作 + 来源 + 目标）合同尚未实现（T-208）
 - 模拟理财产品/持仓/风险测评查询，以及红色验证后的模拟申购/赎回；银行数据只读接口 `/api/bank/wealth/*` 与 Agent 操作接口 `/api/wealth/*` 分离，Tool 不经过 HTTP 数据接口
 - 接口分层约定：`/api/bank/*` 仅供前端负一屏和服务层封装使用，不注册为 Agent Tool；LLM 不能直接调用银行数据接口
 - 负一屏只读数据接口：账户、联系人、理财持仓、风险测评聚合；按用户隔离，不返回令牌或明文号码，联系人只读

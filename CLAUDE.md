@@ -107,7 +107,7 @@ npm run build
 - LLM 调用只能经过 `app/agent/llm.py` 的适配层，禁止在路由中直接实例化模型客户端。
 - 工具必须注册元数据：名称、描述、参数 Schema、风险等级；工具执行必须有事务边界。
 - 数据库事务失败要回滚；禁止把未验证的模型输出直接写入业务表。
-- 流式接口使用 SSE，事件类型保持稳定：`delta`、`done`、`error`、`action_required`。
+- 流式接口使用 SSE，基础事件类型保持稳定：`delta`、`done`、`error`、`action_required`；可信结果与恢复事件为 `bill_result`、`card_result`、`action_warning`，新增事件必须同步 `docs/项目汇报.md` 与前端解析。
 - 新增接口需补充测试；错误信息使用中文且不泄露内部细节。
 
 ## 6. 前端规范

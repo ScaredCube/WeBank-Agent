@@ -1,7 +1,9 @@
 # 第十三批 · TokenDance 真实模型与 Guard 联调（只读链路）
 
+> 历史状态说明（2026-11-01 补充）：本文改动已随 PR #3 合入 `main`（`007d7fb`）；“未推送、未合并”为撰写时状态。
+
 日期：2026-11-01
-工作分支：`feature/ip-object-workspace`（独立 worktree；未推送、未合并）
+工作分支：`feature/ip-object-workspace`（已随 PR #3 合并）
 
 ## 验证范围
 
