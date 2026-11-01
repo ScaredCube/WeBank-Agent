@@ -22,6 +22,11 @@ _LOCAL_TIMEZONE = timezone(timedelta(hours=8))
 _TRANSFER_NAME = "transfer"
 _TRANSFER_LIMIT_FEN = 100_000
 _INTERNAL_LIMIT_FEN = 100_000
+# Card loss and wealth changes require password + face by default. Large
+# transfers remain password-only; a guard flag can still raise them to face.
+_RED_FACE_TOOLS = frozenset({
+    "card_loss", "wealth_subscribe", "wealth_redeem", "wealth_convert",
+})
 
 
 @dataclass(frozen=True)
@@ -86,7 +91,9 @@ def assess_tool(
     if level == RiskLevel.YELLOW and night:
         level = RiskLevel.RED
         reasons.append("夜间操作升级")
-    verification = "password" if level == RiskLevel.RED else None
+    verification = None
+    if level == RiskLevel.RED:
+        verification = "password_face" if spec.name in _RED_FACE_TOOLS else "password"
     if guard_escalation.get():
         level, verification = _escalate(level, verification)
     return RiskDecision(level=level, reasons=tuple(reasons), verification=verification)

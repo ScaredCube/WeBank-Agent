@@ -1,12 +1,22 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlmodel import Session, select
 
 from app.agent.guard import GuardCall, GuardVerdict, LLMGuard, get_guard
 from app.agent.llm import LLMChunk
+from app.core.config import settings
 from app.db.session import get_engine
 from app.models import AuditLog, TransferRequest
+
+
+@pytest.fixture(autouse=True)
+def daytime_policy(monkeypatch):
+    hour = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour
+    monkeypatch.setattr(settings, "risk_night_start_hour", (hour + 1) % 24)
+    monkeypatch.setattr(settings, "risk_night_end_hour", (hour + 2) % 24)
 
 
 def _events(response):

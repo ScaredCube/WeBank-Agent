@@ -35,7 +35,9 @@ def test_system_prompt_is_precise_without_weakening_guard():
     assert "不要把没有调用工具等同于失败" in SYSTEM_PROMPT
     assert "recipient_contact_token" in SYSTEM_PROMPT
     assert "服务端" in SYSTEM_PROMPT and "账户" in SYSTEM_PROMPT
-    assert "无法判断、信息不足" in GUARD_SYSTEM_PROMPT
+    assert "local_time" in GUARD_SYSTEM_PROMPT and "previous_tools" in GUARD_SYSTEM_PROMPT
+    assert "时间" in GUARD_SYSTEM_PROMPT and "历史" in GUARD_SYSTEM_PROMPT
+    assert '{"allow": false}' in GUARD_SYSTEM_PROMPT
 
 
 class ConversationalProvider:

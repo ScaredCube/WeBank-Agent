@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
 from sqlmodel import Session, select
 
+from app.core.config import settings
 from app.db.session import get_engine
 from app.models import Account, Card, Contact, WealthHolding, WealthProduct
 from app.services.collection_service import execute_collection, prepare_collection
@@ -61,7 +64,10 @@ def test_internal_transfer_green_executes_and_yellow_requires_confirmation(clien
     assert executed.json()["status"] == "completed"
 
 
-def test_collection_is_yellow_and_does_not_move_money(client, auth_headers):
+def test_collection_is_yellow_and_does_not_move_money(client, auth_headers, monkeypatch):
+    hour = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour
+    monkeypatch.setattr(settings, "risk_night_start_hour", (hour + 1) % 24)
+    monkeypatch.setattr(settings, "risk_night_end_hour", (hour + 2) % 24)
     with Session(get_engine()) as session:
         account = session.exec(select(Account)).first()
         contact = session.exec(select(Contact)).first()
@@ -116,7 +122,10 @@ def test_conversion_requires_red_verification(client, auth_headers):
     verify = client.post(f"/api/actions/{action['id']}/verification/verify",
                          json={"token": result["confirmation_token"], "code": "123456"},
                          headers=auth_headers)
-    assert verify.status_code == 200
+    assert verify.status_code == 200 and verify.json()["status"] == "code_verified"
+    face = client.post(f"/api/actions/{action['id']}/verification/face",
+                       json={"token": result["confirmation_token"]}, headers=auth_headers)
+    assert face.status_code == 200
     executed = client.post(f"/api/wealth/conversions/{result['conversion_id']}/execute",
                            headers=auth_headers)
     assert executed.status_code == 200

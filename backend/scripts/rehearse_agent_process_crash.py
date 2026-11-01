@@ -7,6 +7,7 @@ NEVER accepts an arbitrary database path; no TokenDance calls or real credential
 import argparse
 from contextlib import closing
 import base64
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,9 @@ def _safe_env(database: Path) -> dict[str, str]:
         "DEMO_USERNAME": "rehearsal_user",
         "DEMO_PASSWORD": "only-synthetic-test-password",
         "DEBUG": "true",
+        # Keep the rehearsal deterministic regardless of the local clock.
+        "RISK_NIGHT_START_HOUR": str(((datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour + 1) % 24)),
+        "RISK_NIGHT_END_HOUR": str(((datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour + 2) % 24)),
     })
     return env
 

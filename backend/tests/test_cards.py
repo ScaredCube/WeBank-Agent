@@ -20,8 +20,11 @@ from app.services.transfer_service import TransferError, execute_transfer
 def verification(client, headers, action, token, code=None):
     path = f"/api/actions/{action}/verification"
     assert client.post(path + "/start", headers=headers, json={"token": token}).status_code == 200
-    return client.post(path + "/verify", headers=headers,
-                       json={"token": token, "code": code or settings.demo_verification_code})
+    response = client.post(path + "/verify", headers=headers,
+                           json={"token": token, "code": code or settings.demo_verification_code})
+    if response.status_code == 200 and response.json().get("status") == "code_verified":
+        response = client.post(path + "/face", headers=headers, json={"token": token})
+    return response
 
 
 def prepare_loss(client, headers):
@@ -48,6 +51,8 @@ def test_loss_requires_verification_blocks_prepared_and_new_transfer(client, aut
     verify_path = f"/api/actions/{action}/verification/verify"
     assert client.post(verify_path, headers=auth_headers, json={"token": token,
                        "code": settings.demo_verification_code}).status_code == 200
+    assert client.post(f"/api/actions/{action}/verification/face", headers=auth_headers,
+                       json={"token": token}).status_code == 200
     assert client.get("/api/cards", headers=auth_headers).json()[0]["status"] == "active"
     assert client.post(path, headers=auth_headers).json()["status"] == "lost"
     assert client.post(path, headers=auth_headers).json()["status"] == "lost"
