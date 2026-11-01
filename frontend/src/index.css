@@ -447,3 +447,17 @@
   .bank-reference-source:hover { translate: 0 -2px; }
   .bank-reference-source:active { translate: 0 0; }
 }
+
+/* Responsive asset pane slides in from the conversation edge; no phone frame. */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.assets-scroll { scrollbar-width: none; overscroll-behavior: contain; }
+.assets-scroll::-webkit-scrollbar { display: none; }
+body.asset-dragging, body.asset-dragging * { cursor: grabbing !important; }
+body.asset-dragging .assets-scroll { overflow: hidden; }
+.asset-ghost-card { background: var(--color-panel); }
+@media (prefers-reduced-motion: reduce) {
+  .assets-scroll { scroll-behavior: auto; }
+}

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -31,18 +32,20 @@ from app.services.chat_service import (
     recent_messages,
 )
 from app.risk.injection import detect_injection
-from app.risk.transfer_intent import is_transfer_request, requested_transfer_amount_fen
+from app.risk.transfer_intent import is_transfer_request, requested_amount_fen, requested_transfer_amount_fen
 from app.core.time import utcnow
-from app.services.audit_service import conversation_context, record_separately, request_context
-from app.services.redaction import mask_text, redact_input
+from app.services.audit_service import conversation_context, record, record_separately, request_context
+from app.services.redaction import issue_phone_tool_references
 from app.services.security_service import record_failure
 from app.services.chat_submissions import (SubmissionConflict, fingerprint,
     claim_submission, advance_submission, recover_stale_submission)
 from app.services.conversation_context import (allow_readonly_followup, remember_selection,
                                                previously_selected, latest_trusted_bill_month)
+from app.services.intent_service import IntentError, build_intent_prompt
 from app.services.vault import VaultError, create_account_token, create_contact_token, encrypt_result_snapshot, decrypt_result_snapshot
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
+logger = logging.getLogger(__name__)
 
 
 def _sse(payload: dict) -> ServerSentEvent:
@@ -60,12 +63,10 @@ _UNSET_SNAPSHOT = object()
 
 
 def _present_message(
-    session: Session, message: Message, mask_content: bool = True,
+    session: Session, message: Message,
     snapshot: MessageResult | None | object = _UNSET_SNAPSHOT,
 ) -> MessageOut:
-    output = MessageOut.model_validate(message).model_copy(
-        update={"content": mask_text(message.content) if mask_content else message.content}
-    )
+    output = MessageOut.model_validate(message)
     if message.role != "assistant":
         return output
     if snapshot is _UNSET_SNAPSHOT:
@@ -130,12 +131,16 @@ def _persist_assistant(conversation_id: int, content: str,
             submission = session.get(ChatSubmission, submission_id)
             if submission is None or submission.conversation_id != conversation_id:
                 raise RuntimeError("Chat submission ownership invariant failed")
-            submission.state = "completed"
+            # A prepared action remains pending even though its assistant
+            # placeholder message is now durable; do not overwrite the replay
+            # state with "completed".
+            if submission.state != "action_pending":
+                submission.state = "completed"
             submission.assistant_message_id = message.id
             submission.updated_at = utcnow()
             session.add(submission)
         session.commit()
-        return _present_message(session, message, mask_content=False).model_dump(mode="json")
+        return _present_message(session, message).model_dump(mode="json")
 
 
 def _present_messages(session: Session, messages: list[Message]) -> list[MessageOut]:
@@ -158,10 +163,8 @@ def _present_messages(session: Session, messages: list[Message]) -> list[Message
 
 @router.get("/conversations", response_model=list[ConversationOut])
 def read_conversations(session: SessionDep, user: CurrentUser) -> list[ConversationOut]:
-    return [
-        ConversationOut.model_validate(conversation).model_copy(update={"title": mask_text(conversation.title)})
-        for conversation in list_conversations(session, user)
-    ]
+    return [ConversationOut.model_validate(conversation)
+            for conversation in list_conversations(session, user)]
 
 
 @router.post("/conversations", response_model=ConversationOut, status_code=201)
@@ -170,7 +173,7 @@ def new_conversation(
     session: SessionDep,
     user: CurrentUser,
 ) -> ConversationOut:
-    conversation = create_conversation(session, user, mask_text(payload.title))
+    conversation = create_conversation(session, user, payload.title)
     return ConversationOut.model_validate(conversation)
 
 
@@ -184,7 +187,7 @@ def rename_conversation(
 ) -> ConversationOut:
     """Change only a title. Never rewrite history, tool calls or banking state."""
     conversation = _require_conversation(session, user, conversation_id)
-    title = mask_text(payload.title.strip())
+    title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="请输入有效的会话名称")
     conversation.title = title
@@ -304,13 +307,22 @@ async def send_message(
     if selected_account is not None and selected_card is not None and selected_card[1].id != selected_account.id:
         raise HTTPException(status_code=400, detail="所选银行卡与付款账户不一致，请重新选择")
 
-    try:
-        display_content, model_content, uncertain = redact_input(
-            session, user.id, payload.content, request_context.get() or "")
-    except VaultError:
-        session.rollback()
-        raise HTTPException(status_code=503, detail="敏感信息保护暂不可用，请稍后重试。") from None
+    display_content = payload.content
+    model_content = payload.content
     injection = detect_injection(display_content)
+    intent_prompt = None
+    if payload.intent is not None and not injection.blocked:
+        try:
+            intent_prompt = build_intent_prompt(session, user.id, payload.intent)
+        except IntentError as exc:
+            session.rollback()
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        # The rendered intent is prepended to THIS turn's user message. The
+        # display copy keeps the user-visible capsule above the bubble; the
+        # model copy substitutes opaque tokens. Neither leaks a raw card/phone.
+        model_content = intent_prompt.prompt + "\n\n" + payload.content
+        display_content = intent_prompt.display + "\n\n" + display_content
+        record(session, user_id=user.id, event_type="intent_validated", result="success")
     # Claim before minting object tokens, saving chat history or executing the
     # model. Database uniqueness protects against simultaneous duplicate POSTs.
     submission_id: int | None = None
@@ -319,7 +331,7 @@ async def send_message(
             attempt, claimed = claim_submission(
                 session, user_id=user.id, conversation_id=conversation_id,
                 request_id=payload.request_id,
-                payload_digest=fingerprint(payload.content, payload.references),
+                payload_digest=fingerprint(payload.content, payload.references, payload.intent),
             )
         except SubmissionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
@@ -344,18 +356,34 @@ async def send_message(
                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
             raise HTTPException(status_code=409,
                 detail="此请求已接收或结果尚未确定。请核对会话及操作记录，不要重复发起。")
+    phone_references: list[tuple[str, str]] = []
+    if not injection.blocked:
+        try:
+            phone_references = issue_phone_tool_references(
+                session, user.id, display_content, request_context.get() or "")
+        except VaultError:
+            phone_references = []
+    if phone_references:
+        model_content += (
+            "\n\n[本轮用户输入中的手机号工具引用："
+            + "；".join(f"{number} -> {token}" for number, token in phone_references)
+            + "。仅可用于 prepare_transfer 的 target_token，不得改写或猜测。]"
+        )
     verified_account_token: str | None = None
     verified_card_id: int | None = selected_card[0].id if selected_card is not None else None
     verified_contact_token: str | None = None
     verified_recipient_name: str | None = None
     # Only the user's CURRENT request can authorize amount binding. A missing,
     # ambiguous or malformed amount must never be filled in by the model.
-    verified_transfer_amount_fen = requested_transfer_amount_fen(display_content)
+    verified_transfer_amount_fen = requested_transfer_amount_fen(payload.content)
+    intent_amount_fen = (requested_amount_fen(payload.content)
+                         if intent_prompt is not None else None)
+    intent_needs_amount = bool(intent_prompt is not None and intent_amount_fen is None)
     transfer_needs_amount = bool(
         selected_contact is not None and is_transfer_request(display_content)
         and verified_transfer_amount_fen is None
     )
-    if (payload.references or reused_readonly_selection) and not injection.blocked and not uncertain:
+    if (payload.references or reused_readonly_selection) and not injection.blocked:
         try:
             visible = []
             trusted = []
@@ -364,11 +392,11 @@ async def send_message(
                 account_token = create_account_token(session, user.id, account.id)
                 verified_account_token = account_token
                 if selected_account is not None:
-                    visible.append(f"账户：{mask_text(account.name)} · {mask_text(account.masked_number)}")
+                    visible.append(f"账户：{account.name} · {account.masked_number}")
                 trusted.append(f"经核验的账户引用 account_token={account_token}。")
             if selected_card is not None:
                 card = selected_card[0]
-                visible.append(f"银行卡：{mask_text(account.name)} · {mask_text(account.masked_number)}")
+                visible.append(f"银行卡：{account.name} · {account.masked_number}")
                 trusted.append(
                     "用户选择的银行卡已按 card_id 及所属账户核验，"
                     f"对应 account_token={account_token}、card_id={card.id}；"
@@ -379,10 +407,10 @@ async def send_message(
                 if verified_transfer_amount_fen is not None and account is not None:
                     verified_contact_token = contact_token
                     verified_recipient_name = selected_contact.name
-                visible.append(f"联系人：{mask_text(selected_contact.name)} · {mask_text(selected_contact.bank_name)}")
+                visible.append(f"联系人：{selected_contact.name} · {selected_contact.bank_name}")
                 trusted.append(
                     "用户选择的收款联系人已核验，其显示名为 "
-                    f"{json.dumps(mask_text(selected_contact.name), ensure_ascii=False)}，"
+                    f"{json.dumps(selected_contact.name, ensure_ascii=False)}，"
                     f"引用为 recipient_contact_token={contact_token}。"
                     "仅当用户明确要求模拟转账并提供金额时，才可使用 prepare_transfer；"
                     "该工具必须核对联系人引用与账户，并返回待用户确认的动作，不能直接扣款。"
@@ -410,13 +438,13 @@ async def send_message(
     advance_submission(submission_id=submission_id, state="processing",
                        user_message_id=user_message.id)
     if conversation.title == "新对话":
-        conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(display_content.split("\n\n[已引用对象：", 1)[0])
+        conversation.title = "已拦截的可疑请求" if injection.blocked else derive_title(payload.content)
         session.add(conversation)
         session.commit()
 
     history = []
     for message in recent_messages(session, conversation_id, settings.llm_max_history):
-        content = mask_text(message.content)
+        content = message.content
         if detect_injection(content).blocked:
             content = "[已拦截的可疑输入]"
         history.append({"role": message.role, "content": content})
@@ -453,13 +481,8 @@ async def send_message(
                 yield _sse({"type": "delta", "text": text})
                 yield _sse({"type": "done", "message": finish_reply(text)})
                 return
-            if uncertain:
-                advance_submission(submission_id=submission_id, state="completed")
-                yield _sse({"type": "delta", "text": "检测到无法确认的号码，请核对后重新输入。"})
-                yield _sse({"type": "done", "message": None})
-                return
-            if transfer_needs_amount:
-                clarification = "请提供明确的一笔转账金额（例如 1 元），我会先生成待确认操作供你核对。"
+            if transfer_needs_amount or intent_needs_amount:
+                clarification = "请在消息中提供一个明确金额（例如 100 元），我会按前置意图校验后继续。"
                 yield _sse({"type": "delta", "text": clarification})
                 yield _sse({"type": "done", "message": finish_reply(clarification)})
                 return
@@ -470,7 +493,11 @@ async def send_message(
                 verified_recipient_name=verified_recipient_name,
                 verified_transfer_amount_fen=verified_transfer_amount_fen,
                 has_selected_contact=selected_contact is not None,
-                context_readonly_only=reused_readonly_selection
+                context_readonly_only=reused_readonly_selection,
+                intent_action=intent_prompt.action if intent_prompt is not None else None,
+                intent_tokens=((intent_prompt.source_token, intent_prompt.target_token)
+                               if intent_prompt is not None else None),
+                intent_amount_fen=intent_amount_fen,
             ):
                 if await request.is_disconnected():
                     # The model/tool may already have completed a side effect.
@@ -491,6 +518,13 @@ async def send_message(
                         return
                     trusted_results.append({"kind": "monthly_bill", "data": trusted_bill})
                     yield _sse({"type": "bill_result", "data": trusted_bill})
+                elif event.type == "operation_result":
+                    if event.data.get("kind") != "internal_transfer":
+                        advance_submission(submission_id=submission_id, state="failed")
+                        yield _sse({"type": "error", "message": "操作结果格式异常"})
+                        return
+                    yield _sse({"type": "operation_result", "kind": "internal_transfer",
+                                "data": event.data.get("data") or {}})
                 elif event.type == "card_result":
                     validated_cards = CardStatusSnapshot.model_validate(event.data["data"])
                     if selected_card is not None:
@@ -512,6 +546,10 @@ async def send_message(
                     pending = event.data.get("action") or {}
                     advance_submission(submission_id=submission_id, state="action_pending",
                                        pending_action_id=pending.get("id"))
+                    if not collected:
+                        # Keep a durable assistant row so the conversation never
+                        # looks empty after a tool-only prepare round.
+                        collected.append("已生成待确认操作，请在固定弹窗中核对后继续。")
                     yield _sse({"type": "action_required", "tool_calls": [], **event.data})
                 elif event.type == "error":
                     if not trusted_results:
@@ -538,6 +576,7 @@ async def send_message(
             _persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
             raise
         except Exception:
+            logger.exception("chat event stream failed")
             advance_submission(submission_id=submission_id, state="failed")
             yield _sse({"type": "error", "message": "服务出现异常，请稍后再试。"})
         finally:

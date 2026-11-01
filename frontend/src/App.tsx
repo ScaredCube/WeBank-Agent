@@ -8,16 +8,10 @@ import { AuthProvider } from '@/lib/auth'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 
 const ChatPage = lazy(() => import('@/pages/Chat').then(({ ChatPage }) => ({ default: ChatPage })))
-const DesignPreview = import.meta.env.DEV ? lazy(() => import('@/design-demo/DesignPreview')) : null
-const ProductPreview = import.meta.env.DEV ? lazy(() => import('@/design-demo/ProductPreview')) : null
-const IPStudio = import.meta.env.DEV ? lazy(() => import('@/design-demo/IPStudio')) : null
 
 export default function App() {
   return (
     <ThemeProvider><Routes>
-      {DesignPreview && <Route path="/design-preview" element={<Suspense fallback={<p>加载中…</p>}><DesignPreview /></Suspense>} />}
-      {ProductPreview && <Route path="/product-preview" element={<PageErrorBoundary><Suspense fallback={<p>加载中…</p>}><ProductPreview /></Suspense></PageErrorBoundary>} />}
-      {IPStudio && <Route path="/ip-studio" element={<PageErrorBoundary><Suspense fallback={<p>加载中…</p>}><IPStudio /></Suspense></PageErrorBoundary>} />}
       <Route element={<AuthProvider><Outlet /></AuthProvider>}>
         <Route path="/login" element={<LoginPage />} />
         <Route

@@ -301,6 +301,64 @@ class TransferTokenBinding(SQLModel, table=True):
     request_scope: str
 
 
+class InternalTransfer(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    source_account_id: int = Field(foreign_key="account.id", index=True)
+    target_account_id: int = Field(foreign_key="account.id", index=True)
+    action_id: int | None = Field(default=None, foreign_key="pendingaction.id", unique=True, index=True)
+    idempotency_key: str
+    amount_fen: int = Field(gt=0)
+    note: str = ""
+    status: str = "pending"
+    source_token_id: int = Field(foreign_key="datatoken.id")
+    target_token_id: int = Field(foreign_key="datatoken.id")
+    request_scope: str
+    transaction_id: int | None = Field(default=None, foreign_key="transaction.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+class CollectionRequest(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    contact_id: int = Field(foreign_key="contact.id", index=True)
+    account_id: int = Field(foreign_key="account.id", index=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    idempotency_key: str
+    amount_fen: int = Field(gt=0)
+    note: str = ""
+    status: str = "pending"
+    contact_token_id: int = Field(foreign_key="datatoken.id")
+    account_token_id: int = Field(foreign_key="datatoken.id")
+    request_scope: str
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+class WealthConversion(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    source_product_id: int = Field(foreign_key="wealthproduct.id", index=True)
+    target_product_id: int = Field(foreign_key="wealthproduct.id", index=True)
+    action_id: int = Field(foreign_key="pendingaction.id", unique=True, index=True)
+    idempotency_key: str
+    amount_fen: int = Field(gt=0)
+    note: str = ""
+    status: str = "pending"
+    source_token_id: int = Field(foreign_key="datatoken.id")
+    target_token_id: int = Field(foreign_key="datatoken.id")
+    request_scope: str
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
 class OperationPreparation(SQLModel, table=True):
     """Additive receipt/binding for card loss and subscription cancellation."""
     __table_args__ = (UniqueConstraint("user_id", "operation", "idempotency_key"),)

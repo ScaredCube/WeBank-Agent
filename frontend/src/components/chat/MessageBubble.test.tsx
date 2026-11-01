@@ -41,3 +41,14 @@ it('工作反馈仅声明实际已知状态，不虚构任务步骤', () => {
   expect(screen.getByRole('status').textContent).toContain('正在加载对话')
   expect(screen.queryByText(/已验证|已执行|完成/)).toBeNull()
 })
+
+it('在用户气泡上方展示服务端持久化的前置意图胶囊', () => {
+  render(<MessageBubble message={{
+    id: 9, role: 'user',
+    content: '【前置意图】转账 · 工资卡 → 张三\n\n800 元，饭钱',
+    created_at: '2026-10-01T04:00:00Z',
+  }} />)
+  expect(screen.getByLabelText('前置意图：转账 · 工资卡 → 张三')).toBeTruthy()
+  expect(screen.getByText('800 元，饭钱')).toBeTruthy()
+  expect(screen.queryByText(/【前置意图】/)).toBeNull()
+})

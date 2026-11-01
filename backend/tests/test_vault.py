@@ -47,18 +47,7 @@ def test_vault_enforces_owner_type_request_expiry_and_revocation(client, vault_k
             resolve(session, user.id, stable, "account", "ignored")
 
 
-def test_redaction_issues_request_scoped_tokens_and_masks_uncertain_numbers(client, vault_keys):
-    from app.services.redaction import redact_input
-    with Session(get_engine()) as session:
-        user = session.exec(select(User).where(User.username == "demo")).one()
-        display, model, uncertain = redact_input(session, user.id, "联系 139 0000 0000", "request-one")
-        assert "139" not in display and "139" not in model
-        assert "<PHONE_TMP_" in model and not uncertain
-        display, model, uncertain = redact_input(session, user.id, "号码 1234567890123456", "request-two")
-        assert "1234567890123456" not in display and "1234567890123456" not in model and uncertain
-
-
-def test_new_and_legacy_chat_never_disclose_number_to_model_or_client(client, auth_headers, vault_keys, monkeypatch):
+def test_user_supplied_number_is_preserved_in_chat_storage_and_model(client, auth_headers, monkeypatch):
     import json
     from app.agent.llm import LLMChunk
     from app.models import Conversation, Message
@@ -80,12 +69,14 @@ def test_new_and_legacy_chat_never_disclose_number_to_model_or_client(client, au
     history = client.get(f"/api/chat/conversations/{conversation_id}/messages", headers=auth_headers)
     listing = client.get("/api/chat/conversations", headers=auth_headers)
     assert response.status_code == history.status_code == listing.status_code == 200
-    assert captured and "<PHONE_TMP_" in captured[0]
-    for value in [*captured, response.text, history.text, listing.text]:
-        assert "13900000000" not in value
+    assert captured and "13900000000" in captured[0]
+    assert "<PHONE_TMP_" in captured[0]
+    assert "13900000000" in history.text and "13900000000" in listing.text
     with Session(get_engine()) as session:
-        recent = session.exec(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.desc())).first()
-        assert "13900000000" not in recent.content
+        recent = session.exec(select(Message).where(
+            Message.conversation_id == conversation_id, Message.role == "user"
+        ).order_by(Message.id.desc())).first()
+        assert "13900000000" in recent.content
 
 
 def test_key_rotation_missing_and_damaged_ciphertext_fail_closed(client, vault_keys, monkeypatch):
@@ -194,7 +185,7 @@ def test_model_generated_sensitive_tool_arguments_are_not_replayed(client, auth_
     assert "13900000000" not in captured[1] and "13900000000" not in response.text
 
 
-def test_auto_title_validation_and_uncertain_input_are_safe(client, auth_headers, vault_keys, monkeypatch):
+def test_auto_title_and_raw_user_numbers_are_preserved(client, auth_headers, monkeypatch):
     from app.agent.llm import LLMChunk
     seen = []
     class FakeLLM:
@@ -205,14 +196,16 @@ def test_auto_title_validation_and_uncertain_input_are_safe(client, auth_headers
     conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     url = f"/api/chat/conversations/{conversation_id}/messages"
     client.post(url, json={"content": "联系 13900000000"}, headers=auth_headers)
-    assert "13900000000" not in client.get("/api/chat/conversations", headers=auth_headers).text
-    assert "13900000000" not in str(seen)
+    assert "13900000000" in client.get("/api/chat/conversations", headers=auth_headers).text
+    assert "13900000000" in str(seen)
     invalid = client.post(url, json={"content": "13900000000" * 500}, headers=auth_headers)
-    assert invalid.status_code == 422 and "13900000000" not in invalid.text
+    assert invalid.status_code == 422
     previous = len(seen)
     response = client.post(url, json={"content": "请核对 123/456/789/0123456"}, headers=auth_headers)
-    assert response.status_code == 200 and len(seen) == previous
-    assert "请核对" in response.text or "重新输入" in response.text
+    assert response.status_code == 200 and len(seen) == previous + 1
+    assert "123/456/789/0123456" in str(seen[-1])
     response = client.post(url, json={"content": "号码一三九零零零零零零零零"}, headers=auth_headers)
-    assert len(seen) == previous
-    assert "一三九零零零零零零零零" not in response.text
+    assert len(seen) == previous + 2
+    assert "一三九零零零零零零零零" in str(seen[-1])
+    history = client.get(url, headers=auth_headers).text
+    assert "123/456/789/0123456" in history and "一三九零零零零零零零零" in history

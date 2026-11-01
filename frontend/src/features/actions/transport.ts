@@ -1,4 +1,4 @@
-import { api, type SubscriptionCancelExecution, type WealthOrderExecution } from '@/lib/api'
+import { api, type CollectionExecution, type ConversionExecution, type InternalTransferExecution, type SubscriptionCancelExecution, type WealthOrderExecution } from '@/lib/api'
 
 export interface ActionTransport {
   step: (id: number, step: 'cancel' | 'confirm' | 'verification/start' | 'verification/verify', body?: object) => Promise<{ status: string; message: string }>
@@ -7,6 +7,9 @@ export interface ActionTransport {
   action: (id: number) => Promise<{ status: string }>
   executeWealthOrder?: (orderId: number) => Promise<WealthOrderExecution>
   executeSubscriptionCancel?: (actionId: number, subscriptionId: number) => Promise<SubscriptionCancelExecution>
+  executeInternalTransfer?: (transferId: number) => Promise<InternalTransferExecution>
+  executeCollection?: (collectionId: number) => Promise<CollectionExecution>
+  executeConversion?: (conversionId: number) => Promise<ConversionExecution>
 }
 
 export function serviceActionTransport(token: string): ActionTransport {
@@ -17,5 +20,8 @@ export function serviceActionTransport(token: string): ActionTransport {
     action: (id) => api.action(token, id),
     executeWealthOrder: (orderId) => api.executeWealthOrder(token, orderId),
     executeSubscriptionCancel: (actionId, subscriptionId) => api.executeSubscriptionCancel(token, actionId, subscriptionId),
+    executeInternalTransfer: (transferId) => api.executeInternalTransfer(token, transferId),
+    executeCollection: (collectionId) => api.executeCollection(token, collectionId),
+    executeConversion: (conversionId) => api.executeConversion(token, conversionId),
   }
 }

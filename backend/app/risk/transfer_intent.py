@@ -35,3 +35,19 @@ def requested_transfer_amount_fen(text: str) -> int | None:
         return None
     fen = int(value)
     return fen if 0 < fen <= 100_000_000_000 else None
+
+
+def requested_amount_fen(text: str) -> int | None:
+    """One explicit CNY amount in the current user text; ambiguous input fails closed."""
+    if not isinstance(text, str):
+        return None
+    amounts = list(_AMOUNTS.finditer(text))
+    if len(amounts) != 1:
+        return None
+    if text[:amounts[0].start()].rstrip().endswith(("-", "负")):
+        return None
+    value = Decimal(amounts[0].group(1)) * _FEN[amounts[0].group(2)]
+    if value != value.to_integral_value():
+        return None
+    fen = int(value)
+    return fen if 0 < fen <= 100_000_000_000 else None

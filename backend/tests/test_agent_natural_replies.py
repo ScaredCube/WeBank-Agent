@@ -267,3 +267,49 @@ def test_shorthand_and_untrusted_brackets_cannot_downgrade_scope(message, scope)
 ])
 def test_transfer_imperative_clauses_are_not_overridden_by_education(sentence, scope):
     assert classify_no_tool_request(sentence) == scope
+
+
+@pytest.mark.parametrize("reply", [
+    "我现在不能直接帮你转账或订花，但可以帮你挑花。",
+    "我不能代订鲜花，你的预算是100元还是200元吗？",
+    "可以帮你挑选，预算大约200元吗？",
+])
+def test_non_banking_conversation_preserves_safe_natural_replies(reply):
+    assert tool_free_reply(reply, user_request="我想买一束花") == reply
+
+
+@pytest.mark.parametrize("reply", [
+    "我不能帮你转账，但已帮你转账成功。",
+    "预算100元吗？你的余额还有两千元。",
+    "预算100元吗？花店现价200元。",
+    "预算100元吗？内部凭证 confirmation_token=secret。",
+    "预算100元吗？我已经帮你下单了。",
+    "花束已经订好了，预算100元吗？",
+])
+def test_budget_or_denial_does_not_bypass_unverified_fact_checks(reply):
+    assert tool_free_reply(reply, user_request="我想买一束花") != reply
+
+
+def test_selected_account_keeps_ambiguous_financial_context_protected():
+    assert tool_free_reply("还有五百元。", user_request="这个还剩多少？", financial_context=True) != "还有五百元。"
+
+
+def test_flower_reply_reaches_chat_history_without_model_or_bank_side_effects(
+    client, auth_headers, monkeypatch,
+):
+    reply = "我不能代订鲜花，你的预算是100元还是200元吗？"
+
+    class FlowerProvider:
+        mode = "openai"
+        async def stream(self, messages, tools=None):
+            yield LLMChunk(content=reply)
+            yield LLMChunk(finish_reason="stop")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FlowerProvider())
+    conversation, received = _chat(client, auth_headers, "我想买一束花")
+    assert received[-1]["message"]["content"] == reply
+    history = client.get(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers).json()
+    assert history[-1]["content"] == reply
+    with Session(get_engine()) as db:
+        assert not db.exec(select(TransferRequest)).all()
+        assert db.exec(select(Account)).one().balance_fen == 500000

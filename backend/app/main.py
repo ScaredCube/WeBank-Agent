@@ -6,8 +6,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
-    actions, audit, auth, bank_data, bills, cards, chat, health, security, subscriptions,
-    transfers, wealth,
+    actions, audit, auth, bank_data, bills, cards, chat, combo_actions, health, security,
+    subscriptions, transfers, wealth,
 )
 from app.core.config import settings
 from app.db.seed import (
@@ -74,6 +74,7 @@ app.include_router(bills.router, prefix=settings.api_prefix)
 app.include_router(cards.router, prefix=settings.api_prefix)
 app.include_router(security.router, prefix=settings.api_prefix)
 app.include_router(transfers.router, prefix=settings.api_prefix)
+app.include_router(combo_actions.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 
 

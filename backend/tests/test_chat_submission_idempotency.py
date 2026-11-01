@@ -104,7 +104,9 @@ def test_duplicate_pending_transfer_never_reissues_token_or_prepares_again(
         pending=db.exec(select(TransferRequest)).all()
         assert len(pending)==1 and pending[0].status=="pending"
         assert db.get(Account,aid).balance_fen==original
-    assert [m["role"] for m in client.get(url(conv),headers=auth_headers).json()]==["user"]
+    history = client.get(url(conv), headers=auth_headers).json()
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert "待确认操作" in history[-1]["content"]
 
 
 def test_conflicting_payload_or_conversation_cannot_reuse_key(client,auth_headers,monkeypatch):

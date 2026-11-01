@@ -29,6 +29,25 @@ _PREPARE_TOOLS = {
     "prepare_wealth_subscribe": RiskLevel.RED,
     "prepare_wealth_redeem": RiskLevel.RED,
     "prepare_cancel_subscription": RiskLevel.YELLOW,
+    "prepare_internal_transfer": RiskLevel.YELLOW,
+    "prepare_collection": RiskLevel.YELLOW,
+    "prepare_wealth_convert": RiskLevel.RED,
+}
+_INTENT_TOOLS = {
+    "transfer": "prepare_transfer",
+    "internal_transfer": "prepare_internal_transfer",
+    "collect": "prepare_collection",
+    "purchase": "prepare_wealth_subscribe",
+    "redeem": "prepare_wealth_redeem",
+    "convert": "prepare_wealth_convert",
+}
+_INTENT_TOKEN_ARGS = {
+    "transfer": ("source_token", "recipient_contact_token"),
+    "internal_transfer": ("source_token", "target_token"),
+    "collect": ("contact_token", "account_token"),
+    "purchase": ("account_token", "product_token"),
+    "redeem": ("product_token", "account_token"),
+    "convert": ("source_token", "target_token"),
 }
 logger = logging.getLogger(__name__)
 
@@ -51,9 +70,18 @@ class AgentLoop:
                      verified_recipient_name: str | None = None,
                      verified_transfer_amount_fen: int | None = None,
                      has_selected_contact: bool = False,
-                     context_readonly_only: bool = False) -> AsyncIterator[AgentEvent]:
+                     context_readonly_only: bool = False,
+                     intent_action: str | None = None,
+                     intent_tokens: tuple[str, str] | None = None,
+                     intent_amount_fen: int | None = None) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
+        if intent_action in _INTENT_TOOLS:
+            messages.insert(1, {"role": "system", "content": (
+                "本轮用户消息开头包含服务端已校验的【前置意图】，其中令牌和金额均已绑定。"
+                f"必须调用 {_INTENT_TOOLS[intent_action]} 处理本轮请求；"
+                "不得要求用户重新选择账户、联系人，不得改用其他工具，也不得自行改写来源、目标或金额。"
+            )})
         registry = create_agent_registry()
         tool_results: list[tuple[str, dict]] = []
         prior_calls: list[str] = []
@@ -123,6 +151,10 @@ class AgentLoop:
                     audit_tool = spec.name if spec is not None and spec.name in TOOLS else None
                     record_separately(user_id=user_id, event_type="tool_called", tool=audit_tool, result="success")
                     rejection_reason = None
+                    intent_mismatch = (
+                        intent_action is not None
+                        and (spec is None or spec.name != _INTENT_TOOLS.get(intent_action))
+                    )
                     try:
                         args = json.loads(function["arguments"])
                         if (not isinstance(args, dict) or "session" in args or "user_id" in args
@@ -133,6 +165,27 @@ class AgentLoop:
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
                         argument_error = validate_tool_arguments(spec, args)
+                        if argument_error is None and intent_mismatch:
+                            argument_error = "模型选择的工具与前置意图不一致，请重新发起"
+                            rejection_reason = "invalid_arguments"
+                        if (argument_error is None and intent_action is not None
+                                and intent_tokens is not None):
+                            token_args = _INTENT_TOKEN_ARGS.get(intent_action)
+                            if token_args is None or len(intent_tokens) != 2:
+                                argument_error = "前置意图引用无效"
+                                rejection_reason = "invalid_arguments"
+                            elif (type(args.get("amount_fen")) is not int
+                                  or intent_amount_fen is None
+                                  or args["amount_fen"] != intent_amount_fen):
+                                argument_error = "模型金额与用户原文不一致，已拒绝"
+                                rejection_reason = "invalid_arguments"
+                            else:
+                                # The server, not the model, binds source and target.
+                                args[token_args[0]] = intent_tokens[0]
+                                args[token_args[1]] = intent_tokens[1]
+                                args["amount_fen"] = intent_amount_fen
+                                if intent_action == "transfer":
+                                    args.pop("target_token", None)
                         # Account binding comes ONLY from the authenticated route's
                         # ownership check. The model chooses the read-only tool and month,
                         # but cannot forge, truncate or swap the selected account token.
@@ -198,7 +251,17 @@ class AgentLoop:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
                         elif _PREPARE_TOOLS.get(spec.name) == spec.risk:
                             prepared = await spec.handler(user_id=user_id, **args)
-                            if prepared.get("ok"):
+                            if prepared.get("ok") and prepared.get("executed"):
+                                data = prepared.get("result") or {}
+                                record_separately(
+                                    user_id=user_id, event_type="tool_result", tool=spec.name,
+                                    transfer_id=prepared.get("transfer_id"), result="success",
+                                )
+                                yield AgentEvent("operation_result", {
+                                    "kind": prepared.get("result_kind"), "data": data,
+                                })
+                                result = {"ok": True, "data": data, "error": None}
+                            elif prepared.get("ok"):
                                 prepared_action = prepared.get("action")
                                 action_id = (prepared_action.get("id")
                                              if isinstance(prepared_action, dict) else None)
@@ -212,11 +275,16 @@ class AgentLoop:
                                     payload["order_id"] = prepared["order_id"]
                                 if "subscription_id" in prepared:
                                     payload["subscription_id"] = prepared["subscription_id"]
+                                if "collection_id" in prepared:
+                                    payload["collection_id"] = prepared["collection_id"]
+                                if "conversion_id" in prepared:
+                                    payload["conversion_id"] = prepared["conversion_id"]
                                 # Never put the confirmation token into model messages or logs.
                                 payload["confirmation_token"] = prepared["confirmation_token"]
                                 yield AgentEvent("action_required", payload)
                                 return
-                            result = {"ok": False, "data": None, "error": prepared["error"]}
+                            else:
+                                result = {"ok": False, "data": None, "error": prepared["error"]}
                         else:
                             decision = assess_tool(spec)
                             logger.info("risk_decision tool=%s user_id=%s level=%s reasons=%s",

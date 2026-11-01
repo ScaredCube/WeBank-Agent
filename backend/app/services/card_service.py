@@ -1,4 +1,4 @@
-"""Simulated card status and red-verified loss reporting."""
+﻿"""Simulated card status and red-verified loss reporting."""
 import uuid
 from sqlmodel import Session, select
 
@@ -32,7 +32,7 @@ def list_cards(session: Session, user_id: int, account_token: str | None = None,
     result = []
     for card, account in rows:
         reference = create_account_token(session, user_id, account.id) if account.status == "active" else None
-        result.append({"card_id": card.id, "account_token": reference, "account_name": mask_text(account.name),
+        result.append({"card_id": card.id, "account_id": account.id, "account_token": reference, "account_name": mask_text(account.name),
                        "masked_number": mask_text(account.masked_number), "status": card.status,
                        "account_status": account.status})
     return result

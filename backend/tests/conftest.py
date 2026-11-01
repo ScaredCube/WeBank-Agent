@@ -14,6 +14,9 @@ os.environ["DATA_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(b"a" * 32).decode()
 os.environ["DATA_HMAC_KEY"] = base64.urlsafe_b64encode(b"b" * 32).decode()
 os.environ["DEMO_USERNAME"] = "demo"
 os.environ["DEMO_PASSWORD"] = "demo123"
+# Most regression tests assume the original single-account fixture. Matrix tests
+# create the second account/holding explicitly.
+os.environ["DEMO_MULTI_ASSETS"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient

@@ -11,11 +11,18 @@ export interface PendingAction {
   expires_at: string
 }
 
+export interface ChatIntentPayload {
+  action: 'transfer' | 'internal_transfer' | 'collect' | 'purchase' | 'redeem' | 'convert'
+  source: { kind: 'account' | 'contact' | 'holding'; id: number }
+  target: { kind: 'account' | 'contact' | 'holding'; id: number }
+}
+
 export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; message: Message | null }
   | { type: 'bill_result'; data: unknown }
   | { type: 'card_result'; data: unknown }
+  | { type: 'operation_result'; kind: 'internal_transfer'; data: unknown }
   | { type: 'error'; message: string }
   | { type: 'action_warning'; message: string }
   | {
@@ -25,6 +32,8 @@ export type StreamEvent =
       transfer_id?: number
       order_id?: number
       subscription_id?: number
+      collection_id?: number
+      conversion_id?: number
     }
 
 function isPositiveId(value: unknown): value is number {
@@ -39,6 +48,8 @@ function parseEvent(value: unknown): StreamEvent | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
   if (value.type === 'bill_result' && isRecord(value.data)) return {type:'bill_result', data:value.data}
   if (value.type === 'card_result' && isRecord(value.data)) return {type:'card_result', data:value.data}
+  if (value.type === 'operation_result' && value.kind === 'internal_transfer' && isRecord(value.data))
+    return {type:'operation_result', kind:'internal_transfer', data:value.data}
   if (value.type === 'delta' && typeof value.text === 'string') return { type: 'delta', text: value.text }
   if (value.type === 'error' && typeof value.message === 'string') return { type: 'error', message: value.message }
   if (value.type === 'done') {
@@ -58,9 +69,14 @@ function parseEvent(value: unknown): StreamEvent | null {
       typeof value.action.status === 'string' && typeof value.action.expires_at === 'string' &&
       (value.transfer_id === undefined || isPositiveId(value.transfer_id)) &&
       (value.order_id === undefined || isPositiveId(value.order_id)) &&
-      (value.subscription_id === undefined || isPositiveId(value.subscription_id))) {
+      (value.subscription_id === undefined || isPositiveId(value.subscription_id)) &&
+      (value.collection_id === undefined || isPositiveId(value.collection_id)) &&
+      (value.conversion_id === undefined || isPositiveId(value.conversion_id))) {
     const actionType = value.action.action_type
     if ((actionType === 'transfer' && !isPositiveId(value.transfer_id)) ||
+        (actionType === 'internal_transfer' && !isPositiveId(value.transfer_id)) ||
+        (actionType === 'collection_request' && !isPositiveId(value.collection_id)) ||
+        (actionType === 'wealth_convert' && !isPositiveId(value.conversion_id)) ||
         ((actionType === 'wealth_subscribe' || actionType === 'wealth_redeem') && !isPositiveId(value.order_id)) ||
         (actionType === 'subscription_cancel' && !isPositiveId(value.subscription_id))) return null
     return {
@@ -68,6 +84,8 @@ function parseEvent(value: unknown): StreamEvent | null {
       confirmation_token: value.confirmation_token, transfer_id: value.transfer_id as number | undefined,
       order_id: value.order_id as number | undefined,
       subscription_id: value.subscription_id as number | undefined,
+      collection_id: value.collection_id as number | undefined,
+      conversion_id: value.conversion_id as number | undefined,
     }
   }
   return null
@@ -78,6 +96,7 @@ interface StreamChatOptions {
   conversationId: number
   content: string
   references?: BankObjectReference[]
+  intent?: ChatIntentPayload
   requestId?: string
   signal?: AbortSignal
   onEvent: (event: StreamEvent) => void
@@ -106,6 +125,7 @@ export async function streamChat({
   conversationId,
   content,
   references = [],
+  intent,
   requestId,
   signal,
   onEvent,
@@ -120,9 +140,14 @@ export async function streamChat({
       },
       // Only typed IDs cross the trust boundary; names and display labels are ignored.
       // The server validates ownership, state and card-to-account relationships.
-      body: JSON.stringify({ content, request_id: requestId, references: references
-        .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
-        .map(ref => ({ kind: ref.kind, id: ref.id })) }),
+      body: JSON.stringify({
+        content,
+        request_id: requestId,
+        ...(intent ? { intent } : {}),
+        references: references
+          .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
+          .map(ref => ({ kind: ref.kind, id: ref.id })),
+      }),
       signal,
     },
   )

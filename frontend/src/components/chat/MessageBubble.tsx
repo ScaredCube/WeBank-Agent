@@ -6,6 +6,7 @@ import { PenguinArt } from '@/features/theme/PenguinArt'
 import { MASCOT_NAME } from '@/features/theme/brand'
 import type { Message } from '@/lib/api'
 import { presentReferenceMessage } from '@/features/references/bank-object-reference'
+import { formatIntentBubble, parseIntentMessage } from '@/features/assets/intent-message'
 
 export function MessageBubble({
   message,
@@ -28,13 +29,21 @@ export function MessageBubble({
 
   if (message.unavailable) return <div role="status" className="rounded-xl border border-line bg-panel px-4 py-3 text-sm text-muted">此条历史消息无法展示。</div>
   if (message.role === 'user') {
-    const visible = presentReferenceMessage(message.content)
+    const parsed = parseIntentMessage(message.content)
+    const visible = presentReferenceMessage(parsed.text)
     return <div className="rise-in flex justify-end">
-      <div className="max-w-[90%] whitespace-pre-wrap break-words rounded-[17px] rounded-br-[7px] border border-line/50 bg-message-user px-4 py-3 text-[15px] leading-[1.75] text-ink sm:max-w-[82%]">
-        {visible.objects.length > 0 && <div aria-label="本条消息引用的对象" className="mb-2.5 flex flex-wrap gap-1.5">
-          {visible.objects.map((label,index) => <span key={index} className="rounded-md border border-jade-300/65 bg-panel/70 px-2 py-0.5 text-[11px] font-medium text-jade-800">{label}</span>)}
+      <div className="flex max-w-[90%] flex-col items-end gap-2 sm:max-w-[82%]">
+        {parsed.intent && <div aria-label={`前置意图：${parsed.intent}`}
+          className="flex min-h-8 max-w-full items-center gap-2 rounded-[12px] bg-[#122019] px-3 py-1 text-[11px] leading-5 text-[#F1EDE1] shadow-[0_6px_16px_-12px_rgba(10,20,15,.6)]">
+          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[#84C8A4] shadow-[0_0_8px_#84C8A4]" />
+          <span className="min-w-0 break-words text-[#D9E7DD]">{formatIntentBubble(parsed.intent)}</span>
         </div>}
-        {visible.text}
+        <div className="whitespace-pre-wrap break-words rounded-[17px] rounded-br-[7px] border border-line/50 bg-message-user px-4 py-3 text-[15px] leading-[1.75] text-ink">
+          {visible.objects.length > 0 && <div aria-label="本条消息引用的对象" className="mb-2.5 flex flex-wrap gap-1.5">
+            {visible.objects.map((label,index) => <span key={index} className="rounded-md border border-jade-300/65 bg-panel/70 px-2 py-0.5 text-[11px] font-medium text-jade-800">{label}</span>)}
+          </div>}
+          {visible.text}
+        </div>
       </div>
     </div>
   }

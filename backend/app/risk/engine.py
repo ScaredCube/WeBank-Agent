@@ -8,6 +8,7 @@ _ORDER = {RiskLevel.GREEN: 0, RiskLevel.YELLOW: 1, RiskLevel.RED: 2}
 _LOCAL_TIMEZONE = timezone(timedelta(hours=8))
 _TRANSFER_NAME = "transfer"
 _TRANSFER_LIMIT_FEN = 100_000
+_INTERNAL_LIMIT_FEN = 100_000
 
 
 @dataclass(frozen=True)
@@ -63,3 +64,12 @@ def assess_tool(
         level = RiskLevel.RED
         reasons.append("夜间操作升级")
     return RiskDecision(level=level, reasons=tuple(reasons))
+
+def assess_internal_transfer(amount_fen: int, daily_total_fen: int) -> RiskDecision:
+    """Fixed-code internal transfer rule: never red, never night-upgraded."""
+    if (type(amount_fen) is not int or amount_fen <= 0
+            or type(daily_total_fen) is not int or daily_total_fen < 0):
+        raise ValueError("内部转账金额或累计金额无效")
+    if daily_total_fen + amount_fen <= _INTERNAL_LIMIT_FEN:
+        return RiskDecision(level=RiskLevel.GREEN, reasons=())
+    return RiskDecision(level=RiskLevel.YELLOW, reasons=())

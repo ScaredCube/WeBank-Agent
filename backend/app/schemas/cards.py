@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+﻿from pydantic import BaseModel
 
 
 class CardStatus(BaseModel):
     card_id: int
+    account_id: int
     account_name: str
     masked_number: str
     status: str

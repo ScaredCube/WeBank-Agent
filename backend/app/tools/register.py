@@ -15,6 +15,10 @@ from app.tools.subscription_tools import (
     SubscriptionArguments, SubscriptionCancelArguments, detect_subscriptions,
     get_subscriptions, prepare_cancel_subscription,
 )
+from app.tools.combo_tools import (
+    CollectionArguments, ConversionArguments, InternalTransferArguments,
+    prepare_collection_tool, prepare_conversion_tool, prepare_internal_transfer_tool,
+)
 
 
 def create_readonly_registry() -> ToolRegistry:
@@ -57,4 +61,16 @@ def create_agent_registry() -> ToolRegistry:
     registry.register(ToolSpec(name="prepare_cancel_subscription", description="准备取消模拟订阅，等待用户确认后单独执行",
         parameters=SubscriptionCancelArguments.model_json_schema(), risk=RiskLevel.YELLOW,
         handler=prepare_cancel_subscription))
+    registry.register(ToolSpec(name="prepare_internal_transfer",
+        description="本人在同银行账户间内部转账；1000 元以内由服务端直接执行",
+        parameters=InternalTransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
+        handler=prepare_internal_transfer_tool))
+    registry.register(ToolSpec(name="prepare_collection",
+        description="向联系人发起模拟收款请求，等待用户确认后单独执行",
+        parameters=CollectionArguments.model_json_schema(), risk=RiskLevel.YELLOW,
+        handler=prepare_collection_tool))
+    registry.register(ToolSpec(name="prepare_wealth_convert",
+        description="在本人两个持仓之间转换，必须完成红色模拟验证后单独执行",
+        parameters=ConversionArguments.model_json_schema(), risk=RiskLevel.RED,
+        handler=prepare_conversion_tool))
     return registry

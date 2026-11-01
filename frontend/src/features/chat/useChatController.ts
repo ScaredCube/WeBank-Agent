@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
-import { streamChat, type StreamEvent } from '@/lib/sse'
+import { streamChat, type ChatIntentPayload, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
 import { savePendingChatRequest, clearPendingChatRequest, readPendingChatRequests } from './pending-request'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
@@ -227,7 +227,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [activeId, draft, loadingMessages, sending, actionBlocked, token, resetScroll, onConversationChange, onConversationCreated])
 
   const sendMessage = useCallback(
-    async (raw: string, references: BankObjectReference[] = []) => {
+    async (raw: string, references: BankObjectReference[] = [], intent?: ChatIntentPayload,
+           intentDisplay?: string) => {
       const content = composeReferenceContext(raw, references)
       if (!content || sendingRef.current || sending || creatingRef.current || loadingMessages || historyUnavailable || actionBlocked || !token) return
 
@@ -265,7 +266,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         const optimistic: Message = {
           id: -Date.now(),
           role: 'user',
-          content,
+          content: intentDisplay
+            ? `【前置意图】${intentDisplay}\n\n${content}`
+            : content,
           created_at: new Date().toISOString(),
         }
         optimisticId = optimistic.id
@@ -273,7 +276,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (raw === draft) setDraft((current) => current.startsWith(raw) ? current.slice(raw.length) : current)
         drafts.current.delete(conversationId)
 
-        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id])])
+        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id]), intent ?? null])
         const requestId = pendingRequest.current?.signature === signature
           ? pendingRequest.current.requestId : crypto.randomUUID()
         pendingRequest.current = { signature, requestId }
@@ -289,6 +292,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           conversationId,
           content,
           references,
+          intent,
           requestId,
           signal: controller.signal,
           onEvent: (event) => {
@@ -300,6 +304,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
               const result = cardStatusSnapshotSchema.safeParse(event.data)
               if (result.success && pendingToolResults.length < 8)
                 pendingToolResults.push({kind:'card_status',data:result.data})
+            } else if (event.type === 'operation_result') {
+              if (pendingToolResults.length < 8)
+                pendingToolResults.push({kind:'internal_transfer',data:event.data})
             } else if (event.type === 'delta') {
               receivedText += event.text
               setStreamingText((prev) => prev + event.text)

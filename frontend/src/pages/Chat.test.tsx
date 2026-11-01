@@ -110,11 +110,11 @@ it('打开工作面后可用 Escape 返回原入口', async () => {
   await screen.findByText('第一段对话')
   const trigger = screen.getByRole('button', { name: '打开导航和会话列表' })
   await user.click(trigger)
-  await user.click(screen.getByRole('button', { name: '资产' }))
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: '收起资产区' }))
+  const opener = screen.getByRole('button', { name: '资产' })
+  await user.click(opener)
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '返回对话' })))
   await user.keyboard('{Escape}')
-  expect(screen.queryByRole('button', { name: '收起资产区' })).toBeNull()
-  expect(document.activeElement).toBe(trigger)
+  expect(screen.queryByRole('button', { name: '返回对话' })).toBeNull()
 })
 
 it('快速切换时迟到的历史消息不能覆盖当前会话', async () => {
@@ -344,7 +344,7 @@ it('历史已包含回复时不会重复显示', async () => {
 it('模拟挂失完成后重新读取银行卡状态', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'bankDashboard').mockResolvedValueOnce(dashboard()).mockResolvedValue(dashboard('lost'))
-  vi.spyOn(api, 'cards').mockResolvedValueOnce([{ card_id: 2, account_name: '测试卡', masked_number: '****1234', status: 'active', account_status: 'active' }]).mockResolvedValue([{ card_id: 2, account_name: '测试卡', masked_number: '****1234', status: 'lost', account_status: 'active' }])
+  vi.spyOn(api, 'cards').mockResolvedValueOnce([{ card_id: 2, account_id: 1, account_name: '测试卡', masked_number: '****1234', status: 'active', account_status: 'active' }]).mockResolvedValue([{ card_id: 2, account_id: 1, account_name: '测试卡', masked_number: '****1234', status: 'lost', account_status: 'active' }])
   vi.spyOn(api, 'prepareCardLoss').mockResolvedValue({ action_id: 3, confirmation_token: 'test-token' })
   vi.spyOn(api, 'actionDetails').mockResolvedValue({ id: 3, action_type: 'card_loss', status: 'pending', risk_level: 'red', expires_at: '2030-01-01T00:00:00Z', details: { card_id: 2, masked_number: '****1234' } })
   vi.spyOn(api, 'actionStep').mockResolvedValueOnce({ status: 'pending', message: '验证已开始' }).mockResolvedValueOnce({ status: 'verified', message: '验证通过' })
@@ -353,15 +353,15 @@ it('模拟挂失完成后重新读取银行卡状态', async () => {
   await screen.findByText('第一段对话')
   await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
   await user.click(screen.getByRole('button', { name: '资产' }))
-  await user.click(screen.getByRole('tab', { name: '银行卡' }))
-  await user.click(await screen.findByText('卡片操作'))
+  await user.click(await screen.findByRole('button', { name: /测试卡/ }))
+  await user.click(screen.getByRole('button', { name: '详情' }))
   await user.click(await screen.findByRole('button', { name: '模拟挂失' }))
   await user.click(await screen.findByRole('button', { name: '开始模拟验证' }))
   await user.type(screen.getByLabelText('模拟验证码'), '123456')
   await user.click(screen.getByRole('button', { name: '验证' }))
-  await user.click(screen.getByRole('button', { name: '执行操作' }))
   await screen.findByText('模拟卡片已挂失。')
   await user.click(screen.getAllByRole('button', { name: '关闭' })[0])
+  await user.click(screen.getByRole('button', { name: '关闭详情' }))
   expect(await screen.findByText('已挂失')).toBeTruthy()
   expect(screen.queryByText('挂失申请已核实，可以继续查看确认步骤。')).toBeNull()
 })
@@ -369,22 +369,22 @@ it('模拟挂失完成后重新读取银行卡状态', async () => {
 it('挂失准备结果未知时切换面板保留申请键，核对使用相同键', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'bankDashboard').mockResolvedValue(dashboard())
-  vi.spyOn(api, 'cards').mockResolvedValue([{ card_id: 2, account_name: '测试卡', masked_number: '****1234', status: 'active', account_status: 'active' }])
+  vi.spyOn(api, 'cards').mockResolvedValue([{ card_id: 2, account_id: 1, account_name: '测试卡', masked_number: '****1234', status: 'active', account_status: 'active' }])
   const prepare = vi.spyOn(api, 'prepareCardLoss').mockRejectedValue(new TypeError('network'))
   render(<MemoryRouter><ChatPage /></MemoryRouter>)
   await screen.findByText('第一段对话')
   await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
   await user.click(screen.getByRole('button', { name: '资产' }))
-  await user.click(screen.getByRole('tab', { name: '银行卡' }))
-  await user.click(await screen.findByText('卡片操作'))
+  await user.click(await screen.findByRole('button', { name: /测试卡/ }))
+  await user.click(screen.getByRole('button', { name: '详情' }))
   await user.click(await screen.findByRole('button', { name: '模拟挂失' }))
   await screen.findByText(/准备结果暂不确定/)
-  await user.click(screen.getByRole('button', { name: '收起资产区' }))
+  await user.click(screen.getByRole('button', { name: '返回对话' }))
   await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
   await user.click(screen.getByRole('button', { name: '资产' }))
-  await user.click(screen.getByRole('tab', { name: '银行卡' }))
+  await user.click(await screen.findByRole('button', { name: /测试卡/ }))
+  await user.click(screen.getByRole('button', { name: '详情' }))
   expect(await screen.findByText('准备结果暂不确定，请核对申请状态后再决定下一步。')).toBeTruthy()
-  await user.click(await screen.findByText('卡片操作'))
   expect(screen.queryByRole('button', { name: '模拟挂失' })).toBeNull()
   expect(screen.getByRole('button', { name: '核对准备结果' })).toBeTruthy()
   expect(screen.getByText(/准备结果暂不确定/)).toBeTruthy()
@@ -448,7 +448,9 @@ it('引用真实账户并收到可信账单事件后，回答旁显示可隐藏�
   await screen.findByText('第一段对话')
   await user.click(screen.getByRole('button',{name:'打开导航和会话列表'}))
   await user.click(screen.getByRole('button',{name:'资产'}))
-  await user.click(await screen.findByRole('button',{name:'引用到对话：测试卡'}))
+  await user.click(screen.getByRole('button',{name:'返回对话'}))
+  await user.type(screen.getByRole('textbox',{name:'输入消息'}),'@')
+  await user.click(await screen.findByRole('option',{name:/测试卡/}))
   expect(screen.getByLabelText('已引用的金融对象').textContent).toContain('测试卡')
   await user.type(screen.getByRole('textbox',{name:'输入消息'}),'帮我分析这个账户十月的消费')
   await user.click(screen.getByRole('button',{name:'发送'}))
@@ -475,7 +477,9 @@ it('首次发送创建会话后保留账户上下文，供继续追问', async (
   await screen.findByRole('heading',{name:/今天/})
   await user.click(screen.getByRole('button',{name:'打开导航和会话列表'}))
   await user.click(screen.getByRole('button',{name:'资产'}))
-  await user.click(await screen.findByRole('button',{name:'引用到对话：测试卡'}))
+  await user.click(screen.getByRole('button',{name:'返回对话'}))
+  await user.type(screen.getByRole('textbox',{name:'输入消息'}),'@')
+  await user.click(await screen.findByRole('option',{name:/测试卡/}))
   await user.type(screen.getByRole('textbox',{name:'输入消息'}),'查询这个账户的消费')
   await user.click(screen.getByRole('button',{name:'发送'}))
   expect(await screen.findByText('已收到请求')).toBeTruthy()
@@ -577,7 +581,7 @@ it('@搜索当前用户的联系人并按类型 ID 发给 Agent', async () => {
     {contact_id:7,name:'张三',bank_name:'某银行',masked_phone:'138****0001',status:'active',can_transfer:true},
   ]})
   vi.spyOn(api,'cards').mockResolvedValue([
-    {card_id:3,account_name:'测试卡',masked_number:'****1234',status:'active',account_status:'active'},
+    {card_id:3,account_id:1,account_name:'测试卡',masked_number:'****1234',status:'active',account_status:'active'},
   ])
   vi.spyOn(sse,'streamChat').mockImplementation(async options => {
     expect(options.references?.map(x=>({kind:x.kind,id:x.id}))).toEqual([{kind:'contact',id:7}])
@@ -661,4 +665,34 @@ it('发送后只回读最新一页，同时保留已展开的更早历史', asyn
   await user.click(screen.getByRole('button', { name: '发送' }))
   expect(await screen.findByText('新回复在最新一页')).toBeTruthy()
   expect(screen.getByText('可保留消息1')).toBeTruthy()
+})
+
+it('在资产页点选来源与联系人后生成胶囊，并只发送实体 ID', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'bankDashboard').mockResolvedValue({
+    ...dashboard(),
+    contacts: [{ contact_id: 7, name: '张三', bank_name: '某银行', masked_phone: '138****0001', status: 'active', can_transfer: true }],
+    holdings: [{ holding_id: 9, product_id: 2, product_name: '安心债券 A', category: '债券基金', risk_level: 'R2', expected_rate_bps: 320, amount_fen: 100000, yesterday_earnings_fen: 12, status: 'active' }],
+  })
+  vi.spyOn(api, 'cards').mockResolvedValue([{ card_id: 2, account_id: 1, account_name: '测试卡', masked_number: '****1234', status: 'active', account_status: 'active' }])
+  const seen: { intent?: unknown; references?: unknown } = {}
+  vi.spyOn(sse, 'streamChat').mockImplementation(async options => {
+    seen.intent = options.intent
+    seen.references = options.references
+    options.onEvent({ type: 'done', message: { id: 88, role: 'assistant', content: '收到', created_at: new Date().toISOString() } })
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第一段对话')
+  await user.click(screen.getByRole('button', { name: '打开导航和会话列表' }))
+  await user.click(screen.getByRole('button', { name: '资产' }))
+  await user.click(await screen.findByRole('button', { name: /测试卡/ }))
+  await user.click(screen.getByRole('button', { name: /联系人 张三/ }))
+  const capsule = screen.getByRole('button', { name: '移除前置意图' }).parentElement
+  expect(capsule?.textContent).toContain('测试卡 → 张三')
+  expect((screen.getByRole('textbox', { name: '输入消息' }) as HTMLTextAreaElement).value).toContain('800 元')
+  await user.click(screen.getByRole('button', { name: '发送' }))
+  expect(await screen.findByText('收到')).toBeTruthy()
+  expect(seen.intent).toEqual({ action: 'transfer', source: { kind: 'account', id: 1 }, target: { kind: 'contact', id: 7 } })
+  expect(seen.references).toEqual([])
+  expect(screen.queryByRole('button', { name: '移除前置意图' })).toBeNull()
 })

@@ -10,7 +10,6 @@ from enum import Enum
 import re
 import unicodedata
 
-from app.services.redaction import mask_text
 
 _NO_VERIFIED_DATA = "我还没有查到可靠的银行数据。你可以选择对应账户或银行卡，让我为你查询。"
 _NO_UNSUPPORTED_ACTION = "本轮没有执行操作。请先提供需要处理的对象和必要信息；涉及资金或卡片的模拟操作须独立确认。"
@@ -39,6 +38,7 @@ _PRIVATE_READ = (
 _INTERNAL = re.compile(
     r"(?:system_prompt|guard_system_prompt|account_token|source_token|"
     r"target_token|recipient_contact_token|confirmation_token|"
+    r"phone_input|phone_tmp|card_input|"
     r"api[_ -]?key|bearer\s+\S+|\[以下是服务端验证的金融对象)",
     re.IGNORECASE,
 )
@@ -62,6 +62,24 @@ _BANK_FACT = re.compile(
 )
 _AMOUNT_CLAIM = re.compile(
     r"(?:¥|￥)\s*\d|\d[\d,.]*\s*(?:元|万元|万块|人民币)"
+)
+# Only remove narrowly worded budget questions from the amount check; an
+# asserted price, balance or financial fact must still be checked normally.
+_BUDGET_QUESTION = re.compile(
+    r"预算(?:大概|大约|是)?\s*(?:¥|￥)?\d+(?:\.\d{1,2})?\s*(?:元|块)?"
+    r"(?:\s*(?:还是|或者|或|到|至)\s*(?:¥|￥)?\d+(?:\.\d{1,2})?\s*(?:元|块)?)?"
+    r"\s*(?:左右)?(?:吗|呢|么)[？?]?"
+)
+# Recognize explicit inability without treating the words '帮你转账' as an
+# assertion that a transfer happened. Other claims in the reply remain checked.
+_DENIED_CAPABILITY = re.compile(
+    r"(?:不能|无法|不支持)(?:直接)?(?:帮你|为你|替你)?"
+    r"(?:转账|汇款|扣款|支付|挂失|冻结|申购|赎回)(?=[，。！？；、\s或]|$)"
+)
+_UNVERIFIED_ORDER = re.compile(
+    r"(?:已|已经|成功|刚刚).{0,12}(?:下单|订购|预订|预定|付款|支付|订好|购买)"
+    r"|(?:订单|商品|花束).{0,12}(?:已下单|已订购|已付款|已支付|订好了)"
+    r"|(?:帮你|替你|为你).{0,8}(?:订好了|下好单|买好了)"
 )
 _UNVERIFIED_LOOKUP = re.compile(
     r"(?:已经?查(?:到|询)|查到您的|根据您的账户|系统显示|记录显示|数据库显示)"
@@ -194,15 +212,24 @@ def tool_free_reply(
         return _NO_ACTION_STATUS
     if scope == NoToolScope.ACTION:
         return _action_clarification(user_request)
-    reply = mask_text(raw_content.strip())
+    reply = raw_content.strip()
     if not reply:
         return _NO_TEXT
     if len(reply) > _MAX_REPLY_CHARS or _INTERNAL.search(reply):
         return _NO_TEXT
-    if _ACTION_COMPLETION.search(reply):
+    checked_reply = _DENIED_CAPABILITY.sub("", reply)
+    if _ACTION_COMPLETION.search(checked_reply):
         return _NO_UNSUPPORTED_ACTION
+    if _UNVERIFIED_ORDER.search(checked_reply):
+        return "暂时无法确认订购或付款状态，请通过实际下单渠道核对。"
     if _BANK_FACT.search(reply) or _UNVERIFIED_LOOKUP.search(reply):
         return _NO_VERIFIED_DATA
-    if scope != NoToolScope.EDUCATIONAL and _AMOUNT_CLAIM.search(reply):
-        return _NO_VERIFIED_DATA
+    if scope != NoToolScope.EDUCATIONAL:
+        without_budget_question = _BUDGET_QUESTION.sub("", reply)
+        if _AMOUNT_CLAIM.search(without_budget_question):
+            return _NO_VERIFIED_DATA
+        if without_budget_question != reply and any(
+            cue in checked_reply for cue in _PRIVATE_READ + _ACTION + ("到账", "汇出", "款项")
+        ):
+            return _NO_VERIFIED_DATA
     return reply

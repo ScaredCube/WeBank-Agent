@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { MessageBubble } from '@/components/chat/MessageBubble'
+import { parseIntentMessage } from '@/features/assets/intent-message'
 import type { Message } from '@/lib/api'
 
 interface MessageListProps {
@@ -76,7 +77,7 @@ export function MessageList({ messages, streamingText, thinking, renderAfterMess
         const element = messageRows.current.get(question.id)
         if (!element) continue
         if (element.getBoundingClientRect().bottom < threshold) {
-          current = { id: question.id, content: question.content }
+          current = { id: question.id, content: parseIntentMessage(question.content).text }
         }
       }
       setActiveQuestion(previous =>

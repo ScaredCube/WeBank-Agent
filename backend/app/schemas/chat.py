@@ -55,11 +55,37 @@ class ContactReference(BaseModel):
 
 BankReference = Annotated[AccountReference | CardReference | ContactReference, Field(discriminator="kind")]
 
+IntentAction = Literal[
+    "transfer", "internal_transfer", "collect", "purchase", "redeem", "convert",
+]
+
+
+class IntentEntity(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["account", "contact", "holding"]
+    id: int = Field(gt=0)
+
+
+class ChatIntent(BaseModel):
+    """Local drag intent. Only entity IDs cross the boundary; the server mints
+    tokens and renders the prompt. Labels and tokens are never accepted here."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: IntentAction
+    source: IntentEntity
+    target: IntentEntity
+
+    @model_validator(mode="after")
+    def distinct_entities(self):
+        if self.source.kind == self.target.kind and self.source.id == self.target.id:
+            raise ValueError("来源与目标不能是同一实体")
+        return self
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1, max_length=4000)
     references: list[BankReference] = Field(default_factory=list, max_length=3)
+    intent: ChatIntent | None = None
     # Required for retriable clients; optional for backwards-compatible legacy calls.
     request_id: str | None = Field(default=None, min_length=8, max_length=64,
                                    pattern=r"^[A-Za-z0-9_-]+$")

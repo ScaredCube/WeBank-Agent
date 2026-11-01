@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 
 from app.agent.llm import LLMChunk
@@ -70,6 +70,7 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
                 "prepare_transfer", "get_card_status", "prepare_card_loss",
                 "get_wealth_products", "get_wealth_holdings", "get_wealth_risk_profile",
                 "prepare_wealth_subscribe", "prepare_wealth_redeem",
+                "prepare_internal_transfer", "prepare_collection", "prepare_wealth_convert",
                 "get_subscriptions", "detect_subscriptions", "prepare_cancel_subscription"
             }
             if self.calls == 1:
@@ -79,8 +80,7 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
                 }])
             else:
                 self.seen_result = json.loads(messages[-1]["content"])
-                yield LLMChunk(content="你的余额是 999999 元。")
-
+                yield LLMChunk(content="账户余额 999999 元。")
     llm = FakeLLM()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
     created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
@@ -94,6 +94,56 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
     assert llm.seen_result["data"][0]["balance_fen"] == 500000
     assert "5,000.00 元" in events[-1]["message"]["content"]
     assert "999999" not in events[-1]["message"]["content"]
+
+    history = client.get(
+        f"/api/chat/conversations/{created['id']}/messages", headers=auth_headers,
+    ).json()
+    assert "5,000.00 元" in history[-1]["content"]
+    assert "*,***.**" not in history[-1]["content"]
+    assert "**** 0001" in history[-1]["content"]
+
+
+def test_balance_tool_hides_raw_account_number_from_model_and_history(client, auth_headers, monkeypatch):
+    from sqlmodel import Session, select
+    from app.db.session import get_engine
+    from app.models import Account
+
+    synthetic = "4111111111111111"
+    with Session(get_engine()) as session:
+        account = session.exec(select(Account)).one()
+        account.masked_number = synthetic
+        session.add(account)
+        session.commit()
+
+    class FakeLLM:
+        calls = 0
+        seen = ""
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{
+                    "id": "call-1", "type": "function",
+                    "function": {"name": "get_account_balance", "arguments": "{}"},
+                }])
+            else:
+                self.seen = json.dumps(messages, ensure_ascii=False)
+                yield LLMChunk(content="ignored")
+
+    llm = FakeLLM()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
+    created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
+    response = client.post(
+        f"/api/chat/conversations/{created['id']}/messages",
+        json={"content": "查询余额"}, headers=auth_headers,
+    )
+    events = _sse_payloads(response.text)
+    assert synthetic not in llm.seen
+    assert synthetic not in events[-1]["message"]["content"]
+    history = client.get(
+        f"/api/chat/conversations/{created['id']}/messages", headers=auth_headers,
+    ).json()
+    assert synthetic not in history[-1]["content"]
 
 
 def test_chat_rejects_model_user_id_override(client, auth_headers, monkeypatch):
@@ -149,6 +199,12 @@ def test_chat_renders_transactions_from_tool_not_model(client, auth_headers, mon
     assert "购物" in content and "餐饮" in content
     assert "500.00 元" in content
     assert "123456" not in content
+
+    history = client.get(
+        f"/api/chat/conversations/{created['id']}/messages", headers=auth_headers,
+    ).json()
+    assert "500.00 元" in history[-1]["content"]
+    assert "2026-01" in history[-1]["content"]
 
 
 def test_chat_stops_repeated_tool_calls(client, auth_headers, monkeypatch):

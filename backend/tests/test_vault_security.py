@@ -47,7 +47,7 @@ def test_model_cannot_reuse_temporary_reference_from_another_request(client, aut
         assert session.get(Account, 1).balance_fen == 500000
 
 
-def test_synthetic_luhn_card_is_tokenized_before_model_and_storage(client, auth_headers, monkeypatch):
+def test_user_supplied_card_number_is_preserved_for_model_and_history(client, auth_headers, monkeypatch):
     from app.services.redaction import _luhn
     synthetic = next("999000000000000" + str(n) for n in range(10) if _luhn("999000000000000" + str(n)))
     seen = []
@@ -59,10 +59,10 @@ def test_synthetic_luhn_card_is_tokenized_before_model_and_storage(client, auth_
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers,
                            json={"content": "测试卡号 " + synthetic})
-    assert response.status_code == 200 and seen and "<CARD_INPUT_" in seen[0]
-    assert synthetic not in seen[0] and synthetic not in response.text
+    assert response.status_code == 200 and seen
+    assert synthetic in seen[0]
+    assert "<CARD_INPUT_" not in seen[0]
     history = client.get(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers)
-    assert synthetic not in history.text
+    assert synthetic in history.text
     with Session(get_engine()) as session:
-        row = session.exec(select(DataToken).where(DataToken.kind == "card_input")).one()
-        assert synthetic not in row.ciphertext
+        assert session.exec(select(DataToken).where(DataToken.kind == "card_input")).all() == []

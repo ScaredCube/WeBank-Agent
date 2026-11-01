@@ -28,31 +28,40 @@ def seed_demo_user(session: Session) -> User:
 
 
 def seed_demo_accounts(session: Session, user: User) -> None:
-    """Create a single fictional account only when the demo user has none."""
+    """Create two fictional accounts; additive for databases seeded earlier."""
     if user.id is None:
         raise ValueError("演示用户尚未保存")
     existing = session.exec(select(Account).where(Account.user_id == user.id)).first()
-    if existing is not None:
-        return
+    if existing is None:
+        account = Account(
+            user_id=user.id, name="演示活期账户", masked_number="**** 0001",
+            balance_fen=500000,
+        )
+        session.add(account)
+        session.flush()
+        entries = [
+            ("income", 600000, 600000, "演示公司", "工资", datetime(2026, 1, 1, tzinfo=timezone.utc)),
+            ("expense", 50000, 550000, "演示餐厅", "餐饮", datetime(2026, 1, 2, tzinfo=timezone.utc)),
+            ("expense", 50000, 500000, "演示商店", "购物", datetime(2026, 1, 3, tzinfo=timezone.utc)),
+        ]
+        for index, (direction, amount, balance, counterparty, category, occurred_at) in enumerate(entries, 1):
+            session.add(Transaction(
+                account_id=account.id, reference=f"demo-{user.id}-{index}", direction=direction,
+                amount_fen=amount, balance_after_fen=balance, counterparty=counterparty,
+                category=category, note="模拟交易", occurred_at=occurred_at,
+            ))
+        session.commit()
 
-    account = Account(
-        user_id=user.id, name="演示活期账户", masked_number="**** 0001",
-        balance_fen=500000,
-    )
-    session.add(account)
-    session.flush()
-    entries = [
-        ("income", 600000, 600000, "演示公司", "工资", datetime(2026, 1, 1, tzinfo=timezone.utc)),
-        ("expense", 50000, 550000, "演示餐厅", "餐饮", datetime(2026, 1, 2, tzinfo=timezone.utc)),
-        ("expense", 50000, 500000, "演示商店", "购物", datetime(2026, 1, 3, tzinfo=timezone.utc)),
-    ]
-    for index, (direction, amount, balance, counterparty, category, occurred_at) in enumerate(entries, 1):
-        session.add(Transaction(
-            account_id=account.id, reference=f"demo-{user.id}-{index}", direction=direction,
-            amount_fen=amount, balance_after_fen=balance, counterparty=counterparty,
-            category=category, note="模拟交易", occurred_at=occurred_at,
+    if not settings.demo_multi_assets:
+        return
+    secondary = session.exec(select(Account).where(
+        Account.user_id == user.id, Account.name == "零钱账户")).first()
+    if secondary is None:
+        session.add(Account(
+            user_id=user.id, name="零钱账户", masked_number="**** 0002",
+            balance_fen=386012,
         ))
-    session.commit()
+        session.commit()
 
 
 def seed_demo_cards(session: Session, user: User) -> None:
@@ -126,6 +135,13 @@ def seed_demo_wealth(session: Session, user: User) -> None:
     if existing is None:
         session.add(WealthHolding(user_id=user.id, product_id=first.id,
                                   amount_fen=100_000, yesterday_earnings_fen=80))
+    if settings.demo_multi_assets:
+        second = products[1]
+        if session.exec(select(WealthHolding).where(
+                WealthHolding.user_id == user.id,
+                WealthHolding.product_id == second.id)).first() is None:
+            session.add(WealthHolding(user_id=user.id, product_id=second.id,
+                                      amount_fen=1_860_000, yesterday_earnings_fen=1_234))
     if session.get(WealthRiskProfile, user.id) is None:
         session.add(WealthRiskProfile(user_id=user.id, risk_level="R2", score=4))
     session.commit()

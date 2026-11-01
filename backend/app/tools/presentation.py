@@ -23,7 +23,9 @@ def render_tool_result(name: str, result: dict) -> str:
             return f"理财赎回未准备：{result['error']}。"
         if name == "prepare_cancel_subscription":
             return f"取消订阅未准备：{result['error']}。"
-        return f"查询未完成：{result['error']}。"
+        if name in {"prepare_internal_transfer", "prepare_collection", "prepare_wealth_convert"}:
+            return f"操作未完成：{result['error']}。"
+        return f"操作未完成：{result['error']}。"
     data = result["data"]
     if name == "get_card_status":
         if not data:
@@ -97,6 +99,13 @@ def render_tool_result(name: str, result: dict) -> str:
         if data.get("risk_level") == "未评估":
             return "尚未完成模拟理财风险测评。"
         return f"模拟理财风险等级：{data['risk_level']}；测评分数：{data['score']}/9。"
+    if name == "prepare_internal_transfer":
+        if isinstance(data, dict) and data.get("status") == "completed":
+            return (f"内部转账已完成：{data.get('source_name', '')} → "
+                    f"{data.get('target_name', '')}，{_money(data.get('amount_fen', 0))} 元。")
+        return "内部转账已提交，请以操作记录为准。"
+    if name in {"prepare_collection", "prepare_wealth_convert"}:
+        return "操作已提交，请以服务端确认和操作记录为准。"
     if name == "get_monthly_bill":
         lines = [f"{data['month']} 月度账单（北京时间）",
                  f"{data['account_name']}（{data['masked_number']}）",
@@ -112,4 +121,4 @@ def render_tool_result(name: str, result: dict) -> str:
         if data["ignored_count"]:
             lines.append(f"另有 {data['ignored_count']} 笔方向不明的流水未计入统计。")
         return "\n".join(lines)
-    return "查询未完成：工具不可用。"
+    return "操作已完成，请以服务端记录为准。"

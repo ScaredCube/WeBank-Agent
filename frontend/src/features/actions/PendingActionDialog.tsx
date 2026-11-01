@@ -23,12 +23,15 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   const { action, confirmation_token: confirmationToken } = event
   const service = transport ?? serviceActionTransport(token!)
   const transfer = action.action_type === 'transfer'
+  const internalTransfer = action.action_type === 'internal_transfer'
+  const collection = action.action_type === 'collection_request'
   const wealthSubscribe = action.action_type === 'wealth_subscribe'
   const wealthRedeem = action.action_type === 'wealth_redeem'
   const wealthOrder = wealthSubscribe || wealthRedeem
+  const wealthConversion = action.action_type === 'wealth_convert'
   const subscriptionCancel = action.action_type === 'subscription_cancel'
   const cardLoss = action.action_type === 'card_loss'
-  const usesMoney = transfer || wealthOrder || subscriptionCancel
+  const usesMoney = transfer || internalTransfer || collection || wealthOrder || wealthConversion || subscriptionCancel
   const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
   const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value)
   const positiveId = (value: unknown): value is number => safeInteger(value) && Number(value) > 0
@@ -36,7 +39,10 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   const validAmount = safeInteger(action.details.amount_fen) && Number(action.details.amount_fen) > 0
   const wealthOrderType = wealthSubscribe ? 'subscribe' : 'redeem'
   const missingBusinessTransport = (wealthOrder && !service.executeWealthOrder) ||
-    (subscriptionCancel && !service.executeSubscriptionCancel)
+    (subscriptionCancel && !service.executeSubscriptionCancel) ||
+    (internalTransfer && !service.executeInternalTransfer) ||
+    (collection && !service.executeCollection) ||
+    (wealthConversion && !service.executeConversion)
   const supportedWealth = wealthOrder && action.risk_level === 'red' && event.order_id !== undefined && positiveId(event.order_id) &&
     action.details.order_type === wealthOrderType && positiveId(action.details.product_id) && nonempty(action.details.product_name) &&
     nonempty(action.details.product_category) && nonempty(action.details.product_risk_level) && safeInteger(action.details.expected_rate_bps) &&
@@ -46,14 +52,24 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     positiveId(event.subscription_id) && action.details.subscription_id === event.subscription_id && nonempty(action.details.merchant) &&
     validAmount && nonempty(action.details.cycle) && typeof action.details.next_charge_date === 'string' &&
     Number.isFinite(Date.parse(action.details.next_charge_date)) && action.details.status === 'active'
+  const supportedInternal = internalTransfer && action.risk_level === 'yellow' && event.transfer_id !== undefined &&
+    positiveId(event.transfer_id) && validAmount && nonempty(action.details.source_masked) &&
+    nonempty(action.details.target_masked) && action.details.currency === 'CNY'
+  const supportedCollection = collection && action.risk_level === 'yellow' && event.collection_id !== undefined &&
+    positiveId(event.collection_id) && validAmount && nonempty(action.details.contact_name) &&
+    nonempty(action.details.account_masked) && action.details.currency === 'CNY'
+  const supportedConversion = wealthConversion && action.risk_level === 'red' && event.conversion_id !== undefined &&
+    positiveId(event.conversion_id) && validAmount && nonempty(action.details.source_product_name) &&
+    nonempty(action.details.target_product_name) && action.details.currency === 'CNY'
   const supported = !missingBusinessTransport && action.status === 'pending' && positiveId(action.id) && nonempty(confirmationToken) && validExpiry && (
     (transfer && (action.risk_level === 'yellow' || action.risk_level === 'red') && positiveId(event.transfer_id) && validAmount &&
       nonempty(action.details.account_masked) && nonempty(action.details.recipient_name) && action.details.currency === 'CNY') ||
     (cardLoss && action.risk_level === 'red' && positiveId(action.details.card_id) && nonempty(action.details.masked_number)) ||
-    supportedWealth || supportedSubscription
+    supportedWealth || supportedSubscription || supportedInternal || supportedCollection || supportedConversion
   )
-  const operationTitle = wealthSubscribe ? '确认模拟申购' : wealthRedeem ? '确认模拟赎回' : subscriptionCancel ? '确认取消订阅' :
-    transfer ? '确认模拟转账' : cardLoss ? '确认模拟挂失' : '待确认操作'
+  const operationTitle = wealthSubscribe ? '确认模拟申购' : wealthRedeem ? '确认模拟赎回' : wealthConversion ? '确认持仓转换' :
+    subscriptionCancel ? '确认取消订阅' : internalTransfer ? '确认内部转账' : collection ? '确认发起收款' :
+      transfer ? '确认模拟转账' : cardLoss ? '确认模拟挂失' : '待确认操作'
 
   async function run(operation: () => Promise<void>, keepCodeOnRejection = false) {
     if (busyRef.current) return
@@ -89,21 +105,57 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   }
 
   async function verify() {
-    await run(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setMessage('')
+    let verified = false
+    try {
       const result = await service.step(action.id, 'verification/verify', { token: confirmationToken, code })
       if (result.status !== 'verified') throw new Error('验证状态无法核实')
+      verified = true
       setCode('')
       setStage('ready')
-      setMessage('模拟验证通过，操作尚未执行。')
-    }, true)
+      setMessage('模拟验证通过，正在执行…')
+      // Verification and execution are a single user gesture: a second
+      // "execute" click would add no security and only slow the flow down.
+      await performExecution()
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        setMessage(err.message)
+        setStage(verified ? 'rejected' : 'code')
+      } else {
+        setStage('unknown')
+        setMessage(verified
+          ? '验证已通过，但执行结果暂不确定，请查询状态；不要重复发起操作。'
+          : '请求结果暂不确定，请查询状态；不要重复发起操作。')
+      }
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
   }
 
-  async function execute() {
-    await run(async () => {
+  async function performExecution() {
       if (transfer && event.transfer_id) {
         const result = await service.executeTransfer(event.transfer_id)
         if (result.status !== 'completed') throw new Error('执行结果无法确认')
         setMessage(result.message)
+      } else if (internalTransfer && event.transfer_id) {
+        if (!service.executeInternalTransfer) throw new ApiError('当前演示没有连接内部转账执行接口。', 422)
+        const result = await service.executeInternalTransfer(event.transfer_id)
+        if (result.status !== 'completed' || result.transfer_id !== event.transfer_id) throw new Error('内部转账结果无法确认')
+        setMessage('内部转账已完成。')
+      } else if (collection && event.collection_id) {
+        if (!service.executeCollection) throw new ApiError('当前演示没有连接收款执行接口。', 422)
+        const result = await service.executeCollection(event.collection_id)
+        if (result.status !== 'completed' || result.collection_id !== event.collection_id) throw new Error('收款结果无法确认')
+        setMessage('收款请求已发送。')
+      } else if (wealthConversion && event.conversion_id) {
+        if (!service.executeConversion) throw new ApiError('当前演示没有连接持仓转换执行接口。', 422)
+        const result = await service.executeConversion(event.conversion_id)
+        if (result.status !== 'completed' || result.conversion_id !== event.conversion_id) throw new Error('转换结果无法确认')
+        setMessage('持仓转换已完成。')
       } else if (cardLoss) {
         const result = await service.executeCardLoss(action.id)
         if (result.status !== 'lost') throw new Error('执行结果无法确认')
@@ -129,7 +181,10 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
       } else throw new Error('不支持此操作')
       onResolved?.('completed')
       setStage('complete')
-    })
+  }
+
+  async function execute() {
+    await run(performExecution)
   }
 
   async function cancel() {
@@ -185,6 +240,17 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     add('账户', action.details.account_masked)
     add('收款人', action.details.recipient_name)
     add('收款号码', action.details.recipient_phone_masked)
+  } else if (internalTransfer) {
+    add('付款账户', action.details.source_name)
+    add('付款卡号', action.details.source_masked)
+    add('收款账户', action.details.target_name)
+    add('收款卡号', action.details.target_masked)
+  } else if (collection) {
+    add('付款人', action.details.contact_name)
+    add('收款账户', action.details.account_masked)
+  } else if (wealthConversion) {
+    add('转出产品', action.details.source_product_name)
+    add('转入产品', action.details.target_product_name)
   } else if (cardLoss) {
     add('账户', action.details.account_name)
     add('卡号', action.details.masked_number)
@@ -204,7 +270,7 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     add('下次扣费', action.details.next_charge_date)
     add('当前状态', action.details.status === 'active' ? '生效中' : action.details.status)
   }
-  const amountLabel = wealthOrder ? '操作金额' : subscriptionCancel ? '单次扣费' : '金额'
+  const amountLabel = wealthOrder || wealthConversion ? '操作金额' : subscriptionCancel ? '单次扣费' : '金额'
   if (safeInteger(action.details.amount_fen)) rows.push([amountLabel, formatCnyFen(action.details.amount_fen)])
   add('备注', action.details.note)
   const privacyLabels = new Set(['金额', '操作金额', '单次扣费', '执行后余额', '该产品持仓'])
@@ -213,7 +279,9 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     : subscriptionCancel
       ? '这是模拟订阅取消。确认只记录你的同意，只有服务端执行成功后订阅状态才会变更。'
       : '请核对信息。确认后操作仍需单独执行。'
-  const executionLabel = wealthSubscribe ? '执行模拟申购' : wealthRedeem ? '执行模拟赎回' : subscriptionCancel ? '执行模拟取消' : '执行操作'
+  const executionLabel = wealthSubscribe ? '执行模拟申购' : wealthRedeem ? '执行模拟赎回' :
+    wealthConversion ? '执行模拟转换' : subscriptionCancel ? '执行模拟取消' :
+      internalTransfer ? '执行内部转账' : collection ? '发起收款' : '执行操作'
 
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !busy) { if (stage === 'complete' || stage === 'cancelled') onFinish(); else onClose() } }}>
     <DialogContent className="bank-action-dialog p-5 sm:p-6">

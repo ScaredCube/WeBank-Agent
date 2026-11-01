@@ -30,13 +30,19 @@ EVENTS = frozenset({
     "subscription_cancel_prepared", "subscription_cancel_prepare_denied",
     "subscription_cancel_prepare_failed", "subscription_cancelled",
     "subscription_cancel_retried", "subscription_cancel_denied", "subscription_cancel_failed",
+    "intent_validated",
+    "internal_transfer_prepared", "internal_transfer_completed",
+    "collection_prepared", "collection_completed",
+    "wealth_conversion_prepared", "wealth_conversion_completed",
 })
 TOOLS = frozenset({"get_account_balance", "list_recent_transactions", "get_monthly_bill", "calculate",
                    "prepare_transfer", "transfer", "get_card_status", "prepare_card_loss", "card_loss",
                    "get_wealth_products", "get_wealth_holdings", "get_wealth_risk_profile",
                    "prepare_wealth_subscribe", "prepare_wealth_redeem", "wealth_subscribe", "wealth_redeem",
                    "get_subscriptions", "detect_subscriptions", "prepare_cancel_subscription",
-                   "subscription_cancel"})
+                   "subscription_cancel", "prepare_internal_transfer", "internal_transfer",
+                   "prepare_collection", "collection_request", "prepare_wealth_convert",
+                   "wealth_convert"})
 RESULTS = frozenset({"success", "denied", "failed", "retry", "locked"})
 REASONS = {"工具基础风险等级": "base", "转账日累计超过限额": "daily_limit",
            "转账需要确认": "confirmation_required", "夜间操作升级": "night_upgrade"}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Textarea } from '@/components/ui/textarea'
@@ -17,10 +17,13 @@ interface ChatComposerProps {
   onReferenceDrop?: (value: BankObjectReference) => void
   onRemoveReference?: (value: BankObjectReference) => void
   onSearchReferences?: () => Promise<BankObjectReference[]>
+  intentSlot?: ReactNode
+  intentActive?: boolean
 }
 
 export function ChatComposer({ value, onChange, onSend, disabled = false, onStop, variant = 'conversation',
-  references = [], onReferenceDrop, onRemoveReference, onSearchReferences }: ChatComposerProps) {
+  references = [], onReferenceDrop, onRemoveReference, onSearchReferences,
+  intentSlot, intentActive = false }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
   const prefersReducedMotion = useReducedMotion()
@@ -109,6 +112,7 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
       home ? 'min-h-[92px] shadow-[0_14px_40px_-32px_rgba(0,48,36,.4)]' : 'min-h-[76px]',
       dropActive && 'border-jade-600 bg-jade-50 ring-4 ring-jade-500/15',
     )}>
+      {intentSlot && <div className="px-1 pb-2 pt-1">{intentSlot}</div>}
       {references.length > 0 && <div aria-label="已引用的金融对象" className="flex flex-wrap gap-2 px-2 pb-2 pt-1">
         <AnimatePresence initial={false}>
         {references.map(ref => <motion.span key={`${ref.kind}:${ref.id}`}
@@ -147,7 +151,7 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
       </div>}
       <div className="flex items-end gap-2">
         <Textarea ref={textareaRef} rows={1} value={value}
-          placeholder={references.length ? '围绕所选对象，想了解什么？' : '说说你想办的事'}
+          placeholder={intentActive ? '补充金额和备注' : references.length ? '围绕所选对象，想了解什么？' : '说说你想办的事'}
           aria-label="输入消息"
           className="chat-composer-input max-h-[168px] min-h-10 flex-1 overflow-y-auto py-2 pl-2 pr-2"
           aria-controls={showing ? 'bank-object-mentions' : undefined}

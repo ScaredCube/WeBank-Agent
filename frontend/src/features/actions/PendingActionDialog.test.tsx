@@ -101,7 +101,7 @@ describe('待确认动作', () => {
     expect(demoTransport.step).not.toHaveBeenCalled()
   })
 
-  it('申购明确展示模拟验证，验证和执行分开并核对服务端订单结果', async () => {
+  it('申购模拟验证通过后自动执行并核对服务端订单结果', async () => {
     const user = userEvent.setup()
     const step = vi.spyOn(api, 'actionStep')
       .mockResolvedValueOnce({ status: 'pending', message: '验证已开始' })
@@ -119,13 +119,11 @@ describe('待确认动作', () => {
     await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
     await user.type(screen.getByLabelText('模拟验证码'), '123456')
     await user.click(screen.getByRole('button', { name: '验证' }))
-    expect(execute).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: '执行模拟申购' }))
+    expect(await screen.findByText('模拟理财操作已完成。')).toBeTruthy()
 
     expect(step).toHaveBeenNthCalledWith(1, 'auth', 8, 'verification/start', { token: 'wealth-token' })
     expect(step).toHaveBeenNthCalledWith(2, 'auth', 8, 'verification/verify', { token: 'wealth-token', code: '123456' })
     expect(execute).toHaveBeenCalledWith('auth', 21)
-    expect(screen.getByText('模拟理财操作已完成。')).toBeTruthy()
     expect(screen.getByText('¥800.00')).toBeTruthy()
     expect(resolved).toHaveBeenCalledWith('completed')
   })
@@ -149,9 +147,8 @@ describe('待确认动作', () => {
     await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
     await user.type(screen.getByLabelText('模拟验证码'), '123456')
     await user.click(screen.getByRole('button', { name: '验证' }))
-    await user.click(screen.getByRole('button', { name: '执行模拟赎回' }))
+    expect(await screen.findByText('该产品持仓')).toBeTruthy()
     expect(execute).toHaveBeenCalledWith('auth', 21)
-    expect(screen.getByText('该产品持仓')).toBeTruthy()
     expect(screen.getByText('¥0.00')).toBeTruthy()
   })
 
@@ -194,9 +191,8 @@ describe('待确认动作', () => {
     await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
     await user.type(screen.getByLabelText('模拟验证码'), '123456')
     await user.click(screen.getByRole('button', { name: '验证' }))
-    await user.click(screen.getByRole('button', { name: '执行模拟申购' }))
+    expect(await screen.findByText(/执行结果暂不确定/)).toBeTruthy()
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(screen.getByText(/请求结果暂不确定/)).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: '查询服务端状态' }))
     expect(check).toHaveBeenCalledWith('auth', 8)
@@ -220,8 +216,7 @@ describe('待确认动作', () => {
     await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
     await user.type(screen.getByLabelText('模拟验证码'), '123456')
     await user.click(screen.getByRole('button', { name: '验证' }))
-    await user.click(screen.getByRole('button', { name: '执行模拟申购' }))
-    await user.click(screen.getByRole('button', { name: '查询服务端状态' }))
+    await user.click(await screen.findByRole('button', { name: '查询服务端状态' }))
     expect(screen.getByText(/按本设备时间，此操作可能已过有效期/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '按原动作编号重试' })).toBeNull()
   })
@@ -269,7 +264,7 @@ describe('待确认动作', () => {
     expect(step).toHaveBeenCalledTimes(2)
   })
 
-  it('红色挂失通过模拟验证后仍需用户执行', async () => {
+  it('红色挂失通过模拟验证后自动执行', async () => {
     const user = userEvent.setup()
     const red = { ...action, transfer_id: undefined, action: { ...action.action, action_type: 'card_loss', risk_level: 'red', details: { card_id: 2, masked_number: '****1234', account_name: '测试账户' } } }
     const step = vi.spyOn(api, 'actionStep').mockResolvedValueOnce({ status: 'pending', message: '验证已开始' }).mockResolvedValueOnce({ status: 'verified', message: '验证通过' })
@@ -279,12 +274,9 @@ describe('待确认动作', () => {
     await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
     await user.type(screen.getByLabelText('模拟验证码'), '123456')
     await user.click(screen.getByRole('button', { name: '验证' }))
-    expect(screen.getByText('模拟验证通过，操作尚未执行。')).toBeTruthy()
-    expect(execute).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: '执行操作' }))
+    expect(await screen.findByText('模拟卡片已挂失。')).toBeTruthy()
     expect(execute).toHaveBeenCalledTimes(1)
     expect(step).toHaveBeenCalledTimes(2)
-    expect(screen.getByText('模拟卡片已挂失。')).toBeTruthy()
     expect(resolved).toHaveBeenCalledWith('completed')
   })
 

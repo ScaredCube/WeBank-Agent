@@ -28,10 +28,10 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-def mask_text(text: str) -> str:
+def mask_text(text: str, *, aggressive: bool = True) -> str:
     masked = _CHINESE_CANDIDATE.sub("[敏感号码已隐藏]", _normalise(text))
     masked = _CANDIDATE.sub("[敏感号码已隐藏]", masked)
-    if sum(ch.isdecimal() or ch in _CHINESE_DIGITS for ch in masked) >= 10:
+    if aggressive and sum(ch.isdecimal() or ch in _CHINESE_DIGITS for ch in masked) >= 10:
         masked = re.sub(r"[\d零〇一二三四五六七八九幺]", "*", masked)
     return masked
 
@@ -60,31 +60,22 @@ def mask_value(value):
     return value
 
 
-def redact_input(session: Session, user_id: int, text: str, scope: str) -> tuple[str, str, bool]:
-    normalized, chinese_count = _CHINESE_CANDIDATE.subn("[敏感号码已隐藏]", _normalise(text))
-    parts_display: list[str] = []
-    parts_model: list[str] = []
-    cursor = 0
-    uncertain = bool(chinese_count)
+def issue_phone_tool_references(
+    session: Session, user_id: int, text: str, scope: str
+) -> list[tuple[str, str]]:
+    """Create request-scoped tool handles for phone numbers the user typed.
+
+    The user text itself is never rewritten: it stays visible in the UI and is
+    sent to the model as typed. These tokens only let a Tool accept the number
+    without putting raw digits into Tool arguments.
+    """
+    normalized = _normalise(text)
+    issues: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for match in _CANDIDATE.finditer(normalized):
-        parts_display.append(normalized[cursor:match.start()])
-        parts_model.append(normalized[cursor:match.start()])
         number = _digits(match.group())
-        parts_display.append("[敏感号码已隐藏]")
-        if re.fullmatch(r"1[3-9][0-9]{9}", number):
-            parts_model.append(create_temporary(session, user_id, "phone_input", number, scope))
-        elif 16 <= len(number) <= 19 and _luhn(number):
-            parts_model.append(create_temporary(session, user_id, "card_input", number, scope))
-        else:
-            parts_model.append("[敏感号码已隐藏]")
-            uncertain = True
-        cursor = match.end()
-    parts_display.append(normalized[cursor:])
-    parts_model.append(normalized[cursor:])
-    display = "".join(parts_display)
-    model = "".join(parts_model)
-    if sum(ch.isdecimal() or ch in _CHINESE_DIGITS for ch in display) >= 10:
-        uncertain = True
-        display = re.sub(r"[\d零〇一二三四五六七八九幺]", "*", display)
-        model = re.sub(r"[\d零〇一二三四五六七八九幺]", "*", model)
-    return display, model, uncertain
+        if number in seen or not re.fullmatch(r"1[3-9][0-9]{9}", number):
+            continue
+        seen.add(number)
+        issues.append((number, create_temporary(session, user_id, "phone_input", number, scope)))
+    return issues

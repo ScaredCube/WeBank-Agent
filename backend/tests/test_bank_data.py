@@ -117,3 +117,23 @@ def test_bank_data_is_not_registered_as_agent_tools():
     names = {item["function"]["name"] for item in create_agent_registry().definitions()}
     assert not {"read_accounts", "read_contacts", "read_dashboard"} & names
     assert "get_account_balance" in names
+
+
+def test_demo_multi_assets_seed_is_opt_in_and_idempotent(client, auth_headers, monkeypatch):
+    from app.core.config import settings
+    from app.db.seed import seed_demo_accounts, seed_demo_wealth
+    from app.db.session import get_engine
+    from app.models import User
+    from sqlmodel import Session, select
+
+    monkeypatch.setattr(settings, "demo_multi_assets", True)
+    with Session(get_engine()) as session:
+        user = session.exec(select(User).where(User.username == "demo")).one()
+        seed_demo_accounts(session, user)
+        seed_demo_wealth(session, user)
+        seed_demo_accounts(session, user)
+        seed_demo_wealth(session, user)
+        accounts = session.exec(select(Account).where(Account.user_id == user.id)).all()
+        holdings = session.exec(select(WealthHolding).where(WealthHolding.user_id == user.id)).all()
+    assert len(accounts) == 2
+    assert len(holdings) == 2

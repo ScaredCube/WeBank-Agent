@@ -17,7 +17,7 @@ describe('业务列表响应校验', () => {
     expect(fetchMock).toHaveBeenLastCalledWith('/api/bills/monthly', expect.anything())
   })
   it('接受银行卡与审计接口的有效数据', async () => {
-    respond([{ card_id: 2, account_name: '示例账户', masked_number: '****1234', status: 'active', account_status: 'active' }])
+    respond([{ card_id: 2, account_id: 1, account_name: '示例账户', masked_number: '****1234', status: 'active', account_status: 'active' }])
     expect(await api.cards('test')).toHaveLength(1)
     respond([{ id: 1, event_type: 'tool_called', result: null, created_at: '2026-01-01T00:00:00Z', action_id: null }])
     expect(await api.audit('test')).toHaveLength(1)

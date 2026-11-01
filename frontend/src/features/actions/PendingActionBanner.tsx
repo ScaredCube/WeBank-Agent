@@ -4,6 +4,9 @@ import type { StreamEvent } from '@/lib/sse'
 type Event = Extract<StreamEvent, { type: 'action_required' }>
 const labels: Record<string, string> = {
   transfer: '模拟转账',
+  internal_transfer: '内部转账',
+  collection_request: '发起收款',
+  wealth_convert: '持仓转换',
   card_loss: '模拟挂失',
   wealth_subscribe: '模拟申购',
   wealth_redeem: '模拟赎回',

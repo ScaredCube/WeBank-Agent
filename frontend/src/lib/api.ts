@@ -42,6 +42,7 @@ export interface ChatSubmissionStatus {
 
 export interface BankCard {
   card_id: number
+  account_id: number
   account_name: string
   masked_number: string
   status: string
@@ -118,6 +119,35 @@ export interface SubscriptionCancelExecution {
   message: string
 }
 
+export interface InternalTransferExecution {
+  transfer_id: number
+  status: 'completed'
+  amount_fen: number
+  note: string
+  source_name: string
+  source_masked: string
+  target_name: string
+  target_masked: string
+  balance_fen: number
+  currency: string
+  transaction_id: number | null
+}
+
+export interface CollectionExecution {
+  collection_id: number
+  status: 'completed'
+}
+
+export interface ConversionExecution {
+  conversion_id: number
+  status: 'completed'
+  amount_fen: number
+  source_product_name: string
+  target_product_name: string
+  source_holding_fen: number
+  target_holding_fen: number
+}
+
 const positiveId = z.number().int().safe().positive()
 const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional(), card_result: z.unknown().optional(), tool_results: z.unknown().optional() })
 const submissionStatusSchema = z.object({
@@ -127,7 +157,20 @@ const submissionStatusSchema = z.object({
   pending_action_id: positiveId.nullable(),
   message: messageSchema.nullable(),
 })
-const cardListSchema = z.array(z.object({ card_id: positiveId, account_name: z.string(), masked_number: z.string(), status: z.string(), account_status: z.string() }))
+const cardListSchema = z.array(z.object({ card_id: positiveId, account_id: positiveId, account_name: z.string(), masked_number: z.string(), status: z.string(), account_status: z.string() }))
+const internalTransferExecutionSchema = z.object({
+  transfer_id: positiveId, status: z.literal('completed'), amount_fen: z.number().int().safe().positive(),
+  note: z.string(), source_name: z.string(), source_masked: z.string(),
+  target_name: z.string(), target_masked: z.string(), balance_fen: z.number().int().safe().nonnegative(),
+  currency: z.string(), transaction_id: positiveId.nullable(),
+})
+const collectionExecutionSchema = z.object({ collection_id: positiveId, status: z.literal('completed') })
+const conversionExecutionSchema = z.object({
+  conversion_id: positiveId, status: z.literal('completed'), amount_fen: z.number().int().safe().positive(),
+  source_product_name: z.string(), target_product_name: z.string(),
+  source_holding_fen: z.number().int().safe().nonnegative(),
+  target_holding_fen: z.number().int().safe().nonnegative(),
+})
 const bankDashboardSchema = z.object({
   accounts: z.array(z.object({
     account_id: positiveId, name: z.string(), masked_number: z.string(), currency: z.string(),
@@ -362,6 +405,36 @@ export const api = {
     ))
     if (!result.success || result.data.subscription_id !== subscriptionId) {
       throw new Error('订阅取消结果数据格式异常，请查询服务端状态。')
+    }
+    return result.data
+  },
+
+  async executeInternalTransfer(token: string, transferId: number): Promise<InternalTransferExecution> {
+    const result = internalTransferExecutionSchema.safeParse(await request<unknown>(
+      `/internal-transfers/${transferId}/execute`, { method: 'POST' }, token,
+    ))
+    if (!result.success || result.data.transfer_id !== transferId) {
+      throw new Error('内部转账结果数据格式异常，请查询服务端状态。')
+    }
+    return result.data
+  },
+
+  async executeCollection(token: string, collectionId: number): Promise<CollectionExecution> {
+    const result = collectionExecutionSchema.safeParse(await request<unknown>(
+      `/collections/${collectionId}/execute`, { method: 'POST' }, token,
+    ))
+    if (!result.success || result.data.collection_id !== collectionId) {
+      throw new Error('收款结果数据格式异常，请查询服务端状态。')
+    }
+    return result.data
+  },
+
+  async executeConversion(token: string, conversionId: number): Promise<ConversionExecution> {
+    const result = conversionExecutionSchema.safeParse(await request<unknown>(
+      `/wealth/conversions/${conversionId}/execute`, { method: 'POST' }, token,
+    ))
+    if (!result.success || result.data.conversion_id !== conversionId) {
+      throw new Error('转换结果数据格式异常，请查询服务端状态。')
     }
     return result.data
   },
