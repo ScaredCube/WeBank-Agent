@@ -25,6 +25,7 @@ REVIEW_PATHS = (
     "backend/app/agent/response_policy.py",
     "backend/app/agent/response_recovery.py",
     "backend/app/agent/read_completion.py",
+    "backend/app/agent/financial_summary.py",
     "backend/app/agent/loop.py",
     "backend/app/agent/guard.py",
     "backend/app/services/intent_service.py",
@@ -113,6 +114,7 @@ def runtime_versions() -> dict[str, str]:
         ("reply_policy", "backend/app/agent/response_policy.py"),
         ("recovery_policy", "backend/app/agent/response_recovery.py"),
         ("read_completion", "backend/app/agent/read_completion.py"),
+        ("grounded_summary", "backend/app/agent/financial_summary.py"),
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]

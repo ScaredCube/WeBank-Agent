@@ -8,7 +8,9 @@ from typing import Any
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
-from app.agent.financial_summary import summarize_bill_comparison
+from app.agent.financial_summary import (
+    incomplete_bill_comparison, summarize_bill_comparison,
+)
 from app.agent.read_completion import completed_readonly_summary
 from app.agent.response_policy import (
     NoToolScope, ReplyRoute, classify_no_tool_request,
@@ -123,9 +125,14 @@ class AgentLoop:
                                 return
                         fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
                                               for name, result in tool_results)
+                        missing_evidence = incomplete_bill_comparison(
+                            tool_results, original_request or "",
+                        )
                         if fully_supported and len(tool_results) > 1:
                             summary = (summarize_bill_comparison(tool_results)
                                        or f"已完成 {len(tool_results)} 项查询，结果见下方。")
+                        elif missing_evidence is not None:
+                            summary = missing_evidence
                         else:
                             summary = "\n\n".join(
                                 ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
