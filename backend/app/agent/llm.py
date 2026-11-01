@@ -1,4 +1,5 @@
 import asyncio
+from secrets import token_bytes
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from functools import lru_cache
@@ -7,6 +8,17 @@ from typing import Any, Protocol
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+
+
+def _new_internal_tool_call_id() -> str:
+    """Opaque model call IDs are transport metadata, not trusted bank reference data.
+
+    Generate a random letter-only correlation ID so third-party numeric IDs cannot
+    collide with the account/phone redaction rules. The same generated ID is used
+    in assistant tool_calls and the matching tool response.
+    """
+    alphabet = "abcdefghijklmnop"
+    return "call_" + "".join(alphabet[byte >> 4] + alphabet[byte & 15] for byte in token_bytes(16))
 
 
 @dataclass
@@ -66,6 +78,7 @@ class OpenAIProvider:
         self._client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
+            default_headers=settings.llm_extra_headers or None,
             timeout=settings.llm_timeout,
         )
 
@@ -109,6 +122,10 @@ class OpenAIProvider:
                             slot["function"]["arguments"] += call.function.arguments
 
             if choice.finish_reason:
+                if tool_calls:
+                    for buffered in tool_calls.values():
+                        if buffered["id"]:
+                            buffered["id"] = _new_internal_tool_call_id()
                 yield LLMChunk(
                     finish_reason=choice.finish_reason,
                     tool_calls=list(tool_calls.values()) if tool_calls else None,

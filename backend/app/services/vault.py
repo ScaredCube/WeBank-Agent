@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time import utcnow
-from app.models import Account, AuditTokenContext, DataToken, Subscription, WealthProduct
+from app.models import Account, Contact, AuditTokenContext, DataToken, Subscription, WealthProduct
 from app.services.audit_service import record
 
 
@@ -72,6 +72,28 @@ def create_temporary(session: Session, user_id: int, kind: str, value: str, scop
     return token
 
 
+def encrypt_result_snapshot(payload: dict) -> tuple[str, str]:
+    """Encrypt trusted tool data at rest; do not log/serialize the ciphertext."""
+    keys, _ = _keys()
+    version = settings.data_encryption_key_version
+    ciphertext = Fernet(keys[version].encode()).encrypt(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    ).decode()
+    return ciphertext, version
+
+
+def decrypt_result_snapshot(ciphertext: str, version: str) -> dict:
+    try:
+        keys, _ = _keys()
+        key = keys[version]
+        payload = json.loads(Fernet(key.encode()).decrypt(ciphertext.encode()))
+        if not isinstance(payload, dict):
+            raise ValueError()
+        return payload
+    except (KeyError, ValueError, TypeError, InvalidToken):
+        raise VaultError() from None
+
+
 def create_account_token(session: Session, user_id: int, account_id: int) -> str:
     account = session.exec(select(Account).where(Account.id == account_id, Account.user_id == user_id,
                                                  Account.status == "active")).first()
@@ -83,6 +105,24 @@ def create_account_token(session: Session, user_id: int, account_id: int) -> str
         row = DataToken(user_id=user_id, kind="account", entity_id=account_id,
                         token=f"<CARD_{_random_reference()}>")
         session.add(row); session.flush()
+    return row.token
+
+
+def create_contact_token(session: Session, user_id: int, contact_id: int) -> str:
+    contact = session.exec(select(Contact).where(
+        Contact.id == contact_id, Contact.user_id == user_id, Contact.status == "active"
+    )).first()
+    if contact is None:
+        raise VaultError()
+    row = session.exec(select(DataToken).where(
+        DataToken.user_id == user_id, DataToken.kind == "contact",
+        DataToken.entity_id == contact_id, DataToken.revoked_at.is_(None)
+    )).first()
+    if row is None:
+        row = DataToken(user_id=user_id, kind="contact", entity_id=contact_id,
+                        token=f"<CONTACT_{_random_reference()}>")
+        session.add(row)
+        session.flush()
     return row.token
 
 
@@ -133,6 +173,15 @@ def resolve(session: Session, user_id: int, token: str, expected_kind: str, scop
             _audit(session, user_id, "token_resolve_denied", None, "denied")
             raise VaultError()
         value = account.id
+    elif row.kind == "contact":
+        contact = session.exec(select(Contact).where(
+            Contact.id == row.entity_id, Contact.user_id == user_id,
+            Contact.status == "active"
+        )).first()
+        if contact is None:
+            _audit(session, user_id, "token_resolve_denied", None, "denied")
+            raise VaultError()
+        value = contact.id
     elif row.kind == "product":
         product = session.get(WealthProduct, row.entity_id)
         if product is None or product.status != "available":

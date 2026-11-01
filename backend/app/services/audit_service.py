@@ -11,7 +11,7 @@ request_context: ContextVar[str | None] = ContextVar("audit_request", default=No
 conversation_context: ContextVar[int | None] = ContextVar("audit_conversation", default=None)
 
 EVENTS = frozenset({
-    "operation_prepare_retried",
+    "operation_prepare_retried", "demo_account_created",
     "tool_called", "tool_result", "risk_assessed", "transfer_prepared", "transfer_prepare_retried",
     "transfer_prepare_denied", "transfer_prepare_failed", "action_confirmed", "action_confirm_denied",
     "action_cancelled", "action_cancel_denied", "verification_started", "verification_start_denied",

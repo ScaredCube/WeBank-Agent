@@ -1,15 +1,17 @@
-﻿import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Eye,
   EyeOff,
   LoaderCircle,
   LockKeyhole,
-  ShieldCheck,
   UserRound,
 } from 'lucide-react'
 
-import { BrandMark } from '@/components/BrandMark'
+import { PenguinArt } from '@/features/theme/PenguinArt'
+import { MascotStage } from '@/features/theme/MascotStage'
+import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { MASCOT_NAME, MASCOT_SLOGAN } from '@/features/theme/brand'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/use-auth'
@@ -17,8 +19,8 @@ import { useAuth } from '@/lib/use-auth'
 export function LoginPage() {
   const { token, login } = useAuth()
   const navigate = useNavigate()
-  const [username, setUsername] = useState('demo')
-  const [password, setPassword] = useState('demo123')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -43,107 +45,79 @@ export function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1.08fr_1fr]">
-      <section className="relative hidden overflow-hidden bg-jade-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-36 -top-40 size-[520px] rounded-full bg-jade-600/25 blur-[130px]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-40 -left-24 size-[460px] rounded-full bg-jade-500/12 blur-[110px]"
-        />
-
+    <div className="grid min-h-dvh bg-canvas text-ink lg:grid-cols-[minmax(0,1fr)_minmax(440px,1fr)]">
+      <section aria-label="欢迎插画" className="relative hidden overflow-hidden border-r border-line bg-sidebar px-12 py-10 lg:flex lg:flex-col lg:justify-between">
         <div className="relative flex items-center gap-3">
-          <BrandMark className="size-10 rounded-xl bg-white/10 text-white ring-1 ring-white/15" />
-          <div>
-            <div className="text-[15px] font-medium tracking-wide">微众银行AI智能体</div>
-            <div className="text-[9.5px] uppercase tracking-[0.24em] text-white/40">
-              WeBank AI Agent
-            </div>
+          <PenguinArt pose="avatar" className="size-11" />
+          <div className="min-w-0">
+            <p className="text-[14px] font-semibold tracking-tight text-ink">{MASCOT_NAME}</p>
           </div>
         </div>
 
-        <div className="relative">
-          <h1 className="text-[46px] font-medium leading-[1.16] tracking-[-0.025em]">
-            说一句，
-            <br />
-            就把事办了。
-          </h1>
-          <p className="mt-6 max-w-[360px] text-[14.5px] leading-relaxed text-white/50">
-            从查账到转账，把复杂的流程留给我，你只需要说清楚想要什么。
-          </p>
+        <div className="relative mx-auto flex w-full max-w-[520px] flex-col items-start">
+          <h1 className="text-[clamp(2.4rem,3.25vw,3.6rem)] font-semibold leading-[1.23] tracking-[-0.055em] text-ink">{MASCOT_SLOGAN}</h1>
+          <div className="relative mx-auto -mb-6 mt-5">
+            <MascotStage showcase />
+          </div>
         </div>
-
-        <div className="relative flex items-center gap-2 text-[11.5px] text-white/35">
-          <ShieldCheck className="size-4" />
-          分级授权 · 全程留痕 · 可随时接管
-        </div>
+        <p className="relative text-[12px] leading-5 text-muted">模拟银行业务环境 · 操作结果以服务端记录为准</p>
       </section>
 
-      <section className="flex min-h-dvh items-center justify-center px-6 py-12">
-        <div className="w-full max-w-[360px]">
-          <div className="mb-10 flex items-center gap-3 lg:hidden">
-            <BrandMark className="size-10 rounded-xl" />
+      <section className="relative flex min-h-dvh flex-col px-6 py-8 sm:px-12 lg:px-16">
+        <header className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 lg:hidden">
+            <PenguinArt pose="avatar" className="size-10" />
+            <span className="text-sm font-semibold tracking-tight text-ink">{MASCOT_NAME}</span>
+          </div>
+          <ThemeToggle />
+        </header>
+
+        <div className="my-auto mx-auto w-full max-w-[380px] pb-12 pt-16 lg:py-12">
+          <h2 className="text-[32px] font-semibold tracking-[-0.04em] text-ink">欢迎回来</h2>
+          <p className="mt-2 text-sm leading-6 text-muted lg:hidden">{MASCOT_SLOGAN}</p>
+
+          <form className="mt-10 space-y-5" onSubmit={handleSubmit}>
             <div>
-              <div className="text-[15px] font-medium tracking-wide text-ink">微众银行AI智能体</div>
-              <div className="text-[9.5px] uppercase tracking-[0.24em] text-muted/60">
-                WeBank AI Agent
+              <label htmlFor="login-username" className="mb-2 block text-[13px] font-medium text-ink">账号</label>
+              <div className="relative">
+                <UserRound className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted/65" />
+                <Input id="login-username" value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  className="h-12 rounded-xl border-line bg-panel pl-11 text-[14px]"
+                />
               </div>
             </div>
-          </div>
 
-          <h2 className="text-[28px] font-medium tracking-tight text-ink">欢迎回来</h2>
-          <p className="mt-2 text-[13.5px] text-muted">登录后继续与你的 AI 管家对话</p>
-
-          <form className="mt-8 space-y-3.5" onSubmit={handleSubmit}>
-            <div className="relative">
-              <UserRound className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
-              <Input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="账号"
-                autoComplete="username"
-                className="h-12 rounded-xl pl-10 text-[14px]"
-              />
+            <div>
+              <label htmlFor="login-password" className="mb-2 block text-[13px] font-medium text-ink">密码</label>
+              <div className="relative">
+                <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted/65" />
+                <Input id="login-password" type={showPassword ? 'text' : 'password'}
+                  value={password} onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  className="h-12 rounded-xl border-line bg-panel pl-11 pr-12 text-[14px]"
+                />
+                <button type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                  title={showPassword ? '隐藏密码' : '显示密码'}
+                  className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-muted transition-colors hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700"
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
             </div>
 
-            <div className="relative">
-              <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted/55" />
-              <Input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="密码"
-                autoComplete="current-password"
-                className="h-12 rounded-xl pl-10 pr-11 text-[14px]"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((current) => !current)}
-                className="absolute right-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted/55 transition hover:bg-ink/5 hover:text-ink"
-              >
-                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                <span className="sr-only">{showPassword ? '隐藏密码' : '显示密码'}</span>
-              </button>
-            </div>
+            {error && <p role="alert" className="text-[13px] text-red-600">{error}</p>}
 
-            <p className="min-h-[18px] text-[12.5px] text-red-600">{error ?? ''}</p>
-
-            <Button
-              type="submit"
-              disabled={loading || !username.trim() || !password}
-              className="h-12 w-full rounded-xl text-[14.5px]"
-            >
+            <Button type="submit" disabled={loading || !username.trim() || !password}
+              className="mt-3 h-12 w-full rounded-xl text-[14px] font-semibold">
               {loading && <LoaderCircle className="size-4 animate-spin" />}
               {loading ? '正在登录' : '登录'}
             </Button>
           </form>
-
-          <p className="mt-7 text-center text-[11.5px] text-muted/60">
-            演示账号{' '}
-            <span className="font-mono text-ink/55">demo / demo123</span>
-          </p>
+          <p className="mt-8 text-center text-xs text-muted lg:hidden">模拟银行业务环境</p>
         </div>
       </section>
     </div>

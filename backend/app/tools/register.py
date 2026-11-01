@@ -5,7 +5,7 @@ from app.tools.account_tools import (
 from app.tools.transfer_tools import TransferArguments, prepare_transfer_tool
 from app.tools.bill_tools import MonthlyBillArguments, get_monthly_bill
 from app.tools.calculator_tools import CalculateArguments, calculate
-from app.tools.card_tools import CardArguments, get_card_status, prepare_card_loss
+from app.tools.card_tools import CardArguments, CardStatusArguments, get_card_status, prepare_card_loss
 from app.tools.wealth_tools import (
     WealthHoldingArguments, WealthPrepareArguments, WealthProductArguments, WealthRiskArguments,
     get_wealth_holdings, get_wealth_products, get_wealth_risk_profile,
@@ -24,7 +24,7 @@ def create_readonly_registry() -> ToolRegistry:
         ("get_account_balance", "查询当前用户的模拟账户余额", BalanceArguments, get_account_balance),
         ("list_recent_transactions", "查询当前用户模拟账户的最近交易", TransactionArguments, list_recent_transactions),
         ("get_monthly_bill", "分析当前用户模拟账户的月度收支、消费分类及需核对的重复消费；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
-        ("get_card_status", "查询本人模拟卡片状态", CardArguments, get_card_status),
+        ("get_card_status", "查询本人模拟卡片状态；引用指定卡片时同时传入 account_token 和 card_id", CardStatusArguments, get_card_status),
         ("get_wealth_products", "查询可申购的模拟理财产品及参考年化、风险等级和起购金额", WealthProductArguments, get_wealth_products),
         ("get_wealth_holdings", "查询本人模拟理财持仓和昨日收益", WealthHoldingArguments, get_wealth_holdings),
         ("get_wealth_risk_profile", "查询本人模拟理财风险测评等级", WealthRiskArguments, get_wealth_risk_profile),

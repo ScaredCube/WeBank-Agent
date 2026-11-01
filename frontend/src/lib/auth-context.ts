@@ -5,6 +5,7 @@ import type { User } from '@/lib/api'
 export interface AuthContextValue {
   token: string | null
   user: User | null
+  sessionVersion: number
   login: (username: string, password: string) => Promise<User>
   logout: () => void
 }

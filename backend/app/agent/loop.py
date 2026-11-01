@@ -7,6 +7,10 @@ from typing import Any
 from app.agent.guard import GuardProvider, GuardVerdict, build_guard_call, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.financial_summary import summarize_bill_comparison
+from app.agent.read_completion import completed_readonly_summary
+from app.agent.response_policy import tool_free_reply
+from app.schemas.card_results import from_card_tool_result
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
 from app.risk.engine import assess_tool
@@ -40,7 +44,14 @@ class AgentLoop:
         self.llm = llm or get_llm()
         self.guard = guard if guard is not None else get_guard()
 
-    async def stream(self, history: list[dict[str, str]], user_id: int) -> AsyncIterator[AgentEvent]:
+    async def stream(self, history: list[dict[str, str]], user_id: int,
+                     verified_account_token: str | None = None,
+                     verified_card_id: int | None = None,
+                     verified_contact_token: str | None = None,
+                     verified_recipient_name: str | None = None,
+                     verified_transfer_amount_fen: int | None = None,
+                     has_selected_contact: bool = False,
+                     context_readonly_only: bool = False) -> AsyncIterator[AgentEvent]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         registry = create_agent_registry()
@@ -58,16 +69,39 @@ class AgentLoop:
                         tool_calls = chunk.tool_calls
                 if not tool_calls:
                     if tool_results:
-                        yield AgentEvent("delta", {"text": "\n\n".join(
-                            render_tool_result(name, result) for name, result in tool_results
-                        )})
+                        fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
+                                              for name, result in tool_results)
+                        if fully_supported and len(tool_results) > 1:
+                            summary = (summarize_bill_comparison(tool_results)
+                                       or f"已完成 {len(tool_results)} 项查询，结果见下方。")
+                        else:
+                            summary = "\n\n".join(
+                                ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
+                                 else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
+                                 else render_tool_result(name, result))
+                                for name, result in tool_results)
+                        yield AgentEvent("delta", {"text": summary})
                     else:
-                        # Model text is untrusted: without a tool result it cannot
-                        # establish any account, amount or transaction claim.
                         if getattr(self.llm, "mode", None) == "mock":
                             text = "当前是演示模式，离线 Mock 不会调用银行工具。"
                         else:
-                            text = "未能通过工具完成查询或准备模拟转账。请检查请求后重试；其他银行业务暂未开放。"
+                            # Model free text is useful for greetings, explaining
+                            # capabilities and asking for missing parameters.
+                            # A response without an authenticated Tool result
+                            # must never assert bank balances or executed actions.
+                            # Scope is derived from the user's current message,
+                            # never from an LLM's assertion that it used a bank Tool.
+                            latest_request = next(
+                                (str(item.get("content") or "") for item in reversed(history)
+                                 if item.get("role") == "user"), ""
+                            )
+                            text = tool_free_reply(
+                                "".join(content), user_request=latest_request,
+                                financial_context=bool(
+                                    verified_account_token or verified_card_id
+                                    or verified_contact_token or has_selected_contact
+                                ),
+                            )
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
@@ -99,6 +133,37 @@ class AgentLoop:
                         result = {"ok": False, "data": None, "error": "查询参数无效"}
                     else:
                         argument_error = validate_tool_arguments(spec, args)
+                        # Account binding comes ONLY from the authenticated route's
+                        # ownership check. The model chooses the read-only tool and month,
+                        # but cannot forge, truncate or swap the selected account token.
+                        # Invalid tool fields still fail the existing whitelist check.
+                        if (argument_error is None and verified_account_token is not None
+                                and spec is not None and spec.name == "get_monthly_bill"):
+                            args["account_token"] = verified_account_token
+                        if (argument_error is None and verified_account_token is not None
+                                and verified_card_id is not None and spec is not None
+                                and spec.name == "get_card_status"):
+                            # Both fields come from the authenticated card-to-account join.
+                            # Never trust an unverified model-supplied card ID or token.
+                            args["account_token"] = verified_account_token
+                            args["card_id"] = verified_card_id
+                        if argument_error is None and spec is not None and spec.name == "prepare_transfer" and has_selected_contact:
+                            if (verified_account_token is None or verified_contact_token is None
+                                    or verified_recipient_name is None or verified_transfer_amount_fen is None):
+                                argument_error = "请明确填写本次转账金额并核对所选账户和联系人"
+                            elif (type(args.get("amount_fen")) is not int
+                                    or args["amount_fen"] != verified_transfer_amount_fen):
+                                argument_error = "模型金额与用户请求不一致，请核对后重新提交"
+                            else:
+                                # Model chooses the operation, but neither the amount
+                                # nor the payer/payee identity can be silently changed.
+                                args.pop("target_token", None)
+                                args["source_token"] = verified_account_token
+                                args["recipient_contact_token"] = verified_contact_token
+                                args["recipient_name"] = verified_recipient_name
+                        if (argument_error is None and context_readonly_only
+                                and spec is not None and spec.name in _PREPARE_TOOLS):
+                            argument_error = "请在本轮明确选择金融对象后再准备操作"
                         guard_blocked = None
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):
@@ -182,10 +247,24 @@ class AgentLoop:
                         record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool,
                                           result="denied", reason_code=rejection_reason)
                     result = mask_value(result)
+                    # Trusted, user-scoped data produced by the existing GREEN tool,
+                    # not a chart or financial claim authored by the language model.
+                    if spec is not None and spec.name == "get_monthly_bill" and result.get("ok") and isinstance(result.get("data"), dict):
+                        yield AgentEvent("bill_result", {"data": result["data"]})
+                    if spec is not None and spec.name == "get_card_status" and result.get("ok"):
+                        safe_snapshot = from_card_tool_result(result.get("data"))
+                        yield AgentEvent("card_result", {"data": safe_snapshot.model_dump()})
                     messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
                                      "content": json.dumps(result, ensure_ascii=False)})
                     tool_results.append((function["name"], result))
                     prior_calls.append(f"{function['name']}:{'success' if result.get('ok') else 'denied'}")
+                # When the requested verified read-only results are already complete,
+                # the server can finish deterministically. A further model round may
+                # otherwise produce redundant/unsafe tool calls without new value.
+                final_readonly_text = completed_readonly_summary(history, tool_results)
+                if final_readonly_text is not None:
+                    yield AgentEvent("delta", {"text": final_readonly_text})
+                    return
         except Exception:
             yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
             return

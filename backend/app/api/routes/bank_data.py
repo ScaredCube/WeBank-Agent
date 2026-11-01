@@ -1,7 +1,12 @@
 """Frontend-only bank data read model. Never registered as an Agent tool."""
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, HTTPException, status
 
 from app.api.deps import CurrentUser, SessionDep, security_gate
+from app.core.config import settings
+from app.models import Account
+from app.services.audit_service import record
+from sqlmodel import select
+from pydantic import BaseModel, Field
 from app.schemas.bank_data import BankAccountData, BankContactData, BankDashboardData
 from app.schemas.subscriptions import SubscriptionCandidateData, SubscriptionData
 from app.schemas.wealth import WealthHoldingData, WealthProductData, WealthRiskProfileData
@@ -18,6 +23,32 @@ def read_accounts(
 ) -> list[BankAccountData]:
     response.headers["Cache-Control"] = "no-store"
     return [BankAccountData.model_validate(item) for item in list_account_overview(session, user.id)]
+
+
+class CreateDemoAccount(BaseModel):
+    name: str = Field(min_length=2, max_length=24, pattern=r"^[一-鿿A-Za-z0-9 _-]+$")
+
+
+@router.post("/accounts/demo", response_model=BankAccountData, status_code=status.HTTP_201_CREATED)
+def create_demo_account(payload: CreateDemoAccount, response: Response,
+                        session: SessionDep, user: CurrentUser) -> BankAccountData:
+    """Opt-in synthetic account only; never an actual bank onboarding endpoint."""
+    if not settings.debug:
+        raise HTTPException(status_code=404, detail="模拟开户未开放")
+    existing = session.exec(select(Account).where(Account.user_id == user.id)).all()
+    if len(existing) >= 8:
+        raise HTTPException(status_code=409, detail="模拟账户数量已达上限")
+    account = Account(user_id=user.id, name=payload.name.strip(),
+                      masked_number="**** 待生成", currency="CNY", balance_fen=0)
+    session.add(account)
+    session.flush()
+    account.masked_number = f"**** {account.id:04d}"
+    session.add(account)
+    record(session, user_id=user.id, event_type="demo_account_created", result="success")
+    session.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return BankAccountData.model_validate(next(item for item in list_account_overview(session, user.id)
+                                               if item["account_id"] == account.id))
 
 
 @router.get("/contacts", response_model=list[BankContactData])

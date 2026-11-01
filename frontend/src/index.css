@@ -1,27 +1,82 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+  --font-sans: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
     ui-sans-serif, system-ui, sans-serif;
 
-  --color-canvas: #f7f6f2;
-  --color-panel: #fdfdfb;
-  --color-ink: #141a16;
-  --color-muted: #6f7773;
-  --color-line: #e6e4dc;
+  --color-canvas: #ffffff;
+  --color-panel: #ffffff;
+  --color-sidebar: #f7faf8;
+  --color-workspace: #f8faf9;
+  --color-message-user: #eef3f0;
+  --color-ink: #142923;
+  --color-muted: #64766f;
+  --color-line: #e1eae5;
 
-  --color-jade-50: #eef7f2;
-  --color-jade-100: #dcefe6;
-  --color-jade-200: #b9dfce;
-  --color-jade-300: #8bcbb2;
-  --color-jade-400: #4bad8a;
-  --color-jade-500: #1a8a63;
-  --color-jade-600: #107a57;
-  --color-jade-700: #0b5f45;
-  --color-jade-800: #0c4a37;
-  --color-jade-900: #0a2a20;
-  --color-jade-950: #071d16;
+  --color-jade-50: #eff6f2;
+  --color-jade-100: #deede6;
+  --color-jade-200: #c3ded2;
+  --color-jade-300: #97c2b0;
+  --color-jade-400: #69a087;
+  --color-jade-500: #3e8067;
+  --color-jade-600: #24715a;
+  --color-jade-700: #0d6250;
+  --color-jade-800: #075346;
+  --color-jade-900: #06443a;
+  --color-jade-950: #04372f;
 }
+
+
+/* Theme tokens are the single source of truth. Brand colors follow the active theme. */
+:root[data-theme="dark"] {
+  --color-canvas: #101716;
+  --color-panel: #151e1c;
+  --color-sidebar: #111917;
+  --color-workspace: #16211d;
+  --color-message-user: #263a32;
+  --color-ink: #e8f0ec;
+  --color-muted: #a8b9b1;
+  --color-line: #34423c;
+
+  --color-jade-50: #1b3029;
+  --color-jade-100: #244438;
+  --color-jade-200: #315f4c;
+  --color-jade-300: #43836a;
+  --color-jade-400: #69b695;
+  --color-jade-500: #84c9a8;
+  --color-jade-600: #9bdbba;
+  --color-jade-700: #a7e5c4;
+  --color-jade-800: #b5f0ce;
+  --color-jade-900: #d0f8e0;
+  --color-jade-950: #e4fff1;
+}
+
+/* Legacy surfaces are gradually replaced with semantic tokens. These scoped
+   selectors keep existing banking components readable while that migration continues. */
+:root[data-theme="dark"] .bank-app .bg-white {
+  background-color: var(--color-panel);
+}
+:root[data-theme="dark"] .bank-app .text-white {
+  color: #ffffff;
+}
+:root[data-theme="dark"] .bank-app .bg-ink\/5 {
+  background-color: color-mix(in srgb, var(--color-ink) 9%, transparent);
+}
+:root[data-theme="dark"] .bank-app .border-\[\#dce5df\] {
+  border-color: var(--color-line);
+}
+:root[data-theme="dark"] .bank-app .border-\[\#e1eae5\] {
+  border-color: var(--color-line);
+}
+:root[data-theme="dark"] .bank-app .text-red-700 {
+  color: #ff9b9b;
+}
+:root[data-theme="dark"] .bank-app .text-ink\/80 {
+  color: color-mix(in srgb, var(--color-ink) 80%, transparent);
+}
+
+.ip-hero { filter: drop-shadow(0 16px 16px rgba(15, 33, 27, 0.06)); }
+:root[data-theme="dark"] .ip-hero { filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.18)); }
 
 @layer base {
   *,
@@ -50,6 +105,10 @@
     background-color: var(--color-jade-200);
     color: var(--color-jade-950);
   }
+
+  :focus-visible {
+    outline-color: var(--color-jade-700);
+  }
 }
 
 @layer components {
@@ -72,9 +131,18 @@
     background: transparent;
   }
 
+  .chat-composer-input {
+    resize: none;
+    scrollbar-width: none;
+  }
+
+  .chat-composer-input::-webkit-scrollbar {
+    display: none;
+  }
+
   .markdown {
-    font-size: 15px;
-    line-height: 1.78;
+    font-size: 16px;
+    line-height: 1.7;
     color: var(--color-ink);
     word-break: break-word;
   }
@@ -251,4 +319,131 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Theme-specific contrast polish for existing navigation and banking surfaces. */
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] {
+  background: #121b19;
+  color: #e8f1eb;
+}
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] button:not(:disabled) {
+  color: #d5e7de;
+}
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] [aria-current] {
+  color: #e6f6ea;
+  background: #244338;
+}
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] button:hover {
+  background: #29473c;
+}
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] p,
+:root[data-theme="dark"] .bank-app aside[aria-label="导航栏"] h2 {
+  color: #acbdb4;
+}
+:root[data-theme="dark"] .bank-app input,
+:root[data-theme="dark"] .bank-app textarea,
+:root[data-theme="dark"] .bank-app select {
+  color: #ebf3ee;
+}
+:root[data-theme="dark"] .bank-app input::placeholder,
+:root[data-theme="dark"] .bank-app textarea::placeholder {
+  color: #aabbb3;
+}
+
+/* Tailwind may fold static @theme colors into utilities. Re-bind semantic
+   background utilities to runtime theme tokens for live dark-mode switches. */
+:root[data-theme="dark"] .bg-panel,
+:root[data-theme="dark"] .bg-white { background-color: var(--color-panel); }
+:root[data-theme="dark"] .bg-sidebar { background-color: var(--color-sidebar); }
+:root[data-theme="dark"] .bg-canvas { background-color: var(--color-canvas); }
+:root[data-theme="dark"] .bg-jade-50 { background-color: var(--color-jade-50); }
+:root[data-theme="dark"] .bg-jade-100 { background-color: var(--color-jade-100); }
+:root[data-theme="dark"] .bg-jade-50\/40 { background-color: color-mix(in srgb, var(--color-jade-50) 40%, transparent); }
+:root[data-theme="dark"] .bg-jade-50\/50 { background-color: color-mix(in srgb, var(--color-jade-50) 50%, transparent); }
+:root[data-theme="dark"] .bg-jade-50\/60 { background-color: color-mix(in srgb, var(--color-jade-50) 60%, transparent); }
+:root[data-theme="dark"] .bg-jade-50\/65 { background-color: color-mix(in srgb, var(--color-jade-50) 65%, transparent); }
+
+/* IP visual language: small supporting shapes, not full-page illustrations. */
+:root {
+  --ip-stage-wash: #edf6f3;
+  --ip-stage-accent: #e87672;
+  --ip-card-active: #eaf5ee;
+}
+:root[data-theme="dark"] {
+  --ip-stage-wash: #21372f;
+  --ip-stage-accent: #8bbcf4;
+  --ip-card-active: #20392f;
+}
+.ip-stage__mascot {
+  transform-origin: 50% 72%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ip-stage__mascot {
+    transition: transform 480ms cubic-bezier(.2,.8,.2,1);
+  }
+  .bank-home:focus-within .ip-stage__mascot {
+    transform: translateY(-4px) rotate(-3deg);
+  }
+}
+
+/* One small agent motion vocabulary; no fake progress or looping page movement. */
+@keyframes agent-gentle-bob {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50% { transform: translateY(-3px) rotate(1deg); }
+}
+@keyframes agent-working-beat {
+  0%, 65%, 100% { opacity: .35; transform: scale(.8); }
+  32% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-working-character { animation: agent-gentle-bob 2.5s ease-in-out infinite; }
+  .agent-working-dot { animation: agent-working-beat 1.3s ease-in-out infinite; }
+  .agent-working-dot:nth-child(2) { animation-delay: 140ms; }
+  .agent-working-dot:nth-child(3) { animation-delay: 280ms; }
+}
+
+/* Financial authorization must remain legible in both themes.
+   Dark mode uses a light green action surface with dark ink. */
+:root[data-theme="dark"] .bank-action-dialog .bank-action-primary {
+  color: #10251d;
+}
+:root[data-theme="dark"] .bank-action-dialog .action-journey-done {
+  color: #10251d;
+}
+:root[data-theme="dark"] .bank-action-dialog .action-caution {
+  background-color: #362f21;
+  color: #f7dba4;
+}
+:root[data-theme="dark"] .bank-action-dialog .action-caution .text-muted {
+  color: #d6c3a6;
+}
+
+/* The new color theme opens as a circular curtain from the small corner icon.
+   The old snapshot remains still, avoiding the browser's default whole-page fade. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+  ::view-transition-old(root) { z-index: 1; }
+  ::view-transition-new(root) { z-index: 2; }
+}
+
+/* Subtle feedback for the adjustable seams, never movement detached from the pointer. */
+.bank-app [role="separator"][aria-orientation="vertical"] svg {
+  transition: color 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+}
+.bank-app [role="separator"][aria-orientation="vertical"]:is(:hover, :focus-visible) svg {
+  transform: scale(1.14);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bank-reference-source { transition: translate 280ms cubic-bezier(.2,.8,.2,1); }
+  .bank-reference-source:hover { translate: 0 -2px; }
+  .bank-reference-source:active { translate: 0 0; }
 }

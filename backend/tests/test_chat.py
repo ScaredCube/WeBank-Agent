@@ -188,7 +188,7 @@ def test_chat_does_not_display_model_bank_claim_without_tool(client, auth_header
     content = _sse_payloads(response.text)[-1]["message"]["content"]
     assert "一百万" not in content
     assert "转账已经成功" not in content
-    assert "未能通过工具完成查询" in content
+    assert "尚未完成" in content or "还没有查到" in content
 
 
 def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, caplog):

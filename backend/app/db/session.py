@@ -17,8 +17,13 @@ def get_engine() -> Engine:
 
 def init_db() -> None:
     from app import models  # noqa: F401
+    from app.db.schema_guard import ensure_existing_chat_schema
 
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    # Do not silently create missing Agent chat tables in an existing database.
+    # A truly empty database can bootstrap for local synthetic development.
+    ensure_existing_chat_schema(engine)
+    SQLModel.metadata.create_all(engine)
 
 
 def get_session() -> Iterator[Session]:

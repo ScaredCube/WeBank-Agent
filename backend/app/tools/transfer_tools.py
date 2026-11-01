@@ -14,6 +14,7 @@ class TransferArguments(BaseModel):
     source_token: str | None = None
     recipient_name: str = Field(min_length=1, max_length=80)
     target_token: str | None = None
+    recipient_contact_token: str | None = None
     amount_fen: int = Field(gt=0, le=100_000_000_000, description="模拟转账金额，单位为分")
     note: str = Field(default="", max_length=120)
 
@@ -28,7 +29,8 @@ async def prepare_transfer_tool(*, user_id: int, **arguments: object) -> dict:
             "idempotency_key": agent_preparation_key("transfer"),
         })
         result = prepare_transfer(user_id, payload, source_token=args.source_token,
-                                  target_token=args.target_token, model_request=True)
+                                  target_token=args.target_token,
+                                  recipient_contact_token=args.recipient_contact_token, model_request=True)
         with session_scope() as session:
             action = get_pending_action(session, user_id=user_id, action_id=result["action_id"])
         if action is None or result["confirmation_token"] is None:

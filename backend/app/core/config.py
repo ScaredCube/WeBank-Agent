@@ -48,9 +48,12 @@ class Settings(BaseSettings):
     # Fixed code is solely for local demonstration; verification is disabled unless DEBUG=true.
     demo_verification_code: str = Field(default="123456", pattern=r"^[0-9]{6}$")
 
-    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_base_url: str = "https://tokendance.space/gateway/v1"
     llm_api_key: str = ""
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "deepseek-v4.1-flash-1017"
+    # Additional provider-specific HTTP headers, supplied as a JSON object in .env.
+    # Authorization: Bearer is automatically handled by AsyncOpenAI via llm_api_key.
+    llm_extra_headers: dict[str, str] = Field(default_factory=dict)
     llm_timeout: float = 60.0
     llm_max_history: int = 20
 

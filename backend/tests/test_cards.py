@@ -145,7 +145,11 @@ def test_card_tools_status_and_loss_event(client, auth_headers, monkeypatch):
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers,
                            json={"content": "查询卡片状态"})
-    assert "正常" in response.text and "伪造卡片状态" not in response.text
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert events[0]["type"] == "card_result"
+    assert events[0]["data"]["cards"][0]["status"] == "active"
+    assert "account_token" not in response.text and "<CARD_" not in response.text
+    assert "伪造卡片状态" not in response.text
 
     class LossLLM:
         async def stream(self, messages, tools=None):
@@ -182,8 +186,9 @@ def test_chat_card_status_shows_account_status(client, auth_headers, monkeypatch
     response = client.post(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers,
                            json={"content": "查询卡片状态"})
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert "卡片状态：正常" in events[-1]["message"]["content"]
-    assert f"账户状态：{expected}" in events[-1]["message"]["content"]
+    assert events[0]["type"] == "card_result"
+    assert events[0]["data"]["cards"][0]["status"] == "active"
+    assert events[0]["data"]["cards"][0]["account_status"] == account_state
 
 
 @pytest.mark.parametrize("first", ["loss", "transfer"])
@@ -263,3 +268,93 @@ def test_multiple_verified_loss_requests_only_one_succeeds(client, auth_headers)
         logs = session.exec(select(AuditLog)).all()
         assert len([e for e in logs if e.event_type == "card_loss_completed" and e.result == "success"]) == 1
         assert any(e.event_type == "card_loss_denied" and e.action_id == second["action_id"] for e in logs)
+
+
+def test_selected_card_status_is_exact_and_persisted_without_token(client, auth_headers, monkeypatch):
+    from app.models import MessageResult
+    from app.services.vault import decrypt_result_snapshot
+    from app.schemas.card_results import CardStatusSnapshot
+    from app.services.card_service import list_cards
+    from app.services.vault import create_account_token
+
+    with Session(get_engine()) as session:
+        account = session.get(Account, 1)
+        selected = session.exec(select(Card).where(Card.account_id == account.id)).one()
+        selected.status = "lost"
+        session.add(selected)
+        another = Account(user_id=account.user_id, name="另一个账户",
+                          masked_number="**** 9999", currency="CNY", balance_fen=600000, status="active")
+        session.add(another)
+        session.flush()
+        session.add(Card(account_id=another.id, status="active"))
+        session.commit()
+        selected_id = selected.id
+        account_token = create_account_token(session, account.user_id, account.id)
+        session.commit()
+        all_rows = list_cards(session, account.user_id)
+        selected_rows = list_cards(session, account.user_id, account_token, selected_id)
+        assert len(all_rows) == 2
+        assert len(selected_rows) == 1 and selected_rows[0]["card_id"] == selected_id
+
+    class FakeLLM:
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                import re
+                text = messages[-1]["content"]
+                expected_id = int(re.search(r"card_id=(\d+)", text).group(1))
+                token = re.search(r"<CARD_[A-Za-z]{32}>", text).group()
+                assert expected_id == selected_id
+                yield LLMChunk(tool_calls=[{"id": "selected-status", "type": "function", "function": {
+                    "name": "get_card_status",
+                    "arguments": "{}"}}])  # Model omitted filters; the server must narrow the result.
+            else:
+                yield LLMChunk(content="模型杜撰的银行卡状态不会被采用。")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    url = f"/api/chat/conversations/{conversation}/messages"
+    response = client.post(url, headers=auth_headers, json={
+        "content": "查询我选中的这张银行卡",
+        "references": [{"kind": "card", "id": selected_id}]})
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert [item["type"] for item in events] == ["card_result", "delta", "done"]
+    saved = events[-1]["message"]
+    assert saved["card_result"] == {"cards": [{
+        "card_id": selected_id,
+        "account_name": account.name, "masked_number": account.masked_number,
+        "status": "lost", "account_status": "active"}]}
+    assert "account_token" not in response.text and "<CARD_" not in response.text
+
+    with Session(get_engine()) as session:
+        row = session.exec(select(MessageResult)).one()
+        assert row.kind == "card_status" and row.message_id == saved["id"]
+        assert "lost" not in row.ciphertext
+        assert "account_token" not in row.ciphertext
+        assert CardStatusSnapshot.model_validate(decrypt_result_snapshot(
+            row.ciphertext, row.key_version)).model_dump() == saved["card_result"]
+
+    history = client.get(url, headers=auth_headers)
+    assert history.status_code == 200 and history.headers["cache-control"] == "no-store"
+    assert history.json()[-1]["card_result"] == saved["card_result"]
+    assert history.json()[0]["card_result"] is None
+
+
+def test_card_snapshot_rejects_extra_tokens_and_invalid_fields():
+    from app.schemas.card_results import CardStatusSnapshot, from_card_tool_result
+    from pydantic import ValidationError
+
+    sanitized = from_card_tool_result([{
+        "card_id": 1, "account_name": "test", "masked_number": "**** 0001",
+        "status": "active", "account_status": "active",
+        "account_token": "<CARD_synthetic>", "unsafe_extra": "MUST_NOT_APPEAR"}])
+    assert "account_token" not in sanitized.model_dump_json()
+    assert "MUST_NOT_APPEAR" not in sanitized.model_dump_json()
+    with pytest.raises(ValidationError):
+        CardStatusSnapshot.model_validate({"cards": [{
+            "card_id": 1, "account_name": "test", "masked_number": "****",
+            "status": "active", "account_status": "active",
+            "account_token": "<CARD_synthetic>"}]})
