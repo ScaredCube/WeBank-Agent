@@ -19,7 +19,8 @@ from app.services.audit_service import TOOLS, record, record_separately
 from app.services.redaction import mask_text, mask_value
 from app.services.security_service import record_failure
 
-logger = logging.getLogger(__name__)
+# Preserve the existing risk-decision logger category for audit consumers.
+logger = logging.getLogger("app.agent.loop")
 
 # Server-validated intent is an instruction about *which* operation is authorized
 # for this request. Tool arguments cannot change its source/target or amount.
