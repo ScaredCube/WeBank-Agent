@@ -8,6 +8,7 @@ from typing import Any
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
+from app.agent.compound_read_summary import summarize_transaction_subscription_review
 from app.agent.financial_summary import (
     incomplete_bill_comparison, summarize_bill_comparison,
 )
@@ -128,7 +129,17 @@ class AgentLoop:
                         missing_evidence = incomplete_bill_comparison(
                             tool_results, original_request or "",
                         )
-                        if fully_supported and len(tool_results) > 1:
+                        compound_summary = summarize_transaction_subscription_review(
+                            tool_results, user_request=original_request or "",
+                        )
+                        if compound_summary is not None:
+                            # The summary states coverage and evidence limits.
+                            # Preserve the exact verified transaction details below.
+                            summary = compound_summary + "\n\n" + "\n\n".join(
+                                render_tool_result(name, result)
+                                for name, result in tool_results
+                            )
+                        elif fully_supported and len(tool_results) > 1:
                             summary = (summarize_bill_comparison(tool_results)
                                        or f"已完成 {len(tool_results)} 项查询，结果见下方。")
                         elif missing_evidence is not None:
