@@ -88,6 +88,32 @@ def test_safe_clarification_is_not_replaced_by_fixed_script(
     assert all(e["type"] not in {"action_required", "operation_result"} for e in events)
 
 
+def test_natural_prefixed_clarification_avoids_second_model_call(
+    client, auth_headers, monkeypatch,
+):
+    class PrefixedQuestionModel:
+        mode = "openai"
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            assert self.calls == 1, "Valid safe clarification should skip Recovery"
+            yield LLMChunk(content="可以的。请问你想从哪个账户转账？")
+
+    model = PrefixedQuestionModel()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
+    cid = client.post(
+        "/api/chat/conversations", json={}, headers=auth_headers,
+    ).json()["id"]
+    events = _events(client.post(
+        f"/api/chat/conversations/{cid}/messages",
+        json={"content": "我想转账"}, headers=auth_headers,
+    ))
+    assert model.calls == 1
+    assert [e["type"] for e in events] == ["delta", "done"]
+    assert events[-1]["message"]["content"] == "可以的。请问你想从哪个账户转账？"
+
+
 def test_live_recovery_only_adds_bounded_question_without_bank_tools(
     client, auth_headers, monkeypatch,
 ):

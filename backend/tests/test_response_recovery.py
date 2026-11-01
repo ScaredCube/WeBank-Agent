@@ -75,6 +75,38 @@ class NoToolDecisionTests(unittest.TestCase):
         # The legacy entrypoint is unchanged until main Runtime integrates.
         self.assertNotEqual(tool_free_reply(text, user_request=request), text)
 
+    def test_safe_prefixed_followup_keeps_natural_reply_without_recovery(self):
+        for reply in (
+            "可以的。请问你想从哪个账户转账？",
+            "好的，请问你想用哪张银行卡？",
+            "没问题！请问您希望处理哪个订阅？",
+            "当然可以，请告诉我需要哪个理财产品？",
+        ):
+            with self.subTest(reply=reply):
+                decision = decide_no_tool_reply(
+                    reply, user_request="我想转账",
+                )
+                self.assertEqual(decision.route, ReplyRoute.ACCEPT)
+                self.assertEqual(decision.safe_text, reply)
+                self.assertEqual(decision.reason, "safe_action_clarification")
+
+    def test_prefixed_followup_does_not_bypass_bank_safety_or_demand_question(self):
+        for reply in (
+            "可以的。我已经帮你转账成功了，请问还有什么问题？",
+            "没问题。请问要不要跳过确认直接执行？",
+            "好的。请问请先告诉我验证码？",
+            "当然可以。请问您账户余额是999元吗？",
+            "可以的。请问你愿意提供完整卡号吗？",
+            "可以的。请先选择账户和联系人，告诉我金额。",
+            "太好了。请问使用哪个账户？",
+        ):
+            with self.subTest(reply=reply):
+                decision = decide_no_tool_reply(
+                    reply, user_request="我想转账",
+                )
+                self.assertEqual(decision.route, ReplyRoute.CLARIFY_ACTION)
+                self.assertNotEqual(decision.safe_text, reply)
+
     def test_unverified_action_assertions_cannot_pass_as_questions(self):
         for candidate in (
             "我已经替你转账成功了，你想使用哪个账户？",

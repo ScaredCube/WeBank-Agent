@@ -246,6 +246,9 @@ _UNVERIFIED_PROGRESS = re.compile(
     r"绕过|跳过|无需确认|不用确认|无需验证|免验证|无需核对|直接执行|"
     r"无需授权|不必授权|验证码|密码|完整卡号)"
 )
+_SAFE_CLARIFICATION_OPENER = re.compile(
+    r"^(?:可以的|当然可以|好的|没问题|好呀|当然|可以)[，,。！!]\s*"
+)
 _CLARIFICATION_CUES = (
     "账户", "银行卡", "联系人", "收款人", "金额", "附言",
     "哪一", "哪个", "哪张", "谁", "多少", "订阅", "理财产品",
@@ -266,7 +269,11 @@ def safe_action_clarification(candidate: str) -> bool:
             or not text.endswith(("？", "?"))
             or text.count("？") + text.count("?") != 1):
         return False
-    if not text.startswith((
+    # Accept a short conversational acknowledgement before an otherwise
+    # valid question. Run every financial-claim and safety check on the WHOLE
+    # text below; the prefix cannot waive those constraints.
+    question = _SAFE_CLARIFICATION_OPENER.sub("", text, count=1)
+    if not question.startswith((
         "请问", "请告诉我", "请先", "你想", "您想", "你希望", "您希望",
         "需要", "想用", "哪", "哪个", "哪张", "想从",
     )):

@@ -1,5 +1,5 @@
 {
-  "source_revision": "87a0d9d54fa1dd5150569f8375b543d70e48a200",
+  "source_revision": "ba9d36aa991562b65e8da242dac88adf4c32c95d",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
@@ -15,6 +15,9 @@
     "agent:purchase": "agent:293f98322a40e2ce",
     "agent:redeem": "agent:99b476628139c9cc",
     "agent:convert": "agent:67b9da4bc7f8c6ba",
-    "tools": "tools:2b40e468b5c5436a"
+    "tools": "tools:2b40e468b5c5436a",
+    "reply_policy": "reply_policy:151e5a792f70e031",
+    "recovery_policy": "recovery_policy:1614c9f9d00ace67",
+    "read_completion": "read_completion:6e2412d31ecbbedc"
   }
 }
