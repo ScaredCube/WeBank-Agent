@@ -52,7 +52,7 @@ class MockProvider:
         )
         snippet = last_user.strip().replace("\n", " ")[:24]
         if not snippet:
-            return "你好，我是微众银行AI。当前运行在演示模式，随时可以开始对话。"
+            return "你好，我是小We。当前是演示模式，可以陪你了解银行功能和使用流程。"
         return (
             f"收到你说的「{snippet}」。当前是演示模式，离线 Mock 不会调用银行工具，"
             "只能用于测试对话链路。转账、账单分析和卡片管理尚未开放。"

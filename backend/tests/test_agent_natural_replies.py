@@ -69,8 +69,14 @@ def test_freeform_greeting_and_transfer_clarification_persist(
     text = second[-1]["message"]["content"]
     assert "选择付款账户" in text
     assert "未能通过工具完成查询" not in text
-    assert len(model.history_seen) == 2
-    assert any(m["content"] == "hi" for m in model.history_seen[1])
+    # Recovery is a separate, tool-free wording pass; count actual Agent turns.
+    agent_turns = [
+        messages for messages in model.history_seen
+        if messages[0]["content"] == SYSTEM_PROMPT
+    ]
+    assert len(agent_turns) == 2
+    assert len(model.history_seen) <= 3
+    assert any(m["content"] == "hi" for m in agent_turns[1])
     fetched = client.get(f"/api/chat/conversations/{conversation}/messages",
                          headers=auth_headers).json()
     assert [m["role"] for m in fetched] == ["user", "assistant", "user", "assistant"]

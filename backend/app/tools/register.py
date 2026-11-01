@@ -28,7 +28,7 @@ def create_readonly_registry() -> ToolRegistry:
     for name, description, args, handler in (
         ("get_account_balance", "查询当前用户的模拟账户余额", BalanceArguments, get_account_balance),
         ("list_recent_transactions", "查询当前用户模拟账户的最近交易", TransactionArguments, list_recent_transactions),
-        ("get_monthly_bill", "分析当前用户模拟账户的月度收支、消费分类及需核对的重复消费；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
+        ("get_monthly_bill", "查询当前用户模拟账户指定月份的月度收支和消费分类，用作进一步比较分析的可信数据；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
         ("get_card_status", "查询本人模拟卡片状态；引用指定卡片时同时传入 account_token 和 card_id", CardStatusArguments, get_card_status),
         ("get_wealth_products", "查询可申购的模拟理财产品及参考年化、风险等级和起购金额", WealthProductArguments, get_wealth_products),
         ("get_wealth_holdings", "查询本人模拟理财持仓和昨日收益", WealthHoldingArguments, get_wealth_holdings),
