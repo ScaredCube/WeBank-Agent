@@ -114,3 +114,18 @@ describe('本地卡片快照', () => {
     expect((await listSnapshots(1007)).some((item) => item.id === other.id)).toBe(true)
   })
 })
+
+it('本地收藏额外遮盖工具令牌与授权文本，但不丢失演示金额', async () => {
+  const sensitive = { ...card, source: '账单 account_token=ABCD123 source_token=ZX98',
+    blocks: [
+      { type: 'text', text: 'confirmation_token=TOKEN1 Bearer abc.def.ghi Authorization: Bearer other.secret.value' },
+      { type: 'list', rows: [{ label: 'recipient_contact_token=XYZ', value: 'API_KEY=xyz987' }] },
+      { type: 'metric', label: '消费', value: 123456, unit: 'CNY_FEN' },
+    ] }
+  const saved = await saveSnapshot(1024, sensitive)
+  const row = JSON.stringify((await listSnapshots(1024))[0])
+  for (const secret of ['ABCD123','ZX98','TOKEN1','abc.def.ghi','other.secret.value','XYZ','xyz987'])
+    expect(row).not.toContain(secret)
+  expect(row).toContain('123456')
+  await deleteSnapshot(1024, saved.id)
+})

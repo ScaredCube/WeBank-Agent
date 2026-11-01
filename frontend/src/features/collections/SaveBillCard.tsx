@@ -56,6 +56,7 @@ export function SaveBillCard({ value, hidden, userId, token, origin }: {
         {status === 'saved' ? <Check size={16}/> : <Bookmark size={16}/>}
         {status === 'saved' ? '已收藏' : status === 'saving' ? '保存中…' : '收藏卡片'}
       </button>
+      {status === 'idle' && <span className="text-xs text-muted">本地保存含金额，未加密，退出后仍保留</span>}
       {error && <span role="alert" className="text-xs text-red-700">{error}</span>}
     </div>
   </div>

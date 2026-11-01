@@ -5,7 +5,14 @@ export interface Snapshot { id: string; savedAt: string; card: unknown; refresh?
 interface StoredSnapshot extends Snapshot { key: string; userId: number }
 
 function redact(value: string): string {
-  return value.replace(/<[^<>]{3,}>/g, '[已隐藏]').replace(/\d{11,}/g, '[已隐藏]')
+  // Defense in depth for browser-persisted presentation text. The upstream
+  // bank Tool must never pass authorization tokens in the first place.
+  // This is not encryption or an authorization boundary.
+  return value
+    .replace(/\bbearer\s+[\w.+\-/=]+/gi, '[已隐藏]')
+    .replace(/\b(?:account_token|source_token|target_token|recipient_contact_token|confirmation_token|api[_ -]?key|authorization)\s*[:=]\s*["']?[\w.:+\-/=]+/gi, '[已隐藏]')
+    .replace(/<[^<>]{3,}>/g, '[已隐藏]')
+    .replace(/\d{11,}/g, '[已隐藏]')
 }
 
 type SnapshotLeaf = Exclude<CardDescription['blocks'][number], { type: 'group' | 'action' }>

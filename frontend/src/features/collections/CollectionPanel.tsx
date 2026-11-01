@@ -88,7 +88,7 @@ function UserCollection({ userId, hidden, token, onStartChat, databaseName, onOp
   </section>
 
   return <section ref={listRef} tabIndex={-1} aria-label="收藏列表">
-    <div className="mb-5 flex items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="text-xl font-semibold tracking-tight text-ink">我的智能卡片</h3><p className="mt-1 text-xs leading-5 text-muted">由对话中的可信结果组成你的个人空间。支持的卡片可手动更新，历史版本仍然保留。</p></div>{items.length > 0 && <button type="button" disabled={busy} onClick={() => void remove()} className="min-h-10 shrink-0 whitespace-nowrap px-2 text-sm text-muted underline disabled:opacity-50">清空</button>}</div>
+    <div className="mb-5 flex items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="text-xl font-semibold tracking-tight text-ink">我的智能卡片</h3><p className="mt-1 text-xs leading-5 text-muted">收藏保存在此浏览器，包含账单金额且未加密；隐藏金额只影响显示。退出登录后仍保留，可随时清空。</p></div>{items.length > 0 && <button type="button" disabled={busy} onClick={() => void remove()} className="min-h-10 shrink-0 whitespace-nowrap px-2 text-sm text-muted underline disabled:opacity-50">清空</button>}</div>
     {loading && <p role="status" className="mt-5 text-sm text-muted">加载中…</p>}
     {error && <p role="alert" className="mt-5 text-sm text-red-700">{error}</p>}
     {!loading && items.length === 0 && <div className="mt-6 rounded-3xl border border-line bg-panel p-6 sm:p-8"><div className="flex flex-col items-center gap-4 text-center"><MascotEmptyState title="还没有收藏卡片" description="从对话中的金融结果卡开始，建立属于你的空间。" pose="peek" />{onStartChat && <button type="button" onClick={onStartChat} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-jade-700 px-5 text-sm font-semibold text-white"><MessageCircle size={17}/>去对话获取卡片</button>}</div></div>}
