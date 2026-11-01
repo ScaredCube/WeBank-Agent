@@ -1,4 +1,4 @@
-from app.agent.registry import RiskLevel, ToolRegistry, ToolSpec
+from app.agent.registry import RiskLevel, ToolExecutionMode, ToolRegistry, ToolSpec
 from app.tools.account_tools import (
     BalanceArguments, TransactionArguments, get_account_balance, list_recent_transactions,
 )
@@ -50,27 +50,27 @@ def create_agent_registry() -> ToolRegistry:
     registry.register(ToolSpec(
         name="prepare_transfer", description="准备模拟转账，等待用户确认或演示验证，不会直接执行或扣款",
         parameters=TransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_transfer_tool,
+        handler=prepare_transfer_tool, execution=ToolExecutionMode.PREPARE,
     ))
     registry.register(ToolSpec(name="prepare_card_loss", description="准备模拟卡片挂失，必须由用户完成红色模拟验证后单独执行",
-        parameters=CardArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_card_loss))
+        parameters=CardArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_card_loss, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_subscribe", description="准备模拟理财申购，必须由用户完成红色模拟验证后单独执行",
-        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_subscribe))
+        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_subscribe, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_redeem", description="准备模拟理财赎回，必须由用户完成红色模拟验证后单独执行",
-        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_redeem))
+        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_redeem, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_cancel_subscription", description="准备取消模拟订阅，等待用户确认后单独执行",
         parameters=SubscriptionCancelArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_cancel_subscription))
+        handler=prepare_cancel_subscription, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_internal_transfer",
         description="本人在同银行账户间内部转账；1000 元以内由服务端直接执行",
         parameters=InternalTransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_internal_transfer_tool))
+        handler=prepare_internal_transfer_tool, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_collection",
         description="向联系人发起模拟收款请求，等待用户确认后单独执行",
         parameters=CollectionArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_collection_tool))
+        handler=prepare_collection_tool, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_convert",
         description="在本人两个持仓之间转换，必须完成红色模拟验证后单独执行",
         parameters=ConversionArguments.model_json_schema(), risk=RiskLevel.RED,
-        handler=prepare_conversion_tool))
+        handler=prepare_conversion_tool, execution=ToolExecutionMode.PREPARE))
     return registry
