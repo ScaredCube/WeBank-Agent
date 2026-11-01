@@ -125,3 +125,30 @@ def test_cancelled_action_cannot_be_verified(client, auth_headers):
     with Session(get_engine()) as session:
         assert session.get(PendingAction, action_id).status == "cancelled"
         assert session.get(Account, 1).balance_fen == 500000
+
+def red_face_action():
+    with Session(get_engine()) as session:
+        user = session.exec(select(User).where(User.username == "demo")).one()
+        action, token = create_simulated_red_action(
+            session, user_id=user.id, action_type="demo_face", details={"amount_fen": 200000},
+            decision=RiskDecision(RiskLevel.RED, ("测试",), "password_face"),
+        )
+        return action.id, user.id, token
+
+
+def test_password_plus_face_requires_both_steps(client, auth_headers):
+    action_id, _, token = red_face_action()
+    path = f"/api/actions/{action_id}/verification"
+    assert client.post(path + "/face", json={"token": token}, headers=auth_headers).status_code == 400
+    assert client.post(path + "/start", json={"token": token}, headers=auth_headers).status_code == 200
+    code = client.post(path + "/verify", json={"token": token, "code": settings.demo_verification_code},
+                       headers=auth_headers)
+    assert code.status_code == 200 and code.json()["status"] == "code_verified"
+    with Session(get_engine()) as session:
+        assert session.get(PendingAction, action_id).status == "pending"
+        assert session.exec(select(VerificationSession)).one().status == "code_verified"
+    face = client.post(path + "/face", json={"token": token}, headers=auth_headers)
+    assert face.status_code == 200 and face.json()["status"] == "verified"
+    with Session(get_engine()) as session:
+        assert session.get(PendingAction, action_id).status == "verified"
+        assert session.exec(select(VerificationSession)).one().status == "verified"

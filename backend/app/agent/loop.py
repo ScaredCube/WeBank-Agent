@@ -13,7 +13,7 @@ from app.agent.response_policy import tool_free_reply
 from app.schemas.card_results import from_card_tool_result
 from app.agent.registry import RiskLevel
 from app.db.session import session_scope
-from app.risk.engine import assess_tool
+from app.risk.engine import assess_tool, begin_guard_escalation, end_guard_escalation
 from app.risk.injection import validate_tool_arguments
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
@@ -217,7 +217,7 @@ class AgentLoop:
                         if (argument_error is None and context_readonly_only
                                 and spec is not None and spec.name in _PREPARE_TOOLS):
                             argument_error = "请在本轮明确选择金融对象后再准备操作"
-                        guard_blocked = None
+                        guard_elevated = False
                         if (argument_error is None and spec is not None and spec.handler is not None
                                 and self.guard is not None):
                             try:
@@ -238,19 +238,20 @@ class AgentLoop:
                                     result="failed" if failed else "denied",
                                     reason_code="guard_unavailable" if failed else "guard_rejected",
                                 )
-                                guard_blocked = "安全检查暂不可用" if failed else "操作未通过安全检查"
-                                rejection_reason = "guard_unavailable" if failed else "guard_rejected"
-                                if not failed:
-                                    record_failure(user_id)
+                                # A guard flag now raises the fixed-code risk one
+                                # notch instead of refusing the user's request.
+                                guard_elevated = True
                         if argument_error is not None:
                             result = {"ok": False, "data": None, "error": argument_error}
                             rejection_reason = "invalid_arguments"
-                        elif guard_blocked is not None:
-                            result = {"ok": False, "data": None, "error": guard_blocked}
                         elif spec is None or spec.handler is None:
                             result = {"ok": False, "data": None, "error": "工具不可用"}
                         elif _PREPARE_TOOLS.get(spec.name) == spec.risk:
-                            prepared = await spec.handler(user_id=user_id, **args)
+                            elevation = begin_guard_escalation(guard_elevated)
+                            try:
+                                prepared = await spec.handler(user_id=user_id, **args)
+                            finally:
+                                end_guard_escalation(elevation)
                             if prepared.get("ok") and prepared.get("executed"):
                                 data = prepared.get("result") or {}
                                 record_separately(

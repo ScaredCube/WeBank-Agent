@@ -14,5 +14,5 @@ class VerifyCodeRequest(StartVerificationRequest):
 
 class VerificationResponse(BaseModel):
     action_id: int
-    status: Literal["pending", "verified"]
+    status: Literal["pending", "code_verified", "verified"]
     message: str

@@ -453,6 +453,16 @@
   from { opacity: 0; transform: translateX(18px); }
   to { opacity: 1; transform: translateX(0); }
 }
+
+/* Mobile assets replace the conversation from the left; utility drawer enters from the right. */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
 .assets-scroll { scrollbar-width: none; overscroll-behavior: contain; }
 .assets-scroll::-webkit-scrollbar { display: none; }
 body.asset-dragging, body.asset-dragging * { cursor: grabbing !important; }

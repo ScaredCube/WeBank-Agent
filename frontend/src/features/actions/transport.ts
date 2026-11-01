@@ -1,7 +1,7 @@
 import { api, type CollectionExecution, type ConversionExecution, type InternalTransferExecution, type SubscriptionCancelExecution, type WealthOrderExecution } from '@/lib/api'
 
 export interface ActionTransport {
-  step: (id: number, step: 'cancel' | 'confirm' | 'verification/start' | 'verification/verify', body?: object) => Promise<{ status: string; message: string }>
+  step: (id: number, step: 'cancel' | 'confirm' | 'verification/start' | 'verification/verify' | 'verification/face', body?: object) => Promise<{ status: string; message: string }>
   executeTransfer: (id: number) => Promise<{ status: string; message: string }>
   executeCardLoss: (id: number) => Promise<{ status: string }>
   action: (id: number) => Promise<{ status: string }>

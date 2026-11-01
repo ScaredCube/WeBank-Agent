@@ -10,7 +10,9 @@ from app.models import (
     Account, CollectionRequest, Contact, DataToken, PendingAction,
 )
 from app.risk.engine import assess_tool
-from app.services.action_service import create_pending_action, get_pending_action
+from app.services.action_service import (
+    create_pending_action, create_simulated_red_action, get_pending_action,
+)
 from app.services.audit_service import record, request_context
 from app.services.operation_service import begin_write
 from app.services.redaction import mask_text
@@ -68,9 +70,12 @@ def prepare_collection(user_id: int, *, contact_token: str, account_token: str,
             "account_id": account.id, "account_masked": mask_text(account.masked_number),
             "amount_fen": amount_fen, "note": mask_text(note), "currency": "CNY",
         }
-        action, token = create_pending_action(
+        decision = assess_tool(_COLLECT_SPEC)
+        create_action = (create_simulated_red_action
+                         if decision.level == RiskLevel.RED else create_pending_action)
+        action, token = create_action(
             session, user_id=user_id, action_type="collection_request",
-            details=details, decision=assess_tool(_COLLECT_SPEC), commit=False,
+            details=details, decision=decision, commit=False,
         )
         request = CollectionRequest(
             user_id=user_id, contact_id=contact.id, account_id=account.id, action_id=action.id,
@@ -81,7 +86,7 @@ def prepare_collection(user_id: int, *, contact_token: str, account_token: str,
         session.flush()
         record(session, user_id=user_id, action_id=action.id,
                event_type="collection_prepared", tool="collection_request",
-               risk_level="yellow", result="success")
+               risk_level=decision.level.value, result="success")
         session.commit()
         return {"collection_id": request.id, "confirmation_token": token,
                 "action": get_pending_action(session, user_id=user_id, action_id=action.id)}
@@ -101,11 +106,12 @@ def execute_collection(user_id: int, collection_id: int) -> dict:
         action = session.exec(select(PendingAction).where(
             PendingAction.id == request.action_id, PendingAction.user_id == user_id,
             PendingAction.action_type == "collection_request",
-            PendingAction.risk_level == "yellow", PendingAction.status == "confirmed",
+            PendingAction.risk_level.in_(("yellow", "red")),
+            PendingAction.status.in_(("confirmed", "verified")),
             PendingAction.expires_at > now,
         )).first()
         if action is None:
-            raise CollectionError("收款请求尚未确认或已过期")
+            raise CollectionError("收款请求尚未确认/验证或已过期")
         request.status = "completed"
         request.completed_at = now
         action.status = "completed"

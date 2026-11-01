@@ -2,10 +2,8 @@ import { useRef, type ReactNode } from 'react'
 import { ArrowUpRight } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 
-import { HomeAccountSummary } from '@/components/chat/HomeAccountSummary'
 import { MascotStage } from '@/features/theme/MascotStage'
 import { FinanceSticker, type StickerKind } from '@/features/theme/FinanceSticker'
-import type { HomeOverview } from '@/features/home/useHomeAccountOverview'
 
 export interface ChatStarterPrompt {
   label: string
@@ -19,24 +17,14 @@ interface ChatHomeProps {
   onPick?: (prompt: string) => void
   feedback?: ReactNode
   disclaimer?: ReactNode
-  overview?: HomeOverview
-  mode?: 'full' | 'sidecar'
-  hidden?: boolean
-  onTogglePrivacy?: () => void
-  onOpenAssets?: () => void
 }
-
-const emptyOverview: HomeOverview = { status: 'ready', data: null }
 
 /** Presentation only. Authentication, data fetching and conversations belong to the page. */
 export function ChatHome({
   composer, suggestions = [], onPick, feedback, disclaimer,
-  overview = emptyOverview, mode = 'full', hidden = false,
-  onTogglePrivacy, onOpenAssets,
 }: ChatHomeProps) {
   const homeRef = useRef<HTMLElement>(null)
   const reduceMotion = useReducedMotion()
-  const compact = mode === 'sidecar'
 
   function pickPrompt(prompt: string) {
     if (!onPick) return
@@ -56,34 +44,31 @@ export function ChatHome({
     <section
       ref={homeRef}
       aria-labelledby="chat-home-title"
-      data-home-mode={mode}
-      className={'bank-home mx-auto flex min-h-full w-full max-w-[1240px] flex-col px-6 pb-10 pt-8 sm:px-10 sm:pt-10 ' +
-        (compact ? 'lg:px-10 lg:pt-14' : 'lg:px-16 xl:px-20 xl:pt-12')}
+      className="bank-home mx-auto flex min-h-full w-full max-w-[1100px] flex-col px-6 pb-10 pt-8 sm:px-10 sm:pt-10 lg:px-14 xl:px-16 xl:pt-12"
     >
-      <div className={'grid flex-1 items-center ' + (compact ? 'py-8' : 'py-8 lg:py-10')}>
+      <div className="grid flex-1 items-center py-8 lg:py-10">
         <div className="relative w-full">
-          <div className="relative flex items-baseline gap-4">
+          <div className="flex items-baseline gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-4">
                 <h2 id="chat-home-title"
-                  className={'min-w-0 max-w-[700px] text-balance font-semibold leading-[1.18] tracking-[-0.045em] text-ink ' +
-                    (compact ? 'text-[clamp(1.9rem,3vw,2.7rem)]' : 'text-[clamp(2.15rem,4vw,3.9rem)]')}>
-                  今天，<span className="block sm:inline">想完成什么？</span>
+                  className="min-w-0 max-w-[700px] text-balance text-[clamp(2.15rem,4vw,3.9rem)] font-semibold leading-[1.18] tracking-[-0.045em] text-ink">
+                  今天，<span className="block sm:inline lg:block xl:inline">想完成什么？</span>
                 </h2>
-                {!compact && <MascotStage />}
+                <MascotStage />
               </div>
 
-              <div className={'w-full ' + (compact ? 'mt-9' : 'mt-8 lg:mt-10')}>
+              <div className="mt-8 w-full lg:mt-10">
                 {composer}
                 {feedback}
               </div>
 
-              {!compact && onPick && suggestions.length > 0 && (
+              {onPick && suggestions.length > 0 && (
                 <nav className="mt-10" aria-label="常用事务，选择后填入输入框">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-[16px] font-semibold tracking-tight text-ink">常用事务</h3>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {suggestions.map(({ label, prompt, art }) => (
                       <motion.button
                         key={prompt}
@@ -109,16 +94,7 @@ export function ChatHome({
         </div>
       </div>
 
-      {!compact && (
-        <HomeAccountSummary
-          overview={overview}
-          hidden={hidden}
-          onTogglePrivacy={onTogglePrivacy}
-          onOpenAssets={onOpenAssets}
-        />
-      )}
-
-      {disclaimer && <p className={'text-[10.5px] leading-5 text-muted/75 ' + (compact ? 'mt-10' : 'mt-7')}>
+      {disclaimer && <p className="mt-7 text-[10.5px] leading-5 text-muted/75">
         {disclaimer}
       </p>}
     </section>

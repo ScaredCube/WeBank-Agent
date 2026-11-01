@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, CircleDot, Info, type LucideIcon } from 'lucide-react'
 
 /** Mirrors the verified local dialog state; it does not infer progress from elapsed time. */
-export type ActionStage = 'review' | 'code' | 'ready' | 'recover_execute' | 'complete' |
+export type ActionStage = 'review' | 'code' | 'face' | 'ready' | 'recover_execute' | 'complete' |
   'cancelled' | 'unknown' | 'rejected' | 'recover_pending'
 
 type Step = { label: string; number: number }
@@ -17,6 +17,7 @@ function resolveJourney(stage: ActionStage): JourneyState {
   const initial = { heading: '等待核对', explanation: '确认信息后才能继续，当前操作尚未执行。', active: 0, doneThrough: -1, caution: false }
   if (stage === 'review') return initial
   if (stage === 'code') return { heading: '等待模拟验证', explanation: '验证通过后将自动执行，无需再次点击。', active: 1, doneThrough: 0, caution: false }
+  if (stage === 'face') return { heading: '等待模拟人脸识别', explanation: '验证码已通过；完成模拟人脸识别后将自动执行。', active: 1, doneThrough: 0, caution: false }
   if (stage === 'ready') return { heading: '等待执行', explanation: '已通过确认或验证，银行业务尚未执行。', active: 2, doneThrough: 1, caution: false }
   if (stage === 'complete') return { heading: '服务端已确认完成', explanation: '服务端已返回并确认此操作完成。', active: 3, doneThrough: 3, caution: false }
   if (stage === 'recover_execute') return {

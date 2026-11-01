@@ -373,7 +373,7 @@ export const api = {
     })
   },
 
-  actionStep(token: string, id: number, step: 'cancel' | 'confirm' | 'verification/start' | 'verification/verify', body?: object) {
+  actionStep(token: string, id: number, step: 'cancel' | 'confirm' | 'verification/start' | 'verification/verify' | 'verification/face', body?: object) {
     return request<{ status: string; message: string }>(`/actions/${id}/${step}`, {
       method: 'POST', ...(body ? { body: JSON.stringify(body) } : {}),
     }, token)

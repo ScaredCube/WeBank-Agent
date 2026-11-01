@@ -20,6 +20,6 @@ export function Money({ fen, currency = 'CNY', className, hidden, peekKey }: {
     aria-label={masked && !visible ? '金额已隐藏' : text}
     className={cn('tabular-nums transition-[filter,opacity] duration-300',
       masked && !visible && 'cursor-pointer select-none blur-[6px] opacity-70', className)}
-    onClick={masked && !visible ? () => privacy.reveal(key) : undefined}
+    onClick={masked && !visible ? (event) => { event.stopPropagation(); privacy.reveal(key) } : undefined}
   >{text}</span>
 }

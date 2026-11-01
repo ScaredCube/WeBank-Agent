@@ -76,32 +76,41 @@ def test_guard_allows_safe_call_and_records_it(client, auth_headers, monkeypatch
         assert len(entries) == 1 and entries[0].result == "success"
 
 
-def test_guard_denies_suspicious_transfer_before_action_creation(client, auth_headers, monkeypatch):
+def test_guard_denial_elevates_transfer_to_red_instead_of_blocking(client, auth_headers, monkeypatch):
     guard = RecordingGuard(GuardVerdict(False, "rejected"))
     monkeypatch.setattr("app.agent.loop.get_guard", lambda: guard)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: TransferLLM())
     response = _chat(client, auth_headers, "给模拟收款人转账500元")
     payloads = _events(response)
-    assert "action_required" not in [item["type"] for item in payloads]
-    assert "操作未通过安全检查" in response.text
+    action = next(item for item in payloads if item["type"] == "action_required")
+    assert action["action"]["risk_level"] == "red"
+    assert action["action"]["details"]["verification"] == "password"
     assert "转账已经成功" not in response.text
     with Session(get_engine()) as session:
-        assert not session.exec(select(TransferRequest)).all()
         entries = session.exec(select(AuditLog).where(AuditLog.event_type == "guard_denied")).all()
         assert len(entries) == 1 and entries[0].reason_codes == "guard_rejected"
 
 
-def test_guard_failure_is_fail_closed(client, auth_headers, monkeypatch):
+def test_guard_failure_elevates_transfer_to_red(client, auth_headers, monkeypatch):
     guard = RecordingGuard(RuntimeError("guard unavailable"))
     monkeypatch.setattr("app.agent.loop.get_guard", lambda: guard)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: TransferLLM())
     response = _chat(client, auth_headers, "给模拟收款人转账500元")
-    assert "安全检查暂不可用" in response.text
-    assert "action_required" not in [item["type"] for item in _events(response)]
+    action = next(item for item in _events(response) if item["type"] == "action_required")
+    assert action["action"]["risk_level"] == "red"
     with Session(get_engine()) as session:
-        assert not session.exec(select(TransferRequest)).all()
         entries = session.exec(select(AuditLog).where(AuditLog.event_type == "guard_failed")).all()
         assert len(entries) == 1 and entries[0].reason_codes == "guard_unavailable"
+
+
+def test_guard_denial_does_not_block_readonly_bill_query(client, auth_headers, monkeypatch):
+    guard = RecordingGuard(GuardVerdict(False, "rejected"))
+    monkeypatch.setattr("app.agent.loop.get_guard", lambda: guard)
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: BalanceLLM())
+    response = _chat(client, auth_headers, "查询余额")
+    assert response.status_code == 200
+    assert "5,000.00 元" in response.text
+    assert guard.calls and guard.calls[0].tool == "get_account_balance"
 
 
 def test_guard_context_excludes_user_prompt_and_sensitive_values(client, auth_headers, monkeypatch):

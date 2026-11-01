@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 
 import { AppHeader, AppShell } from '@/app/AppShell'
+import type { UtilityTabName } from '@/app/workspace-state'
 import { ChatHome, type ChatStarterPrompt } from '@/components/chat/ChatHome'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { IntentCapsule } from '@/components/chat/IntentCapsule'
-import { ConversationSidebar } from '@/components/chat/ConversationSidebar'
+import { UtilitySidebar } from '@/components/chat/UtilitySidebar'
 import { MessageList } from '@/components/chat/MessageList'
 import { ConversationLoading } from '@/components/chat/ConversationLoading'
 import { SaveBillCard } from '@/features/collections/SaveBillCard'
@@ -26,14 +27,12 @@ import type { CardLossRecovery } from '@/features/actions/CardLossButton'
 import { useChatController } from '@/features/chat/useChatController'
 import { useAuth } from '@/lib/use-auth'
 import { api, type BankCard, type BankDashboardData } from '@/lib/api'
-import { useHomeAccountOverview } from '@/features/home/useHomeAccountOverview'
 import { PrivacyProvider, usePrivacy } from '@/features/privacy/PrivacyProvider'
 import type { ChatIntentPayload, StreamEvent } from '@/lib/sse'
 import type { CardOrigin } from '@/features/intelligent-ui/schema'
 import { addBankReference, type BankObjectReference } from '@/features/references/bank-object-reference'
 import { cn } from '@/lib/utils'
 
-type Panel = 'assets' | 'activity' | 'collections' | null
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
 type SourceNavigation = { origin: CardOrigin; status: 'opening' | 'located' | 'conversation-missing' | 'message-missing' }
 
@@ -51,14 +50,10 @@ function describeIntent(intent: AssetIntent): ChatIntentPayload {
   }
 }
 
-function SidePanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <section aria-label={title} className="flex h-full min-h-0 flex-col bg-workspace">
-    <header className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-4">
-      <button type="button" onClick={onClose} aria-label="返回对话" className="min-h-10 rounded-xl px-2 text-sm text-muted hover:bg-jade-50 hover:text-ink">返回</button>
-      <h2 className="flex-1 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
-    </header>
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
-  </section>
+function desktopViewport() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(min-width: 1024px)').matches
 }
 
 export function ChatPage() {
@@ -70,9 +65,9 @@ function ChatWorkspace() {
   const navigate = useNavigate()
   const privacy = usePrivacy()
 
-  const [panel, setPanel] = useState<Panel>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(true)
+  const [assetsOpen, setAssetsOpen] = useState(desktopViewport)
+  const [utilityOpen, setUtilityOpen] = useState(false)
+  const [utilityTab, setUtilityTab] = useState<UtilityTabName>('conversations')
   const [actionWarning, setActionWarning] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<ActionEvent | null>(null)
   // Completed cards are attached to the assistant message of their turn, so
@@ -91,9 +86,10 @@ function ChatWorkspace() {
   const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [cardError, setCardError] = useState<string | null>(null)
   const referenceSearchCache = useRef<{ key: string; promise: Promise<BankObjectReference[]> } | null>(null)
+  const assetsRef = useRef<HTMLDivElement>(null)
 
   const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => { setPendingAction(event); setActionOpen(true) }, [])
-  const onConversationChange = useCallback(() => setSidebarOpen(false), [])
+  const onConversationChange = useCallback(() => setUtilityOpen(false), [])
   const onConversationCreated = useCallback((id: number) => {
     setReferencesByConversation(current => {
       const selected = current.new
@@ -145,7 +141,7 @@ function ChatWorkspace() {
 
   const addReference = useCallback((next: BankObjectReference) => {
     setReferencesByConversation(current => ({ ...current, [referenceKey]: addBankReference(current[referenceKey] ?? [], next) }))
-    if (window.matchMedia?.('(max-width: 1279px)').matches) setPanel(null)
+    if (!desktopViewport()) { setUtilityOpen(false); setAssetsOpen(false) }
   }, [referenceKey])
   const removeReference = useCallback((value: BankObjectReference) => {
     setReferencesByConversation(current => ({ ...current, [referenceKey]: (current[referenceKey] ?? []).filter(item => !(item.id === value.id && item.kind === value.kind)) }))
@@ -154,7 +150,7 @@ function ChatWorkspace() {
   const refreshAssets = useCallback(() => setWorkspaceRevision((value) => value + 1), [])
 
   useEffect(() => {
-    if (!token || panel !== 'assets') return
+    if (!token || !assetsOpen) return
     let cancelled = false
     setAssetsLoading(true); setDashboardError(null); setCardError(null)
     void Promise.allSettled([api.bankDashboard(token), api.cards(token)]).then(([dashboardResult, cardsResult]) => {
@@ -166,17 +162,39 @@ function ChatWorkspace() {
       setAssetsLoading(false)
     })
     return () => { cancelled = true }
-  }, [token, panel, workspaceRevision])
+  }, [token, assetsOpen, workspaceRevision])
+
+  // The mobile assets page is a full-screen overlay: keep Escape and focus
+  // return local, while the desktop rail stays a plain column.
+  useEffect(() => {
+    if (!assetsOpen) return
+    const compact = !desktopViewport()
+    const previous = compact && document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const frame = compact
+      ? requestAnimationFrame(() => {
+          assetsRef.current?.querySelector<HTMLElement>('[data-assets-close]')?.focus()
+        })
+      : null
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !desktopViewport()) setAssetsOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      window.removeEventListener('keydown', onKeyDown)
+      if (previous) queueMicrotask(() => { if (previous.isConnected) previous.focus() })
+    }
+  }, [assetsOpen])
 
   const openSavedSource = useCallback((origin: CardOrigin) => {
     const sourceConversation = conversations.find((item) => item.id === origin.conversationId)
+    setUtilityOpen(false)
+    if (!desktopViewport()) setAssetsOpen(false)
     if (!sourceConversation) {
       setSourceNavigation({ origin, status: 'conversation-missing' })
-      setPanel(null)
       return
     }
     setSourceNavigation({ origin, status: 'opening' })
-    setPanel(null)
     void openConversation(sourceConversation.id, origin.messageId)
   }, [conversations, openConversation])
 
@@ -204,7 +222,6 @@ function ChatWorkspace() {
 
   const activeConversation = conversations.find((item) => item.id === activeId)
   const isHome = messages.length === 0 && !sending && !loadingMessages && !historyUnavailable
-  const homeOverview = useHomeAccountOverview(token, user?.id, isHome && panel === null, workspaceRevision)
 
   function clearIntent() {
     if (intentCapsule && draft === intentCapsule.prefill) updateDraft('')
@@ -215,8 +232,8 @@ function ChatWorkspace() {
     setIntentCapsule(intent)
     setReferencesByConversation(current => ({ ...current, [referenceKey]: [] }))
     updateDraft(intent.prefill)
-    setPanel(null)
-    setSidebarOpen(false)
+    setUtilityOpen(false)
+    if (!desktopViewport()) setAssetsOpen(false)
     window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.chat-composer-input')?.focus(), 360)
   }
 
@@ -227,6 +244,18 @@ function ChatWorkspace() {
     const display = intentCapsule?.label
     setIntentCapsule(null)
     void sendMessage(text, references, payload, display)
+  }
+
+  function openUtility(tab: UtilityTabName = 'conversations') {
+    setUtilityTab(tab)
+    setUtilityOpen(true)
+  }
+
+  function startNewConversation() {
+    clearIntent()
+    setSourceNavigation(null)
+    setUtilityOpen(false)
+    void createConversation()
   }
 
   const composer = <ChatComposer
@@ -256,65 +285,57 @@ function ChatWorkspace() {
 
   function handleLogout() {
     setIntentCapsule(null); setPendingAction(null); setCompletedByMessage({}); setCardLossRecovery(new Map())
+    setUtilityOpen(false); setAssetsOpen(false)
     logout(); navigate('/login', { replace: true })
   }
 
-  function openPanel(next: Panel) {
-    setSourceNavigation(null)
-    setPanel(next)
-    setSidebarOpen(false)
-  }
-
-  function openSidebar() {
-    if (window.matchMedia?.('(min-width: 1024px)').matches) setDesktopSidebarCollapsed(false)
-    else setSidebarOpen(true)
-  }
-
-  const sidebar = <ConversationSidebar
+  const utility = token && user ? <UtilitySidebar
+    tab={utilityTab}
+    onTabChange={setUtilityTab}
     conversations={conversations}
     activeId={activeId}
     user={user}
-    open={sidebarOpen}
-    desktopCollapsed={desktopSidebarCollapsed}
-    activePanel={panel}
     hideActiveConversation={isHome && activeConversation?.title === '新对话'}
     disabled={sending || creatingConversation || actionPreparing || !!pendingAction}
     disabledReason={actionPreparing || pendingAction ? '请先处理当前操作，再切换或新建会话。' : undefined}
     newDisabled={loadingMessages}
-    onSelect={(id) => { clearIntent(); setSourceNavigation(null); setPanel(null); setSidebarOpen(false); void openConversation(id) }}
-    onNew={() => { clearIntent(); setSourceNavigation(null); setPanel(null); void createConversation() }}
+    collections={<CollectionPanel userId={user.id} hidden={privacy.hidden} token={token}
+      onStartChat={() => { setUtilityOpen(false); updateDraft('请帮我查询本月账单，并生成一张消费分析卡片。') }}
+      onOpenSource={openSavedSource}
+      sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} />}
+    activity={<ActivityPane token={token} embedded />}
+    onSelect={(id) => { clearIntent(); setSourceNavigation(null); setUtilityOpen(false); void openConversation(id) }}
+    onNew={startNewConversation}
     onRename={renameConversation}
-    onOpenPanel={(next) => openPanel(next)}
-    onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((collapsed) => !collapsed)}
-    onClose={() => setSidebarOpen(false)}
+    onClose={() => setUtilityOpen(false)}
     onLogout={handleLogout}
-  />
+  /> : null
 
-  const panelContent = panel === 'assets' && token
-    ? <AssetsPane token={token} dashboard={dashboard} cards={cards} loading={assetsLoading}
-        dashboardError={dashboardError} cardError={cardError}
-        actionDisabled={sending || actionPreparing || !!pendingAction}
-        cardLossRecovery={cardLossRecovery}
-        onCardLossRecoveryChange={onCardLossRecoveryChange}
-        onCardLossResolved={onCardLossResolved}
-        onActionBusy={setActionPreparing}
-        onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }}
-        onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setPanel(null)} />
-    : panel === 'activity' && token
-      ? <ActivityPane token={token} onClose={() => setPanel(null)} />
-      : panel === 'collections' && token && user
-        ? <SidePanel title="收藏" onClose={() => setPanel(null)}>
-            <CollectionPanel userId={user.id} hidden={privacy.hidden} token={token}
-              onStartChat={() => { setPanel(null); updateDraft('请帮我查询本月账单，并生成一张消费分析卡片。') }}
-              onOpenSource={openSavedSource}
-              sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} />
-          </SidePanel>
-        : null
+  const assets = token && assetsOpen ? <>
+    <div className="fixed inset-0 z-30 bg-ink/30 backdrop-blur-[2px] lg:hidden" onClick={() => setAssetsOpen(false)} aria-hidden="true" />
+    <div ref={assetsRef} data-assets-panel
+      onKeyDown={(event) => { if (event.key === 'Escape' && !desktopViewport()) setAssetsOpen(false) }}
+      className="z-40 min-h-0 shrink-0 fixed inset-0 lg:static lg:inset-auto lg:z-auto lg:w-[340px] lg:border-r lg:border-line xl:w-[380px]">
+      <div className="h-full bg-workspace animate-[slide-in-left_.32s_cubic-bezier(.32,.72,0,1)] lg:animate-none">
+        <AssetsPane token={token} dashboard={dashboard} cards={cards} loading={assetsLoading}
+          dashboardError={dashboardError} cardError={cardError}
+          actionDisabled={sending || actionPreparing || !!pendingAction}
+          cardLossRecovery={cardLossRecovery}
+          onCardLossRecoveryChange={onCardLossRecoveryChange}
+          onCardLossResolved={onCardLossResolved}
+          onActionBusy={setActionPreparing}
+          onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }}
+          onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
+      </div>
+    </div>
+  </> : null
 
-  return <AppShell sidebar={sidebar} panel={panelContent} onClosePanel={() => setPanel(null)}>
+  return <AppShell assets={assets} utility={utility} utilityOpen={utilityOpen && !!utility} onCloseUtility={() => setUtilityOpen(false)}>
     <AppHeader title={activeConversation?.title ?? '新对话'} isHome={isHome}
-      sidebarOpen={sidebarOpen} onOpenSidebar={openSidebar}
-      panelOpen={panel !== null} onOpenPanel={() => openPanel('assets')} onClosePanel={() => setPanel(null)} />
+      assetsOpen={assetsOpen} onToggleAssets={() => setAssetsOpen((open) => !open)}
+      onNewConversation={startNewConversation}
+      newConversationDisabled={sending || creatingConversation || actionPreparing || !!pendingAction || loadingMessages}
+      utilityOpen={utilityOpen} onOpenUtility={() => openUtility()} />
     {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
     {sourceNavigationFeedback && <div role={sourceNavigationFeedback.type === 'error' ? 'alert' : 'status'} aria-live="polite" className={cn('flex shrink-0 items-start gap-3 border-b px-4 py-2.5 text-sm', sourceNavigationFeedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-jade-200 bg-jade-50 text-jade-900')}>
       <span className="flex-1">{sourceNavigationFeedback.message}</span>
@@ -326,8 +347,6 @@ function ChatWorkspace() {
         {loadingMessages ? <ConversationLoading />
           : historyUnavailable ? <div className="grid h-full place-items-center px-6"><div className="text-center"><p className="text-sm text-muted">无法读取此会话，请重试。</p><button type="button" className="mt-4 rounded-xl border border-line bg-white px-4 py-2 text-sm text-jade-800" onClick={() => activeId ? void openConversation(activeId) : void createConversation()}>{activeId ? '重试加载会话' : '新建会话'}</button></div></div>
           : isHome ? <ChatHome composer={composer} feedback={homeFeedback} suggestions={bankingStarters} onPick={updateDraft}
-              overview={homeOverview} mode={panel ? 'sidecar' : 'full'} hidden={privacy.hidden}
-              onTogglePrivacy={privacy.toggle} onOpenAssets={() => openPanel('assets')}
               disclaimer="业务信息来自模拟银行环境，所有重要操作以服务端结果为准。" />
           : <MessageList key={activeId ?? 'new'} scrollRoot={scrollRef} messages={messages} hasOlder={hasOlder} loadingOlder={loadingOlder}
               onLoadOlder={() => void loadOlder()}
@@ -344,7 +363,7 @@ function ChatWorkspace() {
                   }
                   if (result.kind === 'internal_transfer') return <InternalTransferResult key={`${message.id}-${index}`} value={result.data} />
                   if (cardStatusSnapshotSchema.safeParse(result.data).success)
-                    return <CardStatusResult key={index} value={result.data} hidden={privacy.hidden} onOpenAssets={() => openPanel('assets')} />
+                    return <CardStatusResult key={index} value={result.data} hidden={privacy.hidden} onOpenAssets={() => setAssetsOpen(true)} />
                   return null
                 })}
                 {completed.map((event, index) => <CompletedActionCard key={`${message.id}-completed-${event.action.id}-${index}`} event={event} />)}
