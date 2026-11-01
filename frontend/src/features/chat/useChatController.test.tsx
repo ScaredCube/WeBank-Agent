@@ -8,6 +8,7 @@ import { useChatController } from './useChatController'
 
 afterEach(() => {
   cleanup()
+  sessionStorage.clear()
   vi.restoreAllMocks()
 })
 
@@ -339,4 +340,62 @@ it('断线后查询得知动作已待确认时，提醒查看操作记录而不�
   await act(async () => { await result.current.sendMessage('准备一笔模拟转账') })
   expect(result.current.error).toBeNull()
   expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('待确认操作已在服务端创建'))
+})
+
+it('刷新挂载时核对历史请求状态，不会向 Agent 重新发送 POST', async () => {
+  const oldId = 'req-reload-confirmed-001'
+  sessionStorage.setItem('xiaowe:chat-inflight:v1',JSON.stringify([
+    {conversationId:1,requestId:oldId,createdAt:Date.now()},
+  ]))
+  const inspect = vi.spyOn(api,'submissionStatus').mockResolvedValue({
+    request_id:oldId,state:'completed',user_message_id:41,
+    pending_action_id:null,message:{id:42,role:'assistant',content:'历史回复',created_at:''},
+  })
+  const stream = vi.spyOn(sse,'streamChat')
+  const onActionWarning=vi.fn()
+  const {result}=renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+    onActionWarning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(result.current.loadingMessages).toBe(false))
+  await waitFor(()=>expect(inspect).toHaveBeenCalledWith('synthetic-token',1,oldId))
+  expect(stream).not.toHaveBeenCalled()
+  expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('已完成'))
+  expect(sessionStorage.getItem('xiaowe:chat-inflight:v1')).toBeNull()
+})
+
+it('刷新后待确认的转账仅显示核对提示，不能重新获取确认令牌', async () => {
+  sessionStorage.setItem('xiaowe:chat-inflight:v1',JSON.stringify([
+    {conversationId:6,requestId:'req-reload-pending-987',createdAt:Date.now()},
+  ]))
+  const inspect=vi.spyOn(api,'submissionStatus').mockResolvedValue({
+    request_id:'req-reload-pending-987',state:'action_pending',
+    user_message_id:80,pending_action_id:90,message:null,
+  })
+  const onActionRequired=vi.fn(),onActionWarning=vi.fn()
+  renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,
+    onActionRequired,onActionWarning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(inspect).toHaveBeenCalledOnce())
+  expect(onActionRequired).not.toHaveBeenCalled()
+  expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('不会再次执行'))
+  expect(sessionStorage.getItem('xiaowe:chat-inflight:v1')).toBeNull()
+})
+
+it('刷新后处理中请求仅要求核对，不触发工具自动重试', async () => {
+  const value={conversationId:7,requestId:'req-reload-processing-01',createdAt:Date.now()}
+  sessionStorage.setItem('xiaowe:chat-inflight:v1',JSON.stringify([value]))
+  vi.spyOn(api,'submissionStatus').mockResolvedValue({
+    request_id:value.requestId,state:'processing',
+    user_message_id:11,pending_action_id:null,message:null,
+  })
+  const send=vi.spyOn(sse,'streamChat'),warning=vi.fn()
+  renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+    onActionWarning:warning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(warning).toHaveBeenCalledWith(expect.stringContaining('不要重复发起')))
+  expect(send).not.toHaveBeenCalled()
+  expect(JSON.parse(sessionStorage.getItem('xiaowe:chat-inflight:v1') || '[]')).toHaveLength(1)
 })

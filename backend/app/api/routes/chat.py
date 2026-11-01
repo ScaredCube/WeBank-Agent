@@ -36,7 +36,7 @@ from app.services.audit_service import conversation_context, record_separately, 
 from app.services.redaction import mask_text, redact_input
 from app.services.security_service import record_failure
 from app.services.chat_submissions import (SubmissionConflict, fingerprint,
-    claim_submission, advance_submission)
+    claim_submission, advance_submission, recover_stale_submission)
 from app.services.conversation_context import (allow_readonly_followup, remember_selection,
                                                previously_selected, latest_trusted_bill_month)
 from app.services.vault import VaultError, create_account_token, create_contact_token, encrypt_result_snapshot, decrypt_result_snapshot
@@ -85,8 +85,11 @@ def _present_message(session: Session, message: Message, mask_content: bool = Tr
 
 def _persist_assistant(conversation_id: int, content: str,
                        bill_result: dict | None = None, card_result: dict | None = None,
-                       tool_results: list[dict] | None = None) -> dict | None:
+                       tool_results: list[dict] | None = None,
+                       submission_id: int | None = None) -> dict | None:
     if not content and not (tool_results or bill_result or card_result):
+        if submission_id is not None:
+            advance_submission(submission_id=submission_id, state="completed")
         return None
     if not content:
         content = "已完成查询，结果见下方卡片。"
@@ -113,6 +116,16 @@ def _persist_assistant(conversation_id: int, content: str,
             session.add(MessageResult(
                 message_id=message.id, kind=snapshot_kind,
                 ciphertext=ciphertext, key_version=key_version))
+        if submission_id is not None:
+            # Atomic success boundary: persisted response and request completion
+            # must commit together, never in two separate transactions.
+            submission = session.get(ChatSubmission, submission_id)
+            if submission is None or submission.conversation_id != conversation_id:
+                raise RuntimeError("Chat submission ownership invariant failed")
+            submission.state = "completed"
+            submission.assistant_message_id = message.id
+            submission.updated_at = utcnow()
+            session.add(submission)
         session.commit()
         return _present_message(session, message, mask_content=False).model_dump(mode="json")
 
@@ -165,6 +178,7 @@ def read_submission_status(
     )).first()
     if attempt is None:
         raise HTTPException(status_code=404, detail="请求不存在")
+    recover_stale_submission(session, attempt)
     result: dict = {
         "request_id": attempt.request_id,
         "state": attempt.state,
@@ -370,10 +384,9 @@ async def send_message(
         def finish_reply(content: str, bill: dict | None = None,
                          cards: dict | None = None,
                          results: list[dict] | None = None) -> dict | None:
-            saved = _persist_assistant(conversation_id, content, bill, cards, results)
-            advance_submission(submission_id=submission_id, state="completed",
-                               assistant_message_id=saved["id"] if saved else None)
-            return saved
+            return _persist_assistant(
+                conversation_id, content, bill, cards, results, submission_id=submission_id
+            )
         collected: list[str] = []
         trusted_bill: dict | None = None
         trusted_cards: dict | None = None

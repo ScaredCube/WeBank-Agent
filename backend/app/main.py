@@ -22,7 +22,9 @@ from uuid import uuid4
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    from app.services.chat_submissions import recover_stale_submissions
     with session_scope() as session:
+        recover_stale_submissions(session)
         user = seed_demo_user(session)
         seed_demo_accounts(session, user)
         seed_demo_cards(session, user)

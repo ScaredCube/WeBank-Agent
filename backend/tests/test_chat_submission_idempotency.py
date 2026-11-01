@@ -213,3 +213,35 @@ def test_fingerprint_is_keyed_and_references_are_canonical(client):
     assert one!=__import__("hashlib").sha256(__import__("json").dumps({
         "content":"转账 1 元","references":[("account",1),("contact",2)]
     },sort_keys=True,ensure_ascii=False,separators=(",",":")).encode()).hexdigest()
+
+def test_stale_processing_is_marked_interrupted_without_replaying_agent(
+    client, auth_headers, monkeypatch,
+):
+    from datetime import timedelta
+    from app.core.time import utcnow
+    from app.services.chat_submissions import recover_stale_submissions
+
+    conv=cid(client,auth_headers)
+    with Session(get_engine()) as db:
+        user=db.exec(select(User)).first()
+        entry,created=claim_submission(db,user_id=user.id,conversation_id=conv,
+             request_id="req-crashed-worker-123",payload_digest=fingerprint("hello",[]))
+        assert created
+        entry.updated_at=utcnow()-timedelta(minutes=45)
+        db.add(entry)
+        db.commit()
+
+    class NeverCallModel:
+        async def stream(self,messages,tools=None):
+            raise AssertionError("Stale requests must not be replayed")
+            yield LLMChunk(content="never") # pragma: no cover
+    monkeypatch.setattr("app.agent.loop.get_llm",NeverCallModel)
+    with Session(get_engine()) as db:
+        assert recover_stale_submissions(db)==1
+        assert recover_stale_submissions(db)==0
+    status=client.get(f"/api/chat/conversations/{conv}/requests/req-crashed-worker-123",
+                      headers=auth_headers)
+    assert status.status_code==200 and status.json()["state"]=="interrupted"
+    assert client.post(url(conv),headers=auth_headers,json={
+        "content":"hello","request_id":"req-crashed-worker-123"}).status_code==409
+    assert client.get(url(conv),headers=auth_headers).json()==[]

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
 import { streamChat, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
+import { savePendingChatRequest, clearPendingChatRequest, readPendingChatRequests } from './pending-request'
 import { billResultCard } from '@/features/intelligent-ui/bill-result-card'
 import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/card-status-schema'
 import { toolResultListSchema, type ToolResultItem } from '@/features/intelligent-ui/tool-results'
@@ -48,6 +49,41 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   // Preserve the opaque request identity when a send is interrupted. An exact
   // retry in this mounted session must never create a second bank operation.
   const pendingRequest = useRef<{signature:string; requestId:string} | null>(null)
+  const recoveryWarning = useRef(onActionWarning)
+  useEffect(() => { recoveryWarning.current = onActionWarning }, [onActionWarning])
+
+  // A reload only re-checks status. It never replays POST/tool calls.
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    const pending = readPendingChatRequests()
+    void (async () => {
+      for (const item of pending) {
+        if (cancelled) return
+        try {
+          const status = await api.submissionStatus(token, item.conversationId, item.requestId)
+          if (cancelled) return
+          if (status.state === 'completed') {
+            clearPendingChatRequest(item.requestId)
+            recoveryWarning.current('上一条请求已完成，结果可在历史会话中查看。')
+          } else if (status.state === 'action_pending') {
+            clearPendingChatRequest(item.requestId)
+            recoveryWarning.current('此前请求已创建待确认操作，请在操作记录中核对。不会再次执行或下发确认令牌。')
+          } else {
+            recoveryWarning.current('检测到尚未确认完成的历史请求，请先核对会话及操作记录，不要重复发起。')
+          }
+        } catch (error) {
+          if (cancelled) return
+          if (error instanceof ApiError && (error.status === 401 || error.status === 404)) {
+            if (error.status === 404) clearPendingChatRequest(item.requestId)
+          } else {
+            recoveryWarning.current('历史请求状态暂时无法核对，请确认操作记录后再决定是否重新提交。')
+          }
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [token])
 
   useEffect(() => {
     if (!token) return
@@ -211,6 +247,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         const requestId = pendingRequest.current?.signature === signature
           ? pendingRequest.current.requestId : crypto.randomUUID()
         pendingRequest.current = { signature, requestId }
+        savePendingChatRequest({conversationId, requestId, createdAt: Date.now()})
         submittedRequestId = requestId
         let receivedDone = false
 
@@ -254,7 +291,10 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             }
           },
         })
-        if (receivedDone) pendingRequest.current = null
+        if (receivedDone) {
+          pendingRequest.current = null
+          clearPendingChatRequest(requestId)
+        }
       } catch (err) {
         if (!isCurrent()) return
         if (receiveController.current?.signal.aborted) {
@@ -282,10 +322,12 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
               savedReply = status.message
               sendFailure = null
               pendingRequest.current = null
+              clearPendingChatRequest(submittedRequestId)
               setError(null)
             } else if (status.state === 'action_pending') {
               sendFailure = null
               pendingRequest.current = null
+              clearPendingChatRequest(submittedRequestId)
               onActionWarning('待确认操作已在服务端创建。请到操作记录核对，原确认令牌不能重新获取。')
               setError(null)
             }

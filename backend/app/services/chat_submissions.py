@@ -6,6 +6,7 @@ Retries never execute tools and NEVER receive an old action confirmation token.
 import hashlib
 import hmac
 import json
+from datetime import timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -78,3 +79,36 @@ def advance_submission(*, submission_id: int | None, state: str,
         attempt.updated_at = utcnow()
         session.add(attempt)
         session.commit()
+
+
+STALE_PROCESSING_AFTER = timedelta(minutes=30)
+
+
+def recover_stale_submission(session: Session, attempt: ChatSubmission) -> bool:
+    """Mark abandoned in-flight work uncertain. Never replay its tools.
+
+    An active worker may still exist, so this marks ONLY a sufficiently old
+    processing state; completed and action_pending states are never changed.
+    """
+    if attempt.state != "processing":
+        return False
+    updated = attempt.updated_at
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    if utcnow() - updated < STALE_PROCESSING_AFTER:
+        return False
+    attempt.state = "interrupted"
+    attempt.updated_at = utcnow()
+    session.add(attempt)
+    session.commit()
+    return True
+
+
+def recover_stale_submissions(session: Session) -> int:
+    """Best-effort reconciliation at process start, safe for multi-worker apps."""
+    cutoff = utcnow() - STALE_PROCESSING_AFTER
+    records = session.exec(select(ChatSubmission).where(
+        ChatSubmission.state == "processing",
+        ChatSubmission.updated_at < cutoff,
+    )).all()
+    return sum(recover_stale_submission(session, entry) for entry in records)

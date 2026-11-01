@@ -26,6 +26,9 @@ const scrollIntoView = vi.fn()
 const messageWithId = (id: number, text: string): Message => ({ id, role: 'assistant', content: text, created_at: '' })
 
 beforeEach(() => {
+  // Every test represents a fresh browser tab. Request-recovery hints must
+  // not bleed from earlier component tests into unrelated UI assertions.
+  sessionStorage.clear()
   vi.spyOn(api, 'health').mockResolvedValue({ status: 'ok', app: 'test', llm: { mode: 'mock', model: 'mock' } })
   vi.spyOn(api, 'conversations').mockResolvedValue([conversation(1), conversation(2), conversation(3)])
   vi.spyOn(api, 'messages').mockImplementation(async (_token, id) => {
