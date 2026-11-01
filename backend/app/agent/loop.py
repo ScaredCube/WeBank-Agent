@@ -6,11 +6,12 @@ from typing import Any
 
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.llm import LLMProvider, get_llm
-from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.prompt_assembly import assemble_agent_prompt
 from app.agent.financial_summary import summarize_bill_comparison
 from app.agent.read_completion import completed_readonly_summary
-from app.agent.response_policy import tool_free_reply
-from app.agent.tool_executor import ToolExecutor, VerifiedToolContext, required_intent_tool
+from app.agent.response_policy import ReplyRoute, decide_no_tool_reply
+from app.agent.response_recovery import recover_no_tool_reply
+from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
 from app.services.redaction import mask_text, mask_value
@@ -43,14 +44,12 @@ class AgentLoop:
                      intent_amount_fen: int | None = None,
                      original_request: str | None = None,
                      conversation_id: int | None = None) -> AsyncIterator[AgentEvent]:
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # One canonical system-prompt assembly. Intent is already verified
+        # upstream; the ToolExecutor remains the authority on business actions.
+        messages: list[dict[str, Any]] = assemble_agent_prompt(
+            verified_intent_action=intent_action,
+        ).model_messages()
         messages.extend(history)
-        if required_intent_tool(intent_action) is not None:
-            messages.insert(1, {"role": "system", "content": (
-                "本轮用户消息开头包含服务端已校验的【前置意图】，其中令牌和金额均已绑定。"
-                f"必须调用 {required_intent_tool(intent_action)} 处理本轮请求；"
-                "不得要求用户重新选择账户、联系人，不得改用其他工具，也不得自行改写来源、目标或金额。"
-            )})
         registry = create_agent_registry()
         executor = ToolExecutor(registry, self.guard)
         trusted = VerifiedToolContext(
@@ -107,13 +106,23 @@ class AgentLoop:
                                 (str(item.get("content") or "") for item in reversed(history)
                                  if item.get("role") == "user"), ""
                             )
-                            text = tool_free_reply(
-                                "".join(content), user_request=latest_request,
+                            decision = decide_no_tool_reply(
+                                "".join(content),
+                                user_request=(original_request if original_request is not None
+                                              else latest_request),
                                 financial_context=bool(
                                     verified_account_token or verified_card_id
                                     or verified_contact_token or has_selected_contact
                                 ),
                             )
+                            # The ordinary answer costs no second LLM call.
+                            # Only an incomplete operation clarification merits a
+                            # bounded, tool-free wording recovery on a live provider.
+                            if (decision.route == ReplyRoute.CLARIFY_ACTION
+                                    and getattr(self.llm, "mode", None) == "openai"):
+                                text = await recover_no_tool_reply(decision, model=self.llm)
+                            else:
+                                text = decision.safe_text
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:

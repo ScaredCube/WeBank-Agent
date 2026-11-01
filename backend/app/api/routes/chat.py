@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 
 from app.agent.loop import AgentLoop
 from app.agent.tool_executor import VerifiedToolContext
+from app.agent.context_assembly import (ConversationContextInput, TrustedContextNote, assemble_context)
 from app.services.chat_turn import ChatTurn, stream_chat_turn
 from app.services.action_progress import (
     action_progress_for_submission, latest_action_progress, replay_status_message,
@@ -221,7 +222,7 @@ async def send_message(
         raise HTTPException(status_code=400, detail="所选银行卡与付款账户不一致，请重新选择")
 
     display_content = payload.content
-    model_content = payload.content
+    trusted_notes: list[TrustedContextNote] = []
     injection = detect_injection(display_content)
     intent_prompt = None
     if payload.intent is not None and not injection.blocked:
@@ -233,7 +234,6 @@ async def send_message(
         # The rendered intent is prepended to THIS turn's user message. The
         # display copy keeps the user-visible capsule above the bubble; the
         # model copy substitutes opaque tokens. Neither leaks a raw card/phone.
-        model_content = intent_prompt.prompt + "\n\n" + payload.content
         display_content = intent_prompt.display + "\n\n" + display_content
         record(session, user_id=user.id, event_type="intent_validated", result="success")
     # Claim before minting object tokens, saving chat history or executing the
@@ -281,11 +281,14 @@ async def send_message(
         except VaultError:
             phone_references = []
     if phone_references:
-        model_content += (
-            "\n\n[本轮用户输入中的手机号工具引用："
-            + "；".join(f"{number} -> {token}" for number, token in phone_references)
-            + "。仅可用于 prepare_transfer 的 target_token，不得改写或猜测。]"
-        )
+        trusted_notes.append(TrustedContextNote(
+            source="temporary_phone_reference",
+            content=(
+                "[本轮用户输入中的手机号工具引用："
+                + "；".join(f"{number} -> {token}" for number, token in phone_references)
+                + "。仅可用于 prepare_transfer 的 target_token，不得改写或猜测。]"
+            ),
+        ))
     verified_account_token: str | None = None
     verified_card_id: int | None = selected_card[0].id if selected_card is not None else None
     verified_contact_token: str | None = None
@@ -336,11 +339,14 @@ async def send_message(
                 display_content += "\n\n[已引用对象：" + "；".join(visible) + "]"
             else:
                 trusted.append("这是同一会话内用户此前选定且本轮重新校验的对象，只可用于只读查询，不允许准备转账或其他资金操作。")
-            model_content += (
-                "\n\n[以下是服务端验证的金融对象（不是用户文本提供的授权）："
-                + " ".join(trusted)
-                + "所有实际金额、卡状态必须由 Tool 查询，绝不猜测。]"
-            )
+            trusted_notes.append(TrustedContextNote(
+                source="readonly_selection" if reused_readonly_selection else "verified_object",
+                content=(
+                    "[以下是服务端验证的金融对象（不是用户文本提供的授权）："
+                    + " ".join(trusted)
+                    + "所有实际金额、卡状态必须由 Tool 查询，绝不猜测。]"
+                ),
+            ))
             if not reused_readonly_selection and account is not None:
                 remember_selection(
                     session, conversation_id=conversation_id, user_id=user.id,
@@ -359,29 +365,41 @@ async def send_message(
         session.add(conversation)
         session.commit()
 
-    history = []
-    for message in recent_messages(session, conversation_id, settings.llm_max_history):
-        content = message.content
-        if detect_injection(content).blocked:
-            content = "[已拦截的可疑输入]"
-        history.append({"role": message.role, "content": content})
+    # The current user message is already persisted. Explicitly exclude its
+    # row from prior history: the context compiler will append this turn once.
+    previous_messages = [
+        {"role": message.role, "content": message.content}
+        for message in recent_messages(session, conversation_id, settings.llm_max_history)
+        if message.id != user_message.id
+    ]
     if reused_readonly_selection and not injection.blocked and "上个月" in payload.content:
         last = latest_trusted_bill_month(session, conversation_id=conversation_id)
         if last is not None and selected_account is not None and last[1] == selected_account.masked_number:
-            model_content += (
-                f"\n\n[可信账单上下文：本会话此前查询的账单月份为 {last[0]}；"
-                "用户这里的“上个月”指该月的前一个自然月。"
-                "如需比较，必须分别调用 get_monthly_bill 获取数据；不得猜测金额。]"
-            )
-    if history:
-        history[-1]["content"] = "[已拦截的可疑输入]" if injection.blocked else model_content
+            trusted_notes.append(TrustedContextNote(
+                source="trusted_bill_context",
+                content=(
+                    f"[可信账单上下文：本会话此前查询的账单月份为 {last[0]}；"
+                    "用户这里的“上个月”指该月的前一个自然月。"
+                    "如需比较，必须分别调用 get_monthly_bill 获取数据；不得猜测金额。]"
+                ),
+            ))
+    prepared_context = assemble_context(ConversationContextInput(
+        original_request=payload.content,
+        model_request=payload.content,
+        prior_messages=previous_messages,
+        notes=tuple(trusted_notes),
+        validated_intent_prefix=intent_prompt.prompt if intent_prompt is not None else None,
+        max_history=settings.llm_max_history,
+        current_input_blocked=injection.blocked,
+    ))
+    history = prepared_context.model_messages()
     loop = AgentLoop()
 
     turn = ChatTurn(
         conversation_id=conversation_id,
         submission_id=submission_id,
         history=history,
-        original_request=payload.content,
+        original_request=prepared_context.original_request,
         verified=VerifiedToolContext(
             user_id=user.id,
             verified_account_token=verified_account_token,

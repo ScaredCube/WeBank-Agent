@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from app.agent.llm import LLMProvider, get_llm
-from app.agent.prompts import GUARD_SYSTEM_PROMPT
+from app.agent.prompt_assembly import assemble_guard_prompt
 from app.agent.registry import ToolSpec
 from app.core.config import settings
 
@@ -101,10 +101,11 @@ class LLMGuard:
         self._timeout = timeout if timeout is not None else settings.guard_timeout_seconds
 
     async def review(self, call: GuardCall) -> GuardVerdict:
-        messages = [
-            {"role": "system", "content": GUARD_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(call.to_payload(), ensure_ascii=False, sort_keys=True)},
-        ]
+        messages = assemble_guard_prompt().model_messages()
+        messages.append({
+            "role": "user",
+            "content": json.dumps(call.to_payload(), ensure_ascii=False, sort_keys=True),
+        })
 
         async def collect() -> str:
             parts: list[str] = []

@@ -71,7 +71,8 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
                 "get_wealth_products", "get_wealth_holdings", "get_wealth_risk_profile",
                 "prepare_wealth_subscribe", "prepare_wealth_redeem",
                 "prepare_internal_transfer", "prepare_collection", "prepare_wealth_convert",
-                "get_subscriptions", "detect_subscriptions", "prepare_cancel_subscription"
+                "get_latest_action_progress", "get_subscriptions",
+                "detect_subscriptions", "prepare_cancel_subscription"
             }
             if self.calls == 1:
                 yield LLMChunk(tool_calls=[{
