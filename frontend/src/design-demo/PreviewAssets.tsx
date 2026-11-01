@@ -35,7 +35,7 @@ export function PreviewAssets({ hidden, onIntent, onReference }: { hidden: boole
     {activeSection === 'accounts' && <AssetSection id="asset-section-accounts" title="银行账户" count={previewAccounts.length}><div className="space-y-3">{previewAccounts.map(({ entity, masked }, index) => <div key={entity.id}>
       <ReferenceSource reference={{kind:"account",id:index+1,label:hidden ? `账户 ${index+1}` : entity.label,detail:hidden ? "" : masked}} onReference={onReference}>
       <div className="relative">
-      <DraggableAccount label={hidden ? `账户 ${index + 1} 已隐藏` : `${entity.label} · ${masked.slice(-4)}`} selected={source?.id === entity.id}
+      <DraggableAccount reserveActionSpace label={hidden ? `账户 ${index + 1} 已隐藏` : `${entity.label} · ${masked.slice(-4)}`} selected={source?.id === entity.id}
         onChoose={() => { setSource(entity); setNotice('已选择付款账户，请选择联系人。') }}
         onMove={(info) => setHovered(contactAt(info)?.id ?? null)}
         onDrop={(info) => { setHovered(null); const target = contactAt(info); if (target) combine(entity, target); else setNotice('未放到可用目标，已返回原位。') }}

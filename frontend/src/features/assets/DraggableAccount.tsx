@@ -1,7 +1,7 @@
 import { animate, motion, useDragControls, useMotionValue, useReducedMotion, type PanInfo } from 'motion/react'
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 
-export function DraggableAccount({ onDrop, onChoose, onMove, onCancel, label, selected = false }: { onDrop: (info: PanInfo) => void; onChoose: () => void; onMove: (info: PanInfo) => void; onCancel: () => void; label: string; selected?: boolean }) {
+export function DraggableAccount({ onDrop, onChoose, onMove, onCancel, label, selected = false, reserveActionSpace = false }: { onDrop: (info: PanInfo) => void; onChoose: () => void; onMove: (info: PanInfo) => void; onCancel: () => void; label: string; selected?: boolean; reserveActionSpace?: boolean }) {
   const controls = useDragControls()
   const reduced = useReducedMotion()
   const x = useMotionValue(0)
@@ -59,7 +59,7 @@ export function DraggableAccount({ onDrop, onChoose, onMove, onCancel, label, se
     onDragEnd={(_event, info) => { clear(); setActive(false); if (dragging.current) onDrop(info); dragging.current = false }}
     onClick={() => { if (!suppressClick.current) onChoose(); suppressClick.current = false }}
     animate={{ scale: active && !reduced ? 1.03 : 1 }} transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-    className={`relative z-10 w-full rounded-2xl border p-4 text-left shadow-sm focus-visible:outline-2 focus-visible:outline-jade-700 ${selected ? 'border-jade-600 bg-jade-50' : 'border-jade-200 bg-white'}`}>
+    className={`relative z-10 w-full rounded-2xl border p-4 ${reserveActionSpace ? 'pb-16' : ''} text-left shadow-sm focus-visible:outline-2 focus-visible:outline-jade-700 ${selected ? 'border-jade-600 bg-jade-50' : 'border-jade-200 bg-white'}`}>
     <span className="flex items-center justify-between gap-3"><span className="text-xs text-muted">付款账户</span><span data-drag-handle aria-hidden="true" className="hidden touch-none rounded-lg bg-jade-50 px-3 py-2 text-xs text-jade-800 md:block">长按拖动</span></span><span className="mt-2 block text-sm font-medium">{label}</span>
   </motion.button>
 }
