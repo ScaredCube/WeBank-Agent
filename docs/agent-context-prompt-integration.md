@@ -54,3 +54,43 @@ original_request_for_policy = compiled.original_request
 ## 测试与审查
 
 `python -m unittest tests.test_context_assembly` 不依赖 FastAPI 测试夹具，适合两个并行 Worktree 中快速验证。全量 pytest 仍依赖后端安装以及避免并发共享 `tempfile.gettempdir()/bank_agent_test.db`。集成验证由主线按关键金融任务统一实施。
+
+
+## Response Policy / Recovery（第三阶段）
+
+当前 `agent/response_policy.py` 原有 `tool_free_reply(...)` 对外行为原样保留，不会因为引入新结构而改变尚未集成的 Agent 行为。
+
+新增 `decide_no_tool_reply(candidate, *, user_request, financial_context=False)` 返回 `ReplyDecision`，字段包括：
+
+- `route`：`ACCEPT`、`QUERY_REQUIRED`、`VERIFY_STATUS`、`CLARIFY_ACTION`、`REJECT_CANDIDATE`。
+- `safe_text`：旧策略会返回的最终保底文本。
+- `reason` / `recovery_topic`：非敏感决策标识，用来决定是否可进行简短追问。
+
+`QUERY_REQUIRED` / `VERIFY_STATUS` **首先由 Runtime 判断能否执行真实工具查询**。若合法范围内可查，则优先调用工具，切勿以一次补写回复替代实际任务。只有本轮无法安全补查且需要进一步沟通时，才可选用：
+
+```python
+from app.agent.response_policy import ReplyRoute, decide_no_tool_reply
+from app.agent.response_recovery import recover_no_tool_reply
+
+decision = decide_no_tool_reply(
+    candidate_text,
+    user_request=prepared.original_request,  # 永远用真实的本轮请求
+    financial_context=has_verified_bank_context,
+)
+if decision.route == ReplyRoute.ACCEPT:
+    final_text = decision.safe_text
+elif decision.route in {ReplyRoute.QUERY_REQUIRED, ReplyRoute.VERIFY_STATUS}:
+    # Runtime 若能够执行合规 Tool 查询，先查询并更新可信结果。
+    # 本轮无法查询时，才考虑自然语言追问。
+    final_text = await recover_no_tool_reply(decision, model=llm)
+elif decision.route == ReplyRoute.CLARIFY_ACTION:
+    final_text = await recover_no_tool_reply(decision, model=llm)
+else:
+    final_text = decision.safe_text
+```
+
+`recover_no_tool_reply` 不接收银行历史、不接收用户原话、不接收被拦截的候选回复，也不携带工具 Schema；它只发送服务端选定的无敏感信息场景，最多调用一次模型生成一句追问。服务器生成的保底事实句永远保留。模型输出只接受严格的单字段 JSON 问句，不能包含金额、账号、确认状态等未经核实断言；超时、错误或违规时原样回退 `safe_text`。新的 Recovery Prompt 从 `assemble_recovery_prompt()` 装配并带版本标识。
+
+**主线接线责任**：由 Runtime 的最终输出阶段决定何时调用上述策略。不得在 SSE 里提前发出未经校验的候选回答；不得让 Recovery 对金融工具再次发起操作或产生新的执行状态。回复修复本身不证明任务完成。
+
+**本分支未修改** `loop.py`、`chat.py`、`read_completion.py`、`risk/injection.py`，因此生产运行路径仍使用旧策略，直到主线合并与接线。

@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal
 
-from app.agent.prompts import GUARD_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.agent.prompts import GUARD_SYSTEM_PROMPT, SYSTEM_PROMPT, RESPONSE_RECOVERY_PROMPT
 
-PromptRole = Literal["agent", "guard"]
+PromptRole = Literal["agent", "guard", "recovery"]
 
 # An allowlist, deliberately not a user-provided tool name.
 _INTENT_TOOL_NAMES: dict[str, str] = {
@@ -70,3 +70,10 @@ def assemble_agent_prompt(*, verified_intent_action: str | None = None) -> Promp
 def assemble_guard_prompt() -> PromptAssembly:
     """The guard sees a separate policy, never an agent chat transcript."""
     return _assembly("guard", [{"role": "system", "content": GUARD_SYSTEM_PROMPT}])
+
+
+def assemble_recovery_prompt() -> PromptAssembly:
+    """A tool-free, question-only response repair prompt."""
+    return _assembly(
+        "recovery", [{"role": "system", "content": RESPONSE_RECOVERY_PROMPT}],
+    )
