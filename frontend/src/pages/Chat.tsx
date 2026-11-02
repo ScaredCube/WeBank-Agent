@@ -237,6 +237,8 @@ function ChatWorkspace() {
         .map(item => ({ kind: 'card' as const, id: item.card_id, label: item.account_name, detail: item.masked_number })),
       ...data.contacts.filter(item => item.status === 'active')
         .map(item => ({ kind: 'contact' as const, id: item.contact_id, label: item.name, detail: item.bank_name + ' · ' + item.masked_phone })),
+      ...data.holdings.filter(item => item.status === 'active')
+        .map(item => ({ kind: 'holding' as const, id: item.holding_id, label: item.product_name, detail: item.category + ' · 风险 ' + item.risk_level })),
     ]).catch(error => {
       if (referenceSearchCache.current?.key === key) referenceSearchCache.current = null
       throw error
@@ -493,7 +495,8 @@ function ChatWorkspace() {
       onCardLossResolved={onCardLossResolved}
       onActionBusy={setActionPreparing}
       onActionPrepared={(event) => { setEditablePendingDraft(null); setPendingAction(event); setActionOpen(true) }}
-      onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
+      onIntent={applyIntent} onReference={addReference}
+      onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
   </div>
 
   const assetsPanel = token && assetsOpen ? <div ref={assetsRef} data-assets-panel
