@@ -34,6 +34,27 @@ from app.main import app  # noqa: E402
 from app.core.config import settings  # noqa: E402
 from app.agent.llm import get_llm_info  # noqa: E402
 
+# Optional development-only instrumentation: log ONLY requested Tool names.
+# Never print model text, user payloads, Tool arguments, bank data or keys.
+if os.getenv("XIAOWE_TRACE_READ_TOOLS") == "1":
+    from app.agent import loop as agent_loop
+    original_provider_factory = agent_loop.get_llm
+
+    class ToolNameTrace:
+        def __init__(self, inner):
+            self.inner = inner
+            self.mode = inner.mode
+
+        async def stream(self, messages, tools=None):
+            async for chunk in self.inner.stream(messages, tools=tools):
+                if chunk.tool_calls:
+                    names = [call.get("function", {}).get("name")
+                             for call in chunk.tool_calls if isinstance(call, dict)]
+                    print("model_requested_tools=", ",".join(str(name) for name in names), flush=True)
+                yield chunk
+
+    agent_loop.get_llm = lambda: ToolNameTrace(original_provider_factory())
+
 def events(response):
     parsed = []
     for line in response.text.splitlines():
@@ -66,6 +87,14 @@ with TestClient(app) as client:
         ]},
         {"content": "从刚才的账单中，有哪些支出类别值得关注？"},
     ]
+    if os.getenv("XIAOWE_TEST_THREE_READ") == "1":
+        triple = {"content": (
+            "请查询2026-10的月度账单、最近交易流水，并识别疑似重复订阅"
+        ), "references": [{"kind": "account", "id": accounts[0]["account_id"]}]}
+        if os.getenv("XIAOWE_ONLY_THREE_READ") == "1":
+            prompts = [triple]
+        else:
+            prompts.append(triple)
     for i, prompt in enumerate(prompts):
         prompt["request_id"] = str(uuid.uuid4())
         try:
@@ -80,6 +109,13 @@ with TestClient(app) as client:
                   "verified_history_followup=", (
                       "根据这段会话此前已核验并保存的账单" in (message.get("content") or "")
                   ) if i == 2 else None,
+                  "three_read_complete=", (
+                      "三个只读查询目标均已取得可信结果" in (message.get("content") or "")
+                  ) if (i == 3 or os.getenv("XIAOWE_ONLY_THREE_READ") == "1") else None,
+                  "three_read_missing=", (
+                      ",".join(label for label in ("月度账单", "最近交易流水", "疑似周期性扣费识别")
+                               if label + "：未取得可信结果" in (message.get("content") or ""))
+                  ) if (i == 3 or os.getenv("XIAOWE_ONLY_THREE_READ") == "1") else None,
                   "error=", any(f.get("type") == "error" for f in frames))
         except Exception as error:
             print("turn=", i+1, "exception=", type(error).__name__)

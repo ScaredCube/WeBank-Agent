@@ -151,7 +151,13 @@ class ToolExecutor:
 
             # Read-only selections are rebound from server-verified objects.
             if (argument_error is None and context.verified_account_token is not None
-                    and spec is not None and spec.name == "get_monthly_bill"):
+                    and spec is not None and spec.name in {
+                        "get_account_balance", "get_monthly_bill",
+                        "list_recent_transactions",
+                    }):
+                # A server-verified selected account is the scope of all
+                # account-specific READ tools. The model cannot omit or replace
+                # it with an unverified account token.
                 args["account_token"] = context.verified_account_token
             if (argument_error is None and context.verified_account_token is not None
                     and context.verified_card_id is not None and spec is not None

@@ -221,3 +221,131 @@ def test_bundle_task_cannot_finish_when_only_bill_is_verified(
     with Session(get_engine()) as session:
         task = session.get(ConversationTask, cid)
         assert task.status == "needs_account"
+
+def test_explicit_month_is_required_for_verified_bill_coverage():
+    plan = build_read_goal_plan(REQUEST)
+    assert plan.expected_month == "2026-10"
+    assert build_read_goal_plan(REQUEST.replace("2026-10", "2026年10月")).expected_month == "2026-10"
+    assert build_read_goal_plan(REQUEST.replace("2026-10", "2026/10")).expected_month == "2026-10"
+    assert build_read_goal_plan("查2026-10和2026-09的账单、最近交易流水和订阅") is None
+    assert build_read_goal_plan("查2026-10和2026-10的账单、最近交易流水和订阅") is None
+    from datetime import timedelta, timezone
+    from app.core.time import utcnow
+    local_date = utcnow().astimezone(timezone(timedelta(hours=8)))
+    last_month = local_date.replace(day=1) - timedelta(days=1)
+    assert build_read_goal_plan(REQUEST.replace("2026-10", "本月")).expected_month == local_date.strftime("%Y-%m")
+    assert build_read_goal_plan(REQUEST.replace("2026-10", "上个月")).expected_month == last_month.strftime("%Y-%m")
+    for ambiguous in ("本月和上个月", "下个月", "近两个月", "最近三个月"):
+        assert build_read_goal_plan(REQUEST.replace("2026-10", ambiguous)) is None
+    assert build_read_goal_plan(REQUEST.replace("2026-10", "本月2026-10")) is None
+    from app.services.conversation_tasks import ReadGoal, classify_pending_read_goal
+    assert classify_pending_read_goal(REQUEST.replace("2026-10", "上个月")) == ReadGoal(
+        "read_bundle", last_month.strftime("%Y-%m"))
+    assert classify_pending_read_goal(REQUEST.replace("2026-10", "本月")) == ReadGoal(
+        "read_bundle", local_date.strftime("%Y-%m"))
+    assert classify_pending_read_goal(REQUEST.replace("2026-10", "本月和上个月")) is None
+    assert classify_pending_read_goal("帮我查2026-09和2026-10的账单") is None
+
+    wrong = ("get_monthly_bill", {"ok": True, "data": bill("2026-09", 12000, 6000)})
+    transactions = ("list_recent_transactions", {"ok": True, "data": []})
+    subscriptions = ("detect_subscriptions", {"ok": True, "data": []})
+    results = [wrong, transactions, subscriptions]
+    assert plan.verified(results) == ("list_recent_transactions", "detect_subscriptions")
+    assert plan.next_unattempted(results) is None
+    summary = plan.report(results)
+    assert "尚未完成全部请求" in summary
+    assert "月度账单：未取得可信结果" in summary
+    assert "三个只读查询目标均已取得可信结果" not in summary
+
+
+def test_wrong_month_tool_cannot_mark_three_goal_chat_complete(client, auth_headers, monkeypatch):
+    class Model:
+        mode = "openai"
+        calls = 0
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                first = call("get_monthly_bill", 101)
+                first["function"]["arguments"] = '{"month":"2026-09"}'
+                yield LLMChunk(tool_calls=[
+                    first,
+                    call("list_recent_transactions", 102),
+                    call("detect_subscriptions", 103),
+                ])
+            else:
+                yield LLMChunk(content="已完成所有查询。")
+
+    model = Model()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
+    cid = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    frames = events(client.post(
+        f"/api/chat/conversations/{cid}/messages", headers=auth_headers,
+        json={"content": REQUEST},
+    ))
+    assert frames[-1]["type"] == "done"
+    assert any(frame["type"] == "bill_result" and frame["data"]["month"] == "2026-09"
+               for frame in frames)
+    content = frames[-1]["message"]["content"]
+    assert "月度账单：未取得可信结果" in content
+    assert "尚未完成全部请求" in content
+    assert "均已取得可信结果" not in content
+    assert model.calls <= 3
+
+def test_verified_account_selection_scopes_balance_and_recent_transactions(
+    client, auth_headers, monkeypatch,
+):
+    """Two owned accounts: model-supplied scope must not override selected account."""
+    from sqlmodel import Session, select
+    from app.db.session import get_engine
+    from app.models import Account
+    from app.services.vault import create_account_token
+
+    with Session(get_engine()) as db:
+        first = db.exec(select(Account)).first()
+        second = Account(
+            user_id=first.user_id, name="本轮选中的第二个模拟账户",
+            masked_number="**** 9673", status="active", currency="CNY",
+            balance_fen=246800,
+        )
+        db.add(second); db.flush()
+        other_token = create_account_token(db, first.user_id, first.id)
+        selected_id = second.id
+        db.commit()
+
+    class Model:
+        tool_observations = None
+        async def stream(self, messages, tools=None):
+            if not any(m.get("role") == "tool" for m in messages):
+                yield LLMChunk(tool_calls=[
+                    {"id": "scope_balance", "type": "function",
+                     "function": {"name": "get_account_balance",
+                                  "arguments": json.dumps({"account_token": other_token})}},
+                    {"id": "scope_transactions", "type": "function",
+                     "function": {"name": "list_recent_transactions",
+                                  "arguments": json.dumps({"account_token": other_token, "limit": 5})}},
+                ])
+            else:
+                self.tool_observations = [json.loads(m["content"]) for m in messages
+                                          if m.get("role") == "tool"]
+                yield LLMChunk(content="查询结束。")
+
+    model = Model()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
+    cid = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
+    frames = events(client.post(
+        f"/api/chat/conversations/{cid}/messages",
+        headers=auth_headers,
+        json={"content": "查询我选中账户的余额和最近交易流水",
+              "references": [{"kind": "account", "id": selected_id}]},
+    ))
+    assert frames[-1]["type"] == "done"
+    assert model.tool_observations is not None
+    balance, transactions = model.tool_observations
+    assert balance["ok"] is True
+    assert len(balance["data"]) == 1
+    assert balance["data"][0]["name"] == "本轮选中的第二个模拟账户"
+    assert balance["data"][0]["balance_fen"] == 246800
+    assert transactions["ok"] is True
+    assert transactions["data"] == []
+    assert transactions["scope"]["kind"] == "single_account"
+    assert "action_required" not in [event["type"] for event in frames]

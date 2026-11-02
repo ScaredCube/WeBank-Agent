@@ -7,11 +7,14 @@ never initiate payments or authorize reuse of previous account selection.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta, timezone
+import re
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.agent.compound_read_summary import _valid_rows
+from app.core.time import utcnow
 from app.schemas.bills import MonthlyBill
 from app.tools.presentation import render_tool_result
 
@@ -30,16 +33,17 @@ _ACTION = (
     "操作成功", "执行", "提交订单",
 )
 _SKIP = ("不要", "不用", "无需", "不必", "别查", "暂不", "只查", "仅查")
-_ALLOWED_EXTRA = frozenset()  # Don't broaden a three-part request by inferred goals.
+_ALLOWED_EXTRA = frozenset()  # Do not broaden a read request by inferred goals.
+_EXPLICIT_MONTH = re.compile(r"(?<!\d)(20\d{2})[-/年](0?[1-9]|1[0-2])(?:月)?(?!\d)")
 
 
-def _trusted(name: str, result: dict[str, Any]) -> bool:
+def _trusted(name: str, result: dict[str, Any], *, expected_month: str | None) -> bool:
     if not isinstance(result, dict) or result.get("ok") is not True:
         return False
     if name == "get_monthly_bill":
         try:
-            MonthlyBill.model_validate(result.get("data"))
-            return True
+            bill = MonthlyBill.model_validate(result.get("data"))
+            return expected_month is None or bill.month == expected_month
         except (ValidationError, TypeError, ValueError):
             return False
     if name in ("list_recent_transactions", "detect_subscriptions"):
@@ -52,16 +56,17 @@ class ReadGoalPlan:
     """Fixed ordered set of read-only goals; no tool arguments or auth tokens."""
 
     goals: tuple[str, ...] = _GOALS
+    expected_month: str | None = None
 
     def verified(self, results: list[tuple[str, dict]]) -> tuple[str, ...]:
         return tuple(goal for goal in self.goals
-                     if any(name == goal and _trusted(name, res)
+                     if any(name == goal and _trusted(name, res, expected_month=self.expected_month)
                             for name, res in results))
 
     def next_unattempted(self, results: list[tuple[str, dict]]) -> str | None:
         if not results or any(
             name not in self.goals and name not in _ALLOWED_EXTRA
-            or not _trusted(name, result)
+            or not _trusted(name, result, expected_month=self.expected_month)
             for name, result in results
         ):
             return None
@@ -72,7 +77,7 @@ class ReadGoalPlan:
         if any(name not in self.goals for name, _ in results):
             return None
         valid = {name: res for name, res in results
-                 if name in self.goals and _trusted(name, res)}
+                 if name in self.goals and _trusted(name, res, expected_month=self.expected_month)}
         if not valid:
             return None
         finished = [goal for goal in self.goals if goal in valid]
@@ -125,4 +130,20 @@ def build_read_goal_plan(request: str) -> ReadGoalPlan | None:
             and any(term in request for term in _TRANSACTION)
             and any(term in request for term in _SUBSCRIPTION)):
         return None
-    return ReadGoalPlan()
+    dates = _EXPLICIT_MONTH.findall(request)
+    # Two explicit months require comparison-aware reasoning, not a single
+    # monthly bill result repackaged as a completed multi-goal plan.
+    if len(dates) > 1 or any(term in request for term in (
+            "下个月", "近两个月", "最近两个月", "过去两个月", "近三个月",
+            "最近三个月", "每个月", "逐月", "各个月", "连续三个月")):
+        return None
+    relative = [term for term in ("本月", "上个月") if term in request]
+    if (len(relative) > 1 or (relative and dates)):
+        return None
+    expected_month = (f"{dates[0][0]}-{int(dates[0][1]):02d}" if dates else None)
+    if relative:
+        local_date = utcnow().astimezone(timezone(timedelta(hours=8)))
+        if relative[0] == "上个月":
+            local_date = local_date.replace(day=1) - timedelta(days=1)
+        expected_month = local_date.strftime("%Y-%m")
+    return ReadGoalPlan(expected_month=expected_month)

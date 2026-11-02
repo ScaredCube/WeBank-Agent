@@ -50,9 +50,23 @@ def classify_pending_read_goal(text: str) -> ReadGoal | None:
             or not any(w in text for w in _QUERY_CUES)
             or any(term in text for term in ("什么是", "原理", "如何理解", "举个例子"))):
         return None
-    match = _MONTH.search(text)
-    month = f"{match.group(1)}-{int(match.group(2)):02d}" if match else None
-    kind = ("read_bundle" if build_read_goal_plan(text) is not None
+    dates = _MONTH.findall(text)
+    relative = [phrase for phrase in ("本月", "上个月") if phrase in text]
+    if (len(dates) > 1 or len(relative) > 1 or (dates and relative)
+            or any(phrase in text for phrase in (
+                "下个月", "近两个月", "最近两个月", "过去两个月",
+                "最近三个月", "每个月", "逐月", "连续三个月"))):
+        return None
+    plan = build_read_goal_plan(text)
+    month = f"{dates[0][0]}-{int(dates[0][1]):02d}" if dates else None
+    if plan is not None:
+        month = plan.expected_month
+    elif relative:
+        local_date = utcnow().astimezone(timezone(timedelta(hours=8)))
+        if relative[0] == "上个月":
+            local_date = local_date.replace(day=1) - timedelta(days=1)
+        month = local_date.strftime("%Y-%m")
+    kind = ("read_bundle" if plan is not None
             else "bill_analysis" if any(w in text for w in ("分析", "收支", "消费分类", "趋势"))
             else "bill_query")
     return ReadGoal(kind=kind, month=month)

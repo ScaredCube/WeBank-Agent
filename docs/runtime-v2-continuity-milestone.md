@@ -172,3 +172,17 @@ account then multi-goal resume, and rejection of premature task completion.
 **Scope boundary:** This is a deliberately small, typed implementation of
 multi-step read progress, not a generic user-directed workflow engine. Other
 read combinations and persistent per-step snapshots remain future work.
+
+## Single-month evidence matching in bounded three-goal plans
+
+A monthly-bill Tool result now counts as completion only if it matches the user's canonical requested month. The plan recognizes explicit months (`2026-10`, `2026/10`, `2026年10月`) and the China-local relative phrases `本月`/`上个月`. Multi-month and ambiguous ranges use the established model/Tool path instead of being forced into a single-month plan. A wrong-month verified snapshot may be presented as a historical fact, but the requested bill goal remains incomplete. Regression coverage includes a three-Tool API call where the model retrieves an incorrect month.
+
+## Real-model read-goal follow-up acceptance
+
+The three-goal live smoke was extended with opt-in flags `XIAOWE_TEST_THREE_READ=1`, `XIAOWE_ONLY_THREE_READ=1` and `XIAOWE_TRACE_READ_TOOLS=1`. It runs with synthetic banking data in a separate temporary SQLite DB and ephemeral vault keys. Tracing prints only requested Tool **names**, not model text, arguments, banking data or keys.
+
+Initial DeepSeek attempt returned a valid October bill but failed the transactions objective when two accounts were present. Root cause: the server-validated selected account was rebound for `get_monthly_bill` but not `list_recent_transactions`. ToolExecutor now binds the same verified account to all account-scoped READ tools (balance, monthly bill, latest transactions) and overrides any model-supplied account token. Direct tests show the second account stays isolated even when the model sends a stale first-account token.
+
+After the fix, a new real DeepSeek triple-read test requested all three tools, reported `three_read_complete=True`, produced a 292-character response, and returned `bill_result` / `ui_view` / `done` with no SSE errors. This confirms the representative **synthetic** scenario, not every possible model response or production deployment.
+
+Regression checkpoint: 607 backend tests + 31 subtests passed after account-scope and goal-month changes; the subsequent narrow cross-turn month normalization passed a further focused 18/18 task/plan/manifest tests. Real DeepSeek simulated three-goal smoke finished with `three_read_complete=True` and no SSE error.
