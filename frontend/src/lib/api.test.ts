@@ -8,6 +8,37 @@ function respond(value: unknown) {
 }
 
 describe('业务列表响应校验', () => {
+  it('历史消息保留服务端的视图与订阅快照', async () => {
+    const view = { view_id: 'view-12345678', revision: 3 }
+    respond([{ id: 4, role: 'assistant', content: '分析完成', created_at: '2026-11-01T00:00:00Z',
+      ui_view: view, subscription_results: { kind: 'subscriptions', data: [] } }])
+
+    const [message] = await api.messages('test', 1)
+
+    expect(message.ui_view).toEqual(view)
+    expect(message.subscription_results).toEqual({ kind: 'subscriptions', data: [] })
+  })
+
+  it('读取指定视图版本，并以服务端交互端点保存筛选', async () => {
+    const responseView = { view_id: 'view-12345678', revision: 4 }
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(responseView), { status: 200 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.view('test-token', 'view-12345678', 2)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/views/view-12345678?revision=2', expect.objectContaining({
+      headers: expect.any(Headers),
+    }))
+    await api.viewInteraction('test-token', 'view-12345678', 3, 'select_category', 'food')
+    const [url, init] = fetchMock.mock.calls[1]
+    expect(url).toBe('/api/views/view-12345678/interactions')
+    expect(init).toMatchObject({ method: 'POST', headers: expect.any(Headers) })
+    expect(JSON.parse(init.body)).toMatchObject({
+      base_revision: 3, action: 'select_category', value: 'food',
+    })
+    expect(JSON.parse(init.body).event_id).toMatch(/^[A-Za-z0-9_-]{8,80}$/)
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer test-token')
+  })
+
   it('月账单可指定账户，也保留不指定账户的查询', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })))
     vi.stubGlobal('fetch', fetchMock)

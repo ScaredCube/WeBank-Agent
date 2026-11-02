@@ -4,8 +4,9 @@ from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.session import session_scope
-from app.models import Conversation, Message, MessageResult, ChatSubmission
+from app.models import Conversation, Message, MessageResult, MessageView, ChatSubmission
 from app.schemas.chat import MessageOut
+from app.schemas.generative_ui import ViewEnvelope
 from app.schemas.tool_results import ToolResultBundle, ToolResultItem
 from app.services.chat_submissions import advance_submission
 from app.services.vault import VaultError, encrypt_result_snapshot, decrypt_result_snapshot
@@ -17,10 +18,17 @@ _UNSET_SNAPSHOT = object()
 def present_message(
     session: Session, message: Message,
     snapshot: MessageResult | None | object = _UNSET_SNAPSHOT,
+    view_snapshots: dict[int, object] | None = None,
 ) -> MessageOut:
     output = MessageOut.model_validate(message)
     if message.role != "assistant":
         return output
+    if view_snapshots is None:
+        from app.services.view_service import load_views_for_messages
+        view_snapshots = load_views_for_messages(session, [message])
+    view = view_snapshots.get(message.id)
+    if view is not None:
+        output = output.model_copy(update={"ui_view": view.model_dump(mode="json")})
     if snapshot is _UNSET_SNAPSHOT:
         snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
     if not isinstance(snapshot, MessageResult) or snapshot.kind not in ("monthly_bill", "card_status", "internal_transfer", "tool_results"):
@@ -47,7 +55,8 @@ def present_message(
 def persist_assistant(conversation_id: int, content: str,
                        bill_result: dict | None = None, card_result: dict | None = None,
                        tool_results: list[dict] | None = None,
-                       submission_id: int | None = None) -> dict | None:
+                      submission_id: int | None = None, *, finalize: bool = True,
+                      view: ViewEnvelope | None = None) -> dict | None:
     if not content and not (tool_results or bill_result or card_result):
         if submission_id is not None:
             advance_submission(submission_id=submission_id, state="completed")
@@ -77,6 +86,11 @@ def persist_assistant(conversation_id: int, content: str,
             session.add(MessageResult(
                 message_id=message.id, kind=snapshot_kind,
                 ciphertext=ciphertext, key_version=key_version))
+        if view is not None:
+            if view.conversation_id != conversation_id:
+                raise RuntimeError("View ownership invariant failed")
+            session.add(MessageView(message_id=message.id, view_id=view.view_id,
+                                    revision=view.revision))
         if submission_id is not None:
             # Atomic success boundary: persisted response and request completion
             # must commit together, never in two separate transactions.
@@ -86,9 +100,34 @@ def persist_assistant(conversation_id: int, content: str,
             # A prepared action remains pending even though its assistant
             # placeholder message is now durable; do not overwrite the replay
             # state with "completed".
-            if submission.state != "action_pending":
+            if finalize and submission.state != "action_pending":
                 submission.state = "completed"
             submission.assistant_message_id = message.id
+            submission.updated_at = utcnow()
+            session.add(submission)
+        session.commit()
+        return present_message(session, message).model_dump(mode="json")
+
+
+def finalize_assistant(conversation_id: int, message_id: int, *,
+                       submission_id: int | None = None, view=None) -> dict:
+    """Complete a saved reply after optional view generation."""
+    with session_scope() as session:
+        message = session.get(Message, message_id)
+        if message is None or message.conversation_id != conversation_id or message.role != "assistant":
+            raise RuntimeError("Assistant message ownership invariant failed")
+        if view is not None:
+            from app.models import MessageView
+            if view.conversation_id != conversation_id:
+                raise RuntimeError("View ownership invariant failed")
+            session.add(MessageView(message_id=message_id, view_id=view.view_id, revision=view.revision))
+        if submission_id is not None:
+            submission = session.get(ChatSubmission, submission_id)
+            if (submission is None or submission.conversation_id != conversation_id
+                    or submission.assistant_message_id != message_id):
+                raise RuntimeError("Chat submission ownership invariant failed")
+            if submission.state != "action_pending":
+                submission.state = "completed"
             submission.updated_at = utcnow()
             session.add(submission)
         session.commit()
@@ -109,5 +148,8 @@ def present_messages(session: Session, messages: list[Message]) -> list[MessageO
                 select(MessageResult).where(MessageResult.message_id.in_(chunk))
             ).all()
         })
-    return [present_message(session, message, snapshot=snapshots.get(message.id))
+    from app.services.view_service import load_views_for_messages
+    views = load_views_for_messages(session, messages)
+    return [present_message(session, message, snapshot=snapshots.get(message.id),
+                            view_snapshots=views)
             for message in messages]

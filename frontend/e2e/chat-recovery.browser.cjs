@@ -64,8 +64,11 @@ async function fakeBank(context, state, config = {}) {
 
 async function openChat(page) {
   await page.goto('/chat')
+  await expect(page.getByRole('heading',{name:'今天，想完成什么？'})).toBeVisible()
   await expect(page.getByRole('textbox',{name:'输入消息'})).toBeVisible()
   await page.getByRole('textbox',{name:'输入消息'}).fill('查询最近交易')
+  await expect(page.getByRole('textbox',{name:'输入消息'})).toHaveValue('查询最近交易')
+  await expect(page.getByRole('button',{name:'发送'})).toBeEnabled()
   await page.getByRole('button',{name:'发送'}).click()
   await expect(page.getByRole('textbox',{name:'输入消息'})).toHaveValue('查询最近交易')
   await expect(page.getByRole('button',{name:'发送'})).toBeEnabled()

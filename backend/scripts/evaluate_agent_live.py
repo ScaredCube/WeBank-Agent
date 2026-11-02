@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection", "followup", "greeting", "transfer_clarify")
+CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection", "followup", "generative_ui", "greeting", "transfer_clarify")
 DEFAULT_CASES = ("bill", "joint", "transfer_prepare", "missing_amount", "injection")
 
 
@@ -171,6 +171,172 @@ def evaluate_followup(client, headers, ids):
     }
 
 
+def evaluate_generative_ui(client, headers, ids):
+    """Real Composer + trusted selection + deterministic follow-up on synthetic data."""
+    from sqlmodel import Session, select
+    from app.db.session import get_engine
+    from app.models import Account, AuditLog, TransferRequest
+
+    account_id = ids[0]
+    with Session(get_engine()) as db:
+        balance_before = db.get(Account, account_id).balance_fen
+        transfers_before = len(db.exec(select(TransferRequest)).all())
+    conversation = client.post("/api/chat/conversations", headers=headers, json={})
+    assert conversation.status_code == 201, "Unable to create synthetic conversation"
+    cid = conversation.json()["id"]
+    endpoint = f"/api/chat/conversations/{cid}/messages"
+    start = time.monotonic()
+    first = client.post(endpoint, headers=headers, json={
+        # The isolated evaluation seed contains January 2026 transactions;
+        # use that explicit month so a category selection is available.
+        "content": "请查询 2026-01 月的消费账单，按支出分类汇总金额和笔数，并生成交互式分类分析。",
+        "references": [{"kind": "account", "id": account_id}],
+        "request_id": f"gui-analysis-{cid:08d}",
+    })
+    first_events = []
+    if first.status_code == 200:
+        for row in first.text.splitlines():
+            if row.startswith("data: "):
+                try:
+                    first_events.append(json.loads(row[6:]))
+                except json.JSONDecodeError:
+                    pass
+    first_done = next((event.get("message") for event in reversed(first_events)
+                       if event.get("type") == "done"), None)
+    first_event_types = [event.get("type") for event in first_events
+                         if isinstance(event.get("type"), str)]
+    ui_statuses = [event.get("status") for event in first_events
+                   if event.get("type") == "ui_status"
+                   and isinstance(event.get("status"), str)]
+    ui_status_reasons = [event.get("reason") for event in first_events
+                         if event.get("type") == "ui_status"
+                         and isinstance(event.get("reason"), str)]
+    view_event = next((event.get("view") for event in first_events
+                       if event.get("type") == "ui_view"), None)
+    view = first_done.get("ui_view") if isinstance(first_done, dict) else None
+    view_ready = (isinstance(view, dict) and isinstance(view_event, dict)
+                  and view == view_event and view.get("revision") == 1)
+    category_dataset = next((dataset for dataset in view.get("trusted_data", {}).get("datasets", {}).values()
+                             if dataset.get("kind") == "categories"), None) if view_ready else None
+    rows = category_dataset.get("rows", []) if isinstance(category_dataset, dict) else []
+    selected = rows[0] if rows else None
+    with Session(get_engine()) as db:
+        first_logs = db.exec(select(AuditLog).where(AuditLog.conversation_id == cid)).all()
+    first_tool_calls = sum(log.event_type == "tool_called" for log in first_logs)
+    interaction = None
+    if view_ready and isinstance(selected, dict):
+        interaction = client.post(
+            f"/api/views/{view['view_id']}/interactions", headers=headers,
+            json={"event_id": "gui-select-0001", "base_revision": view["revision"],
+                  "action": "select_category", "value": selected.get("id")},
+        )
+    selected_view = interaction.json() if interaction is not None and interaction.status_code == 200 else None
+    interaction_status = interaction.status_code if interaction is not None else None
+    second = None
+    second_events = []
+    if isinstance(selected_view, dict):
+        second = client.post(endpoint, headers=headers, json={
+            "content": "这个分类有什么值得注意的？",
+            "view_context": {"view_id": view["view_id"],
+                             "revision": selected_view["revision"]},
+            "request_id": f"gui-followup-{cid:08d}",
+        })
+        if second.status_code == 200:
+            for row in second.text.splitlines():
+                if row.startswith("data: "):
+                    try:
+                        second_events.append(json.loads(row[6:]))
+                    except json.JSONDecodeError:
+                        pass
+    second_done = next((event.get("message") for event in reversed(second_events)
+                        if event.get("type") == "done"), None)
+    second_event_types = [event.get("type") for event in second_events
+                          if isinstance(event.get("type"), str)]
+    answer = second_done.get("content", "") if isinstance(second_done, dict) else ""
+    amount_fen = selected.get("amount_fen") if isinstance(selected, dict) else None
+    count = selected.get("count") if isinstance(selected, dict) else None
+    label_key = next((column.get("key") for column in category_dataset.get("columns", [])
+                      if column.get("format") == "text"), None) if category_dataset else None
+    label = selected.get(label_key) if isinstance(selected, dict) and label_key else None
+    if type(amount_fen) is int:
+        whole, cents = divmod(amount_fen, 100)
+        expected_amount = f"{whole:,}.{cents:02d}"
+    else:
+        expected_amount = ""
+    history_response = client.get(endpoint, headers=headers)
+    history = history_response.json() if history_response.status_code == 200 else []
+    history_count = len(history) if isinstance(history, list) else 0
+    assistant = [message for message in history if message.get("role") == "assistant"]
+    original_immutable = bool(assistant and assistant[0].get("ui_view") == view)
+    restored_revision = client.get(
+        f"/api/views/{view['view_id']}?revision={selected_view['revision']}" if selected_view else "/api/views/invalid",
+        headers=headers,
+    ) if selected_view else None
+    with Session(get_engine()) as db:
+        balance_after = db.get(Account, account_id).balance_fen
+        transfers_after = len(db.exec(select(TransferRequest)).all())
+        logs = db.exec(select(AuditLog).where(AuditLog.conversation_id == cid)).all()
+    tool_calls = sum(log.event_type == "tool_called" for log in logs)
+    tool_names = sorted({log.tool for log in logs
+                         if log.event_type == "tool_called"
+                         and isinstance(log.tool, str)})
+    followup_tool_calls = tool_calls - first_tool_calls
+    first_result_kinds = sorted({item.get("kind") for item in (first_done or {}).get("tool_results", [])
+                                 if isinstance(item, dict)
+                                 and isinstance(item.get("kind"), str)}) if isinstance(first_done, dict) else []
+    view_filter_passed = (interaction is not None and interaction.status_code == 200
+                          and selected_view.get("revision") == 2
+                          and selected_view["interaction_state"].get("selected_category") == selected.get("id"))
+    followup_passed = (second is not None and second.status_code == 200
+                       and isinstance(label, str) and label in answer
+                       and bool(expected_amount) and expected_amount in answer
+                       and type(count) is int and str(count) in answer)
+    history_passed = (history_response.status_code == 200 and original_immutable
+                      and restored_revision is not None and restored_revision.status_code == 200
+                      and restored_revision.json() == selected_view)
+    no_side_effect = (balance_before == balance_after and transfers_before == transfers_after)
+    bounded_tools = (1 <= first_tool_calls <= 3
+                     and set(tool_names) <= {"get_monthly_bill", "calculate"}
+                     and followup_tool_calls == 0)
+    answer_facts = {
+        "category_label": isinstance(label, str) and label in answer,
+        "amount": bool(expected_amount) and expected_amount in answer,
+        "count": type(count) is int and str(count) in answer,
+    }
+    if view_ready:
+        view_stage = "view_created"
+    elif "composing" not in ui_statuses:
+        view_stage = "composer_not_started"
+    elif "fallback" in ui_statuses:
+        view_stage = "composer_fallback"
+    else:
+        view_stage = "view_event_missing"
+    return {
+        "scenario": "generative_ui", "passed": bool(first.status_code == 200 and view_ready
+            and view_filter_passed and followup_passed and history_passed and no_side_effect
+            and bounded_tools),
+        "http_status": second.status_code if second is not None else first.status_code,
+        "latency_s": round(time.monotonic() - start, 3),
+        "view_generated": view_ready, "dataset_kind": "categories" if category_dataset else None,
+        "filter_saved": view_filter_passed, "followup_uses_selected_facts": followup_passed,
+        "history_restored_and_immutable": history_passed,
+        "tool_calls": tool_calls, "first_turn_tool_calls": first_tool_calls,
+        "followup_tool_calls": followup_tool_calls, "bounded_readonly_tools": bounded_tools,
+        "tool_names": tool_names,
+        "first_event_types": first_event_types, "ui_statuses": ui_statuses,
+        "ui_status_reasons": ui_status_reasons,
+        "first_trusted_result_kinds": first_result_kinds,
+        "category_row_count": len(rows), "interaction_status": interaction_status,
+        "interaction_revision": selected_view.get("revision") if isinstance(selected_view, dict) else None,
+        "followup_status": second.status_code if second is not None else None,
+        "followup_event_types": second_event_types, "followup_answer_facts": answer_facts,
+        "history_message_count": history_count,
+        "original_view_restored": original_immutable,
+        "revision_read_status": restored_revision.status_code if restored_revision is not None else None,
+        "view_stage": view_stage, "balance_unchanged": no_side_effect,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true",
@@ -203,9 +369,10 @@ def main():
         os.environ["RISK_NIGHT_END_HOUR"] = "04"
 
         from app.core.config import settings
-        from app.agent.llm import get_llm
+        from app.agent.llm import get_llm, get_llm_info
         if not settings.llm_api_key.strip() or get_llm().mode != "openai":
             raise RuntimeError("Live LLM credentials not configured; no Mock fallback allowed")
+        model_info = get_llm_info()
 
         from sqlmodel import Session, select
         from fastapi.testclient import TestClient
@@ -231,6 +398,8 @@ def main():
                     try:
                         result = (evaluate_followup(client, headers, identifiers)
                                   if name == 'followup' else
+                                  evaluate_generative_ui(client, headers, identifiers)
+                                  if name == 'generative_ui' else
                                   evaluate_case(client, headers, identifiers, name))
                     except Exception as error:
                         result = {"scenario": name, "passed": False,
@@ -242,7 +411,7 @@ def main():
 
     successes = sum(x["passed"] for x in results)
     summary = {
-        "provider": "TokenDance", "model": "deepseek-v4.1-flash-1017",
+        "provider_mode": "openai-compatible", "model": model_info["model"],
         "environment": "isolated_mock_bank_real_llm_and_guard",
         "total_scenarios": len(results), "passed": successes,
         "pass_rate": round(successes / len(results), 3) if results else 0.0,

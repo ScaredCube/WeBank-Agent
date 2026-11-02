@@ -21,7 +21,7 @@ class SubmissionConflict(ValueError):
     pass
 
 
-def fingerprint(content: str, references: list, intent=None) -> str:
+def fingerprint(content: str, references: list, intent=None, view_context=None) -> str:
     refs = sorted((str(ref.kind), int(ref.id)) for ref in references)
     intent_value = None
     if intent is not None:
@@ -30,7 +30,10 @@ def fingerprint(content: str, references: list, intent=None) -> str:
             "source": [intent.source.kind, int(intent.source.id)],
             "target": [intent.target.kind, int(intent.target.id)],
         }
-    body = json.dumps({"content": content, "references": refs, "intent": intent_value},
+    payload = {"content": content, "references": refs, "intent": intent_value}
+    if view_context is not None:
+        payload["view_context"] = {"view_id": view_context.view_id, "revision": view_context.revision}
+    body = json.dumps(payload,
                       sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     # Keyed digest avoids exposing guessable message contents via an ordinary
     # SHA256 dictionary check if the database is ever leaked.

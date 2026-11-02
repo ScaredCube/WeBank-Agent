@@ -5,19 +5,35 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from uuid import uuid4
 
+from pydantic import ValidationError
 from app.agent.loop import AgentLoop
 from app.agent.tool_executor import VerifiedToolContext
 from app.schemas.bills import MonthlyBill
 from app.schemas.card_results import CardStatusSnapshot
 from app.schemas.tool_results import InternalTransferReceipt
 from app.services.audit_service import conversation_context, record_separately
-from app.services.chat_messages import persist_assistant
+from app.services.chat_messages import persist_assistant, finalize_assistant
+from app.core.config import settings
+from app.core.time import utcnow
+from app.agent.ui_composer import get_ui_composer
 from app.services.chat_submissions import advance_submission
 from app.services.security_service import record_failure
 
 logger = logging.getLogger(__name__)
 EventT = TypeVar("EventT")
+_SAFE_VIEW_VALIDATION_REASONS = frozenset({
+    "view root does not exist", "view contains too many elements",
+    "unsupported view component", "component props do not match its catalog schema",
+    "view children must be unique within a parent", "leaf components cannot contain children",
+    "view child does not exist", "unsupported section title", "unsupported action link",
+    "metric reference does not exist", "dataset reference does not exist",
+    "dataset reference has the wrong semantic kind", "data reference is not bound to a result",
+    "view nesting is too deep", "view graph contains a cycle",
+    "view components may have only one parent", "view root cannot have a parent",
+    "view contains unreachable elements",
+})
 
 
 @dataclass(frozen=True)
@@ -32,6 +48,8 @@ class ChatTurn:
     injection_blocked: bool = False
     transfer_needs_amount: bool = False
     intent_needs_amount: bool = False
+    view_snapshot: Any = None
+    view_selection: dict | None = None
 
 
 async def stream_chat_turn(
@@ -52,14 +70,19 @@ async def stream_chat_turn(
 
     def finish_reply(content: str, bill: dict | None = None,
                      cards: dict | None = None,
-                     results: list[dict] | None = None) -> dict | None:
+                     results: list[dict] | None = None,
+                     view=None) -> dict | None:
         return persist_assistant(
-            conversation_id, content, bill, cards, results, submission_id=submission_id
+            conversation_id, content, bill, cards, results,
+            submission_id=submission_id, view=view,
         )
     collected: list[str] = []
     trusted_bill: dict | None = None
     trusted_cards: dict | None = None
     trusted_results: list[dict] = []
+    ui_results: list[dict] = []
+    saved_message: dict | None = None
+    action_pending = False
     audit_token = conversation_context.set(conversation_id)
     try:
         if injection_blocked:
@@ -89,6 +112,7 @@ async def stream_chat_turn(
             intent_amount_fen=turn.verified.intent_amount_fen,
             original_request=turn.original_request,
             conversation_id=conversation_id,
+            **({"view_selection": turn.view_selection} if turn.view_selection else {}),
         ):
             if await is_disconnected():
                 # The model/tool may already have completed a side effect.
@@ -108,6 +132,21 @@ async def stream_chat_turn(
                     yield encode({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
                     return
                 trusted_results.append({"kind": "monthly_bill", "data": trusted_bill})
+                metadata = event.data.get("trusted_metadata")
+                account_id = None
+                if (type(turn.verified.verified_account_id) is int
+                        and turn.verified.verified_account_id > 0):
+                    # The authenticated route identity is authoritative: the
+                    # executor rebinds this bill call to that account token.
+                    account_id = turn.verified.verified_account_id
+                elif isinstance(metadata, dict):
+                    candidate_id = metadata.get("account_id")
+                    if type(candidate_id) is int and candidate_id > 0:
+                        account_id = candidate_id
+                if type(account_id) is int and account_id > 0:
+                    ui_results.append({"kind": "monthly_bill", "data": trusted_bill,
+                                       "metadata": {"account_id": account_id},
+                                       "result_ref": uuid4().hex, "observed_at": utcnow().isoformat()})
                 yield encode({"type": "bill_result", "data": trusted_bill})
             elif event.type == "operation_result":
                 if event.data.get("kind") != "internal_transfer":
@@ -143,6 +182,7 @@ async def stream_chat_turn(
                 trusted_results.append({"kind": "card_status", "data": trusted_cards})
                 yield encode({"type": "card_result", "data": trusted_cards})
             elif event.type == "action_required":
+                action_pending = True
                 pending = event.data.get("action") or {}
                 advance_submission(submission_id=submission_id, state="action_pending",
                                    pending_action_id=pending.get("id"))
@@ -163,17 +203,76 @@ async def stream_chat_turn(
                 explanation = "部分查询已完成，其余步骤未成功。已完成的结果见下方卡片。"
                 collected.append(explanation)
                 yield encode({"type": "delta", "text": explanation})
-                yield encode({"type": "done", "message": finish_reply(
-                    "".join(collected), trusted_bill, trusted_cards, trusted_results)})
-                return
+                # Preserve the verified results through the normal persistence
+                # and optional view composition path below.
+                break
 
-        message = finish_reply("".join(collected), trusted_bill, trusted_cards, trusted_results)
+        if ui_results and not action_pending:
+            # Persist the trustworthy bank result before any model presentation work.
+            saved_message = persist_assistant(conversation_id, "".join(collected), trusted_bill,
+                                              trusted_cards, trusted_results,
+                                              submission_id=submission_id, finalize=False)
+            view = None
+            if settings.generative_ui_enabled:
+                try:
+                    from app.services.view_service import (prepare_view_composition,
+                        create_or_append_view, view_context_for_composer)
+                    combined, catalog = prepare_view_composition(turn.view_snapshot, ui_results)
+                    yield encode({"type": "ui_status", "status": "composing"})
+                    spec = await get_ui_composer().compose(
+                        question=turn.original_request, catalog=catalog,
+                        context=view_context_for_composer(turn.view_snapshot))
+                    if spec is not None:
+                        view = create_or_append_view(user_id=user_id, conversation_id=conversation_id,
+                                                     results=combined, spec=spec, context=turn.view_snapshot)
+                except ValidationError as exc:
+                    reasons = set()
+                    for error in exc.errors(include_input=False):
+                        reason = str(error.get("ctx", {}).get("error", ""))
+                        reasons.add(reason if reason in _SAFE_VIEW_VALIDATION_REASONS else "schema_validation")
+                    logger.warning("view composition rejected: %s", ", ".join(sorted(reasons)))
+                except Exception as exc:
+                    logger.warning("view composition failed: %s", type(exc).__name__)
+            if saved_message is not None:
+                try:
+                    message = finalize_assistant(conversation_id, saved_message["id"],
+                                                 submission_id=submission_id, view=view)
+                except Exception:
+                    if view is None:
+                        raise
+                    logger.warning("view binding failed; keeping trusted result")
+                    view = None
+                    message = finalize_assistant(conversation_id, saved_message["id"],
+                                                 submission_id=submission_id)
+                if view is None:
+                    yield encode({"type": "ui_status", "status": "fallback"})
+                if view is not None:
+                    yield encode({"type": "ui_view", "view": view.model_dump(mode="json")})
+            else:
+                message = None
+        else:
+            if trusted_bill is not None and not ui_results:
+                yield encode({"type": "ui_status", "status": "fallback",
+                              "reason": "trusted_source_unavailable"})
+            context_view = (
+                turn.view_snapshot.envelope
+                if turn.view_snapshot is not None and not trusted_results and not action_pending
+                else None
+            )
+            message = finish_reply("".join(collected), trusted_bill, trusted_cards,
+                                   trusted_results, view=context_view)
         yield encode({"type": "done", "message": message})
     except asyncio.CancelledError:
         # The request was accepted, but the connection ended before the
         # client received completion. Never execute this ID twice.
-        advance_submission(submission_id=submission_id, state="interrupted")
-        persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
+        if saved_message is not None:
+            try:
+                finalize_assistant(conversation_id, saved_message["id"], submission_id=submission_id)
+            except Exception:
+                advance_submission(submission_id=submission_id, state="interrupted")
+        else:
+            advance_submission(submission_id=submission_id, state="interrupted")
+            persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
         raise
     except Exception:
         logger.exception("chat event stream failed")

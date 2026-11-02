@@ -13,9 +13,10 @@ import { cn } from '@/lib/utils'
  * Assets stay mounted by the page so dragging and card selection keep state.
  * The utility drawer only mounts while open so its focus trap stays simple.
  */
-export function AppShell({ assets, utility, utilityOpen, onCloseUtility, children }: {
+export function AppShell({ assets, utility, workspace, utilityOpen, onCloseUtility, children }: {
   assets: ReactNode
   utility: ReactNode
+  workspace?: ReactNode
   utilityOpen: boolean
   onCloseUtility: () => void
   children: ReactNode
@@ -49,6 +50,7 @@ export function AppShell({ assets, utility, utilityOpen, onCloseUtility, childre
   return <div className="bank-app relative flex h-dvh overflow-hidden bg-canvas text-ink">
     {assets}
     <main className="flex min-w-0 flex-1 flex-col bg-panel">{children}</main>
+    {workspace}
     <AnimatePresence>
       {utilityOpen && <motion.div key="utility-overlay"
         className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px]"

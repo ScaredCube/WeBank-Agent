@@ -55,7 +55,7 @@ def test_bill_then_subscription_detection_continues_agent_loop(client, auth_head
     events = _events(response)
     assert model.calls == 3
     assert model.saw_verified_bill
-    assert [event["type"] for event in events] == ["bill_result", "delta", "done"]
+    assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result", "delta", "done"]
     saved = events[-1]["message"]
     assert saved["bill_result"]["month"] == "2026-01"
     assert "订阅" in saved["content"]

@@ -303,6 +303,25 @@ it('网络失败且状态无法核实时，不再重复 POST；发送不同新�
   expect(stream.mock.calls[1][0].requestId).not.toBe(firstId)
 })
 
+it('相同问题但工作视图 revision 变化时作为不同请求发送', async () => {
+  vi.spyOn(api, 'submissionStatus').mockRejectedValue(new ApiError('查询暂不可用', 503))
+  const stream = vi.spyOn(sse, 'streamChat').mockRejectedValue(new TypeError('模拟网络中断'))
+  const { result } = renderHook(() => useChatController({
+    token: 'synthetic-token', actionBlocked: false,
+    onActionRequired: vi.fn(), onActionWarning: vi.fn(), onConversationChange: vi.fn(),
+  }))
+  await waitFor(() => expect(result.current.loadingMessages).toBe(false))
+  const content = '请继续分析这个分类'
+
+  await act(async () => { await result.current.sendMessage(content, [], undefined, undefined, { view_id: 'view-12345678', revision: 1 }) })
+  await act(async () => { await result.current.sendMessage(content, [], undefined, undefined, { view_id: 'view-12345678', revision: 2 }) })
+
+  expect(stream).toHaveBeenCalledTimes(2)
+  expect(stream.mock.calls[0][0].viewContext).toEqual({ view_id: 'view-12345678', revision: 1 })
+  expect(stream.mock.calls[1][0].viewContext).toEqual({ view_id: 'view-12345678', revision: 2 })
+  expect(stream.mock.calls[1][0].requestId).not.toBe(stream.mock.calls[0][0].requestId)
+})
+
 it('断线后状态查询确认回复已经保存，就恢复历史并消除不确定告警', async () => {
   const saved: Message = { id: 82, role: 'assistant', content: '可信查询完成', created_at: '2026-11-01T00:00:00Z' }
   vi.spyOn(api, 'submissionStatus').mockResolvedValue({

@@ -409,3 +409,8 @@
 - [ ] **T-RUNTIME-ACTION-EDIT-02b2 剩余集成验证**：补真实模型多样本、红色 password_face 以及 GUI 并行线的历史可信结果恢复集成。
 - [x] **T-RUNTIME-ACTION-EDIT-02b2a password_face 双阶段验证闭环**：隔离 Chrome + Agent Runtime + 风控 ContextVar + SQLite，旧 1 元动作取消、新 2 元动作独立准备，错误验证码不执行、正确验证码后不执行、模拟人脸通过后仅执行一次；Guard/验证审计与数据库核对 PASS。黄/红原路径回归 PASS，后端相关 24 项 PASS。详细证据：`docs/agent-action-edit-review-2026-11-02.md`。
 - [ ] **T-RUNTIME-ACTION-EDIT-02b2b 真实模型与 Generative UI 集成**：真实 DeepSeek 多样本、不同业务 Tool 使用、GUI 并行线的可信结果与历史状态恢复，须在并行成果稳定后统一验收。
+
+## 2026-11-02 · Generative UI 正式整合
+
+- [x] **T-GUI-MAIN-01**：接收暂停的独立候选 `1244bdb`，三方合并到 `klutz-runtime`，保留金融安全编辑和资产拖拽；定位真实分类选择失败为重复组件造成的 `AMBIGUOUS_LOCATOR`，实现唯一可信分类入口。合并后真实 DeepSeek 浏览器账单→分类→续问→历史恢复 PASS，红色人脸模拟转账 E2E PASS；完整证据见 `docs/frontend/2026-11-02-generative-ui-main-integration.md`。
+- [ ] **T-GUI-MAIN-02**：仅在后续真实需求明确时扩展订阅工具事件、不同业务场景的生成视图及模型多样本统计；旧 SQLite 迁移仍须备份与审批，不得以自动合并代替迁移。

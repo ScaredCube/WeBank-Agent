@@ -33,7 +33,7 @@ def test_multiple_tool_results_survive_encrypted_history(client, auth_headers, m
     resp = client.post(url, headers=auth_headers, json={"content": "查这月账单和银行卡状态"})
     assert resp.status_code == 200
     events = [json.loads(row[6:]) for row in resp.text.splitlines() if row.startswith("data: ")]
-    assert [x["type"] for x in events] == ["bill_result", "card_result", "delta", "done"]
+    assert [x["type"] for x in events if x["type"] != "ui_status"] == ["bill_result", "card_result", "delta", "done"]
     message = events[-1]["message"]
     assert message["content"] == "银行卡状态和账单已查询，明细见下方结果卡。"
     result = message["tool_results"]

@@ -1,4 +1,4 @@
-import { ApiError, api, type Message } from '@/lib/api'
+import { ApiError, api, type ChatViewContext, type Message } from '@/lib/api'
 import { notifyUnauthorized } from '@/lib/session'
 import type { BankObjectReference } from './bank-references'
 
@@ -20,6 +20,9 @@ export interface ChatIntentPayload {
 export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; message: Message | null }
+  | { type: 'ui_status'; status: 'composing' | 'fallback' }
+  | { type: 'ui_view'; view: unknown }
+  | { type: 'subscription_result'; kind: 'subscriptions' | 'subscription_candidates'; data: unknown }
   | { type: 'bill_result'; data: unknown }
   | { type: 'card_result'; data: unknown }
   | { type: 'operation_result'; kind: 'internal_transfer'; data: unknown }
@@ -46,6 +49,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseEvent(value: unknown): StreamEvent | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
+  if (value.type === 'ui_status' && (value.status === 'composing' || value.status === 'fallback'))
+    return { type: 'ui_status', status: value.status }
+  if (value.type === 'ui_view' && Object.hasOwn(value, 'view'))
+    return { type: 'ui_view', view: value.view }
+  if (value.type === 'subscription_result' &&
+      (value.kind === 'subscriptions' || value.kind === 'subscription_candidates') && Object.hasOwn(value, 'data'))
+    return { type: 'subscription_result', kind: value.kind, data: value.data }
   if (value.type === 'bill_result' && isRecord(value.data)) return {type:'bill_result', data:value.data}
   if (value.type === 'card_result' && isRecord(value.data)) return {type:'card_result', data:value.data}
   if (value.type === 'operation_result' && value.kind === 'internal_transfer' && isRecord(value.data))
@@ -97,6 +107,7 @@ interface StreamChatOptions {
   content: string
   references?: BankObjectReference[]
   intent?: ChatIntentPayload
+  viewContext?: ChatViewContext
   requestId?: string
   signal?: AbortSignal
   onEvent: (event: StreamEvent) => void
@@ -126,6 +137,7 @@ export async function streamChat({
   content,
   references = [],
   intent,
+  viewContext,
   requestId,
   signal,
   onEvent,
@@ -143,6 +155,7 @@ export async function streamChat({
       body: JSON.stringify({
         content,
         request_id: requestId,
+        ...(viewContext ? { view_context: viewContext } : {}),
         ...(intent ? { intent } : {}),
         references: references
           .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
@@ -198,10 +211,20 @@ export async function streamChat({
 
       const blocks = buffer.split(/\r?\n\r?\n/)
       buffer = blocks.pop() ?? ''
-      for (const block of blocks) dispatch(block)
+      for (const block of blocks) {
+        dispatch(block)
+        if (terminal) break
+      }
+      if (terminal) {
+        await reader.cancel().catch(() => {})
+        buffer = ''
+        break
+      }
     }
-    buffer += decoder.decode()
-    dispatch(buffer)
+    if (!terminal) {
+      buffer += decoder.decode()
+      dispatch(buffer)
+    }
   } catch (error) {
     if (signal?.aborted) throw error
     throw new ApiError('连接中断，操作结果可能尚未确定，请先查看历史记录。', 0)

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy import Index, UniqueConstraint, text
+from sqlalchemy import ForeignKeyConstraint, Index, Text, UniqueConstraint, text
 
 from app.core.time import utcnow
 
@@ -70,6 +70,56 @@ class MessageResult(SQLModel, table=True):
     kind: str
     ciphertext: str
     key_version: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class UIView(SQLModel, table=True):
+    """Mutable pointer to the latest encrypted view revision for a conversation."""
+    id: str = Field(primary_key=True, max_length=80)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    conversation_id: int = Field(foreign_key="conversation.id", index=True)
+    current_revision: int = Field(default=1, ge=1)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ViewRevision(SQLModel, table=True):
+    """Immutable encrypted snapshot keyed by view and monotonically increasing revision."""
+    view_id: str = Field(foreign_key="uiview.id", primary_key=True, max_length=80)
+    revision: int = Field(primary_key=True, ge=1)
+    ciphertext: str = Field(sa_type=Text)
+    key_version: str = Field(max_length=64)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ViewInteraction(SQLModel, table=True):
+    """Idempotency receipt for an accepted client interaction."""
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["view_id", "result_revision"],
+            ["viewrevision.view_id", "viewrevision.revision"],
+            name="fk_viewinteraction_result_revision",
+        ),
+    )
+    view_id: str = Field(foreign_key="uiview.id", primary_key=True, max_length=80)
+    event_id: str = Field(primary_key=True, max_length=80)
+    payload_digest: str = Field(max_length=64)
+    result_revision: int = Field(ge=1)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class MessageView(SQLModel, table=True):
+    """Bind one persisted assistant message to one immutable view revision."""
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["view_id", "revision"],
+            ["viewrevision.view_id", "viewrevision.revision"],
+            name="fk_messageview_revision",
+        ),
+    )
+    message_id: int = Field(foreign_key="message.id", primary_key=True)
+    view_id: str = Field(max_length=80)
+    revision: int = Field(ge=1)
     created_at: datetime = Field(default_factory=utcnow)
 
 

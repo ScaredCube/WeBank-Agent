@@ -80,7 +80,8 @@ def test_agent_error_after_valid_bill_preserves_trusted_partial_history(client, 
     events = _events(client.post(url, headers=auth_headers, json={
         "content": "查 2026-01 月账单，并核查银行卡状态", "references":[{"kind":"account","id":account_id}]
     }))
-    assert [e["type"] for e in events] == ["bill_result","delta","done"]
+    assert [e["type"] for e in events if e["type"] != "ui_status"] == ["bill_result","delta","done"]
+    assert any(e.get("type") == "ui_status" and e.get("status") == "fallback" for e in events)
     assert events[-1]["message"]["bill_result"]["month"] == "2026-01"
     saved=client.get(url,headers=auth_headers).json()[-1]
     assert saved["tool_results"][0]["kind"]=="monthly_bill"

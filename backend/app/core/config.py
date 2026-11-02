@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     demo_display_name: str = "演示用户"
     # Seed a second account and holding so the drag collision matrix is demoable.
     demo_multi_assets: bool = True
+    # Dynamic read-only views can be disabled without disabling trusted tool cards.
+    generative_ui_enabled: bool = True
 
     risk_night_start_hour: int = Field(default=0, ge=0, le=23)
     risk_night_end_hour: int = Field(default=6, ge=0, le=23)

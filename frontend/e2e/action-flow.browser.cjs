@@ -63,8 +63,14 @@ async function setup(context, event, disconnect=false, committedBeforeDisconnect
 
 async function openAction(page){
  await page.goto('/chat')
- await page.getByRole('textbox',{name:'输入消息'}).fill('办理模拟操作')
- await page.getByRole('button',{name:'发送'}).click()
+ await expect(page.getByRole('heading',{name:'今天，想完成什么？'})).toBeVisible()
+ const input=page.getByRole('textbox',{name:'输入消息'})
+ await expect(input).toBeVisible()
+ await input.fill('办理模拟操作')
+ await expect(input).toHaveValue('办理模拟操作')
+ const send=page.getByRole('button',{name:'发送'})
+ await expect(send).toBeEnabled()
+ await send.click()
  const dialog=page.getByRole('dialog')
  await expect(dialog).toBeVisible()
  return dialog
