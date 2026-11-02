@@ -1,5 +1,5 @@
 {
-  "source_revision": "31c5abae246545d6b4949d126239a150500e47b5",
+  "source_revision": "d6028266df81de770e3cf1b2570a71d3563225b8",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
@@ -19,13 +19,15 @@
     "reply_policy": "reply_policy:151e5a792f70e031",
     "recovery_policy": "recovery_policy:1614c9f9d00ace67",
     "read_completion": "read_completion:6d839f7daa46db59",
+    "bill_insights": "bill_insights:7a0733828e8273bd",
+    "bill_followups": "bill_followups:918b9b1404151a3b",
     "grounded_summary": "grounded_summary:914aba9adc782878",
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
-    "agent_loop": "agent_loop:181ba7569e2d2604",
+    "agent_loop": "agent_loop:db2013b79837260c",
     "tool_executor": "tool_executor:57745137ae0a760d",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
-    "snapshot_contract": "snapshot_contract:0979c55f1caf7bb0",
+    "snapshot_contract": "snapshot_contract:77cd6dd594731618",
     "chat_request_recovery": "chat_request_recovery:7f69cdc969238d95"
   }
 }

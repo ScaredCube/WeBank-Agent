@@ -43,6 +43,9 @@ from app.services.intent_service import IntentError, build_intent_prompt
 from app.services.conversation_tasks import (
     ReadGoal, can_resume_task, classify_pending_read_goal, pending_task, remember_pending_task,
 )
+from app.services.bill_followups import (
+    asks_about_previous_bill_categories, verified_previous_bill_summary,
+)
 from app.services.vault import VaultError, create_account_token, create_contact_token
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
@@ -269,10 +272,14 @@ async def send_message(
     # The stored canonical task is neither a client instruction nor payment authority.
     unfinished_read = pending_task(session, conversation_id=conversation_id, user_id=user.id)
     resumed_read_goal = None
+    resumed_read_version = None
+    resumed_read_month = None
     if (unfinished_read is not None and not injection.blocked and payload.intent is None
             and view_snapshot is None and (selected_account is not None or selected_card is not None)
             and can_resume_task(payload.content)):
         resumed_read_goal = ReadGoal(unfinished_read.kind, unfinished_read.month).model_goal
+        resumed_read_version = unfinished_read.updated_at
+        resumed_read_month = unfinished_read.month
         trusted_notes.append(TrustedContextNote(
             source="pending_read_task",
             content=("[服务端保存的未完成只读目标：" + resumed_read_goal
@@ -481,6 +488,18 @@ async def send_message(
         current_input_blocked=injection.blocked,
     ))
     history = prepared_context.model_messages()
+    prior_bill_summary = None
+    if (not injection.blocked and payload.intent is None and view_snapshot is None
+            and not payload.references and reused_readonly_selection
+            and selected_account is not None
+            and asks_about_previous_bill_categories(payload.content)):
+        selection = previously_selected(session, conversation_id=conversation_id, user_id=user.id)
+        if selection is not None and selection.account_id == selected_account.id:
+            prior_bill_summary = verified_previous_bill_summary(
+                session, conversation_id=conversation_id, user_id=user.id,
+                masked_number=selected_account.masked_number,
+                account_name=selected_account.name, selection_time=selection.updated_at,
+            )
     loop = AgentLoop()
 
     turn = ChatTurn(
@@ -488,6 +507,9 @@ async def send_message(
         submission_id=submission_id,
         history=history,
         original_request=resumed_read_goal or prepared_context.original_request,
+        resumed_read_version=resumed_read_version,
+        resumed_read_month=resumed_read_month,
+        prior_bill_followup_summary=prior_bill_summary,
         verified=VerifiedToolContext(
             user_id=user.id,
             verified_account_token=verified_account_token,

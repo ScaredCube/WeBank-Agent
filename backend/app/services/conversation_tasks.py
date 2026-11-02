@@ -5,7 +5,7 @@ tokens. The calling route must re-validate any bank object on every turn.
 """
 from __future__ import annotations
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from typing import NamedTuple
 
@@ -91,11 +91,22 @@ def remember_pending_task(session: Session, *, conversation_id: int,
     session.commit()
 
 
-def mark_task_completed(session: Session, *, conversation_id: int, user_id: int) -> None:
+def mark_task_completed(session: Session, *, conversation_id: int, user_id: int,
+                        resumed_version: datetime, verified_months: set[str],
+                        expected_month: str) -> bool:
+    """Complete only the exact resumed read task and its matching saved bill.
+
+    A concurrent/newer pending goal, unrelated lookup, or wrong-month Tool result
+    must not accidentally close an old request.
+    """
     task = session.get(ConversationTask, conversation_id)
-    if task is None or task.user_id != user_id or task.status != "needs_account":
-        return
+    if (task is None or task.user_id != user_id or task.status != "needs_account"
+            or task.updated_at.replace(tzinfo=timezone.utc) !=
+            resumed_version.replace(tzinfo=timezone.utc)
+            or expected_month not in verified_months):
+        return False
     task.status = "completed"
     task.updated_at = utcnow()
     session.add(task)
     session.commit()
+    return True

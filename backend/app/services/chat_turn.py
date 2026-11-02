@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -52,6 +53,9 @@ class ChatTurn:
     intent_needs_amount: bool = False
     view_snapshot: Any = None
     view_selection: dict | None = None
+    resumed_read_version: datetime | None = None
+    resumed_read_month: str | None = None
+    prior_bill_followup_summary: str | None = None
 
 
 async def stream_chat_turn(
@@ -87,6 +91,13 @@ async def stream_chat_turn(
     action_pending = False
     audit_token = conversation_context.set(conversation_id)
     try:
+        if turn.prior_bill_followup_summary is not None and not injection_blocked:
+            # Reuse the encrypted server-authored read snapshot, not the model's
+            # transcript. No fresh Tool call or operation authority is implied.
+            summary = turn.prior_bill_followup_summary
+            yield encode({"type": "delta", "text": summary})
+            yield encode({"type": "done", "message": finish_reply(summary)})
+            return
         if injection_blocked:
             record_separately(user_id=user_id, event_type="input_blocked", result="denied",
                               reason_code="prompt_injection")
@@ -263,11 +274,19 @@ async def stream_chat_turn(
             )
             message = finish_reply("".join(collected), trusted_bill, trusted_cards,
                                    trusted_results, view=context_view)
-        if message is not None and trusted_bill is not None:
-            # Clear pending READ goal only after its verified result was saved.
+        if message is not None and turn.resumed_read_version is not None:
+            # Only an explicitly resumed, matching bill can finish the task.
+            # Persisted Tool results are the authority; UI wording is not.
+            verified_months = {item['data']['month'] for item in trusted_results
+                if item['kind'] == 'monthly_bill' and isinstance(item.get('data'), dict)
+                and isinstance(item['data'].get('month'), str)}
+            expected_month = (turn.resumed_read_month or
+                utcnow().astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m'))
             try:
                 with session_scope() as task_session:
-                    mark_task_completed(task_session, conversation_id=conversation_id, user_id=user_id)
+                    mark_task_completed(task_session, conversation_id=conversation_id,
+                                        user_id=user_id, resumed_version=turn.resumed_read_version,
+                                        verified_months=verified_months, expected_month=expected_month)
             except Exception:
                 logger.warning("pending read task finalization failed")
         yield encode({"type": "done", "message": message})

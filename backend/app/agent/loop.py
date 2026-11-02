@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.goal_completion import missing_bill_goal
+from app.agent.bill_insights import summarize_bill_insights
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
 from app.agent.compound_read_summary import (
@@ -196,6 +197,7 @@ class AgentLoop:
                                  else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                                  else render_tool_result(name, result))
                                 for name, result in tool_results)
+                        summary = (summarize_bill_insights(tool_results, request) or summary)
                         if should_synthesize_readoutcome(request, tool_results):
                             summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
                                 user_goal=request,
@@ -329,6 +331,8 @@ class AgentLoop:
                     history, tool_results, user_request=original_request,
                 )
                 if final_readonly_text is not None:
+                    final_readonly_text = (summarize_bill_insights(
+                        tool_results, original_request or "") or final_readonly_text)
                     if should_synthesize_readoutcome(original_request or "", tool_results):
                         final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
                             user_goal=original_request or "",

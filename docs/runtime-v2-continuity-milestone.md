@@ -53,3 +53,24 @@ python scripts/check_v2_live_readonly.py
 The runner creates a separate temporary SQLite database and ephemeral test vault/JWT keys. It reports only HTTP/SSE status, completion flags, and response lengths, not model transcripts or secrets.
 
 Latest branch verification: **590 backend tests + 31 subtests passed**, and a real model run on isolated synthetic data completed three turns, including bill results and UI revisions. This does not constitute production security certification or a general multi-step planner.
+
+## Follow-up hardening (second commit candidate)
+
+- A verified bill from an unrelated turn must not complete a previously unfinished goal. Completion now requires a **resumed task version** and a **persisted bill for the exact expected month**.
+- A newer pending goal remains active if an earlier resumed request finishes later, avoiding stale-request completion.
+- A single-month analysis fallback now derives the highest/second-highest consumption categories from validated bill aggregates, then explicitly distinguishes *distribution* from *cause*. The model still cannot certify amounts or transaction outcomes.
+- Category names fail closed if they contain sensitive masking markers, unsupported characters, repeated labels, or category totals inconsistent with recorded consumption.
+- The new `bill_insights.py` module is included in the runtime/prompt review hash manifest; static SYSTEM/GUARD prompts remain unchanged.
+- Tests exercise unrelated-month reads, version mismatch, conservative numerical/category validation, and existing privacy and grounded financial explanations.
+
+The second-stage outcome is a safer and more helpful **bounded monthly-bill** continuation. It does not yet implement general multi-goal planning or autonomous financial-operation resumption.
+
+## Verified history-backed category follow-up
+
+The real DeepSeek three-turn local smoke test showed a specific gap: the third turn asked about categories in the immediately prior bill, but the model did not issue another Tool call and its text had no authenticated category evidence.
+
+An additional server-side read-only continuation path now handles **narrow previous-bill category questions**. It is activated only when the user refers to the earlier bill, the conversation's read-only account selection is revalidated, and the encrypted historical snapshot matches the selected account name/number and post-selection timestamp. The response is built from verified saved category aggregates and is persisted as a new ordinary assistant message.
+
+This path never sends the historical private bill data to a second model call, never reuses bank operation credentials, and does not pretend a new live Tool query happened. Questions requesting causes, comparisons, transactions or financial actions stay on the normal Agent path. Users can explicitly request a fresh query.
+
+Real DeepSeek smoke: all three turns ended in `done`; third-turn `verified_history_followup=True`. These checks use synthetic banking data and do not constitute a full general-purpose memory or planning system.

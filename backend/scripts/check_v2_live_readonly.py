@@ -77,6 +77,9 @@ with TestClient(app) as client:
                   "event_types=", ",".join(f.get("type", "?") for f in frames),
                   "has_content=", bool(message.get("content")),
                   "content_characters=", len(message.get("content") or ""),
+                  "verified_history_followup=", (
+                      "根据这段会话此前已核验并保存的账单" in (message.get("content") or "")
+                  ) if i == 2 else None,
                   "error=", any(f.get("type") == "error" for f in frames))
         except Exception as error:
             print("turn=", i+1, "exception=", type(error).__name__)
