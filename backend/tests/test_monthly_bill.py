@@ -74,6 +74,23 @@ def test_empty_invalid_month_and_account_isolation(client, auth_headers):
     assert client.get("/api/bills/monthly", params={"month": "2026-01", "account_id": account_id}, headers=auth_headers).status_code == 400
 
 
+def test_monthly_bill_tool_attaches_only_server_side_account_provenance(client):
+    handler = create_readonly_registry().get("get_monthly_bill")
+    with Session(get_engine()) as session:
+        owner = session.exec(select(User).where(User.username == "demo")).one()
+        account = session.exec(select(Account).where(
+            Account.user_id == owner.id, Account.status == "active",
+        )).one()
+        result = asyncio.run(handler.handler(
+            session, owner.id, month="2026-01",
+            account_token=create_account_token(session, owner.id, account.id),
+        ))
+
+    assert result["ok"]
+    assert result["_trusted_metadata"] == {"account_id": account.id}
+    assert "account_id" not in result["data"]
+
+
 def test_chat_bill_tool_fixed_rendering_and_audit(client, auth_headers, monkeypatch):
     class FakeLLM:
         calls = 0
@@ -219,7 +236,7 @@ def test_chat_typed_account_reference_is_verified_and_bill_result_is_trusted(cli
         "references": [{"kind": "account", "id": account_id}]})
     assert response.status_code == 200
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert [event["type"] for event in events] == ["bill_result", "delta", "done"]
+    assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result", "delta", "done"]
     assert events[0]["data"]["expense_fen"] == 100000
     assert "account_token" not in json.dumps(events[0], ensure_ascii=False)
     assert "<CARD_" not in response.text

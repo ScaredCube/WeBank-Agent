@@ -27,7 +27,7 @@ _OTHER_GOALS = (
     "余额", "交易", "流水",
     "理财", "持仓", "风险测评", "产品",
     "计算", "算出", "算一下", "手续费", "利息",
-    "逐笔", "每笔", "分类", "类别", "异常", "识别",
+    "逐笔", "每笔", "异常", "识别",
     "为什么", "原因", "解释", "建议", "推荐", "预测", "趋势",
     "怎么办", "怎么回事", "如何处理", "查找", "排查",
     "近三个月", "最近三个月", "过去三个月", "连续三个月",
@@ -64,6 +64,24 @@ def completed_readonly_summary(
     request = _original_request(history, user_request)
     if not request or any(cue in request for cue in _OTHER_GOALS):
         return None
+    wants_categories = any(cue in request for cue in ("分类", "类别"))
+    if wants_categories:
+        # A monthly aggregate supports displaying category totals, not
+        # transaction details, rankings, proportions or causal analysis.
+        if any(cue in request for cue in ("占比", "比例", "排行", "排名", "最多", "最少",
+                                           "最高", "最低", "明细", "详情", "筛选", "过滤",
+                                           "只看", "仅看", "单独", "选中", "指定", "商户")):
+            return None
+        bills = [result.get("data") for tool, result in results if tool == "get_monthly_bill"]
+        if not bills or any(
+            not isinstance(data, dict) or not isinstance(data.get("categories"), list)
+            or any(not isinstance(row, dict) or not isinstance(row.get("category"), str)
+                   or type(row.get("amount_fen")) is not int or row["amount_fen"] < 0
+                   or type(row.get("count")) is not int or row["count"] < 0
+                   for row in data["categories"])
+            for data in bills
+        ):
+            return None
     # Two explicitly named months require more evidence than one result card.
     # Keep such requests in the normal model loop, regardless of punctuation.
     if len(_MONTH_REFERENCES.findall(request)) > 1:
@@ -89,5 +107,6 @@ def completed_readonly_summary(
     if wants_bill and wants_card:
         return "银行卡状态和账单已查询，明细见下方结果卡。"
     if wants_bill:
-        return "账单已查询，明细见下方结果卡。"
+        return ("账单已查询，消费分类汇总见下方结果卡。" if wants_categories
+                else "账单已查询，明细见下方结果卡。")
     return "银行卡状态已查询，详见下方卡片。"

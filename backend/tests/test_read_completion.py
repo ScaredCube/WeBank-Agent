@@ -22,6 +22,16 @@ def test_single_bill_can_finish_after_one_successful_tool():
     assert output=="账单已查询，明细见下方结果卡。"
 
 
+def test_category_summary_requires_trusted_aggregates_and_no_extra_goal():
+    result = bill("2026-01", 1000)
+    result[1]["data"]["categories"] = [{"category": "餐饮", "amount_fen": 1000, "count": 2}]
+    request = "查询2026-01消费账单并展示分类汇总"
+    assert completed_readonly_summary(history(request), [result]) == "账单已查询，消费分类汇总见下方结果卡。"
+    for extra in ("并查余额", "并准备转账", "分析占比", "哪个类别最多", "查看逐笔明细", "解释原因", "检查订阅", "只看餐饮", "筛选分类", "查看商户"):
+        assert completed_readonly_summary(history(request + extra), [result]) is None
+    assert completed_readonly_summary(history(request), [bill("2026-01", 1000)]) is None
+
+
 def test_joint_requires_both_results():
     assert completed_readonly_summary(history("查看银行卡状态和账单"),[bill("2026-01",1000)]) is None
     assert completed_readonly_summary(history("查看银行卡状态和账单"),[card(),bill("2026-01",1000)]) is not None

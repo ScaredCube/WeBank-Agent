@@ -58,6 +58,9 @@ class VerifiedToolContext:
     intent_action: str | None = None
     intent_tokens: tuple[str, str] | None = None
     intent_amount_fen: int | None = None
+    # Internal server identity for trusted result provenance; never serialized
+    # into model messages or client events.
+    verified_account_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -306,10 +309,21 @@ class ToolExecutor:
                 user_id=user_id, event_type="tool_result", tool=audit_tool,
                 result="denied", reason_code=rejection_reason,
             )
+        # Tool handlers may attach server-only provenance for Chat persistence.
+        # Remove it before the observation is returned to the model.
+        trusted_metadata = result.pop("_trusted_metadata", None) if isinstance(result, dict) else None
         # Hide sensitive fields before both model observations and client read cards.
         result = mask_value(result)
         if spec is not None and spec.name == "get_monthly_bill" and result.get("ok") and isinstance(result.get("data"), dict):
-            events.append(ToolClientEvent("bill_result", {"data": result["data"]}))
+            event_data: dict[str, Any] = {"data": result["data"]}
+            if (isinstance(trusted_metadata, dict)
+                    and set(trusted_metadata) == {"account_id"}
+                    and type(trusted_metadata.get("account_id")) is int
+                    and trusted_metadata["account_id"] > 0):
+                event_data["trusted_metadata"] = {
+                    "account_id": trusted_metadata["account_id"],
+                }
+            events.append(ToolClientEvent("bill_result", event_data))
         if spec is not None and spec.name == "get_card_status" and result.get("ok"):
             snapshot = from_card_tool_result(result.get("data"))
             events.append(ToolClientEvent("card_result", {"data": snapshot.model_dump()}))

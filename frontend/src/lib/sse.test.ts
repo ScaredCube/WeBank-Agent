@@ -10,6 +10,30 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('对话流协议', () => {
 
+  it('保留生成视图状态事件，并为续问发送精确的工作视图版本', async () => {
+    const view = { view_id: 'view-12345678', revision: 4 }
+    const events = [
+      { type: 'ui_status', status: 'composing' },
+      { type: 'ui_view', view: { ...view, conversation_id: 5 } },
+      { type: 'done', message: null },
+    ]
+    const fetchMock = vi.fn().mockResolvedValue(response(events.map(event => `data: ${JSON.stringify(event)}\n\n`)))
+    vi.stubGlobal('fetch', fetchMock)
+    const received: StreamEvent[] = []
+
+    await streamChat({ token: 'test', conversationId: 5, content: '继续分析',
+      viewContext: view, onEvent: event => received.push(event) })
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      content: '继续分析', view_context: view,
+    })
+    expect(received).toEqual([
+      { type: 'ui_status', status: 'composing' },
+      { type: 'ui_view', view: { ...view, conversation_id: 5 } },
+      { type: 'done', message: null },
+    ])
+  })
+
   it('typed account reference 仅发送账户 ID，可信账单事件可在 done 前送达', async () => {
     const bill = { month: '2026-10', expense_fen: 10000 }
     const stream = [
@@ -33,6 +57,24 @@ describe('对话流协议', () => {
     const events: StreamEvent[] = []
     await streamChat({ token: 'test', conversationId: 1, content: '测试', onEvent: (event) => events.push(event) })
     expect(events).toEqual([{ type: 'delta', text: '你好' }, { type: 'done', message: null }])
+  })
+
+  it('收到终止事件后取消仍保持打开的响应流', async () => {
+    const encoder = new TextEncoder()
+    let cancelled = false
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"done","message":null}\n\n'))
+      },
+      cancel() { cancelled = true },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })))
+    const events: StreamEvent[] = []
+
+    await streamChat({ token: 'test', conversationId: 1, content: '测试', onEvent: event => events.push(event) })
+
+    expect(events).toEqual([{ type: 'done', message: null }])
+    expect(cancelled).toBe(true)
   })
 
   it('单个异常事件提示用户，同时继续处理其余事件', async () => {

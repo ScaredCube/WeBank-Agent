@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
+import { ApiError, api, type ChatViewContext, type Conversation, type Health, type Message } from '@/lib/api'
 import { streamChat, type ChatIntentPayload, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
 import { savePendingChatRequest, clearPendingChatRequest, readPendingChatRequests } from './pending-request'
@@ -38,6 +38,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const [sending, setSending] = useState(false)
   const [receiving, setReceiving] = useState(false)
   const [streamingText, setStreamingText] = useState('')
+  const [streamingUiStatus, setStreamingUiStatus] = useState<'composing' | 'fallback' | null>(null)
+  const [streamingUiView, setStreamingUiView] = useState<unknown>(null)
+  const [uiStatusByMessage, setUiStatusByMessage] = useState<Record<number, 'fallback'>>({})
   const [loadingMessages, setLoadingMessages] = useState(true)
   const [hasOlder, setHasOlder] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -231,7 +234,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
 
   const sendMessage = useCallback(
     async (raw: string, references: BankObjectReference[] = [], intent?: ChatIntentPayload,
-           intentDisplay?: string) => {
+           intentDisplay?: string, viewContext?: ChatViewContext) => {
       const content = composeReferenceContext(raw, references)
       if (!content || sendingRef.current || sending || creatingRef.current || loadingMessages || historyUnavailable || actionBlocked || !token) return
 
@@ -240,6 +243,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       resetScroll()
       setError(null)
       setStreamingText('')
+      setStreamingUiStatus(null)
+      setStreamingUiView(null)
 
       let conversationId = activeId
       let receivedText = ''
@@ -269,7 +274,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         // An identical retry may be a second financial operation. Before
         // issuing another POST, reconcile the existing server request ID.
         // A terminal "failed" state still does NOT prove no write happened.
-        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id]), intent ?? null])
+        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id]), intent ?? null, viewContext ?? null])
         const earlier = pendingRequest.current?.signature === signature ? pendingRequest.current : null
         if (earlier) {
           try {
@@ -331,6 +336,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         savePendingChatRequest({conversationId, requestId, createdAt: Date.now()})
         submittedRequestId = requestId
         let receivedDone = false
+        let pendingUiStatus: 'composing' | 'fallback' | null = null
+        let pendingUiView: unknown = null
+        const pendingSubscriptionResults: Array<{ kind: 'subscriptions' | 'subscription_candidates'; data: unknown }> = []
 
         const controller = new AbortController()
         receiveController.current = controller
@@ -341,11 +349,21 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           content,
           references,
           intent,
+          viewContext,
           requestId,
           signal: controller.signal,
           onEvent: (event) => {
             if (!isCurrent()) return
-            if (event.type === 'bill_result') {
+            if (event.type === 'ui_status') {
+              pendingUiStatus = event.status
+              setStreamingUiStatus(event.status)
+            } else if (event.type === 'ui_view') {
+              pendingUiView = event.view
+              setStreamingUiView(event.view)
+            } else if (event.type === 'subscription_result') {
+              if (pendingSubscriptionResults.length < 4)
+                pendingSubscriptionResults.push({ kind: event.kind, data: event.data })
+            } else if (event.type === 'bill_result') {
               if (billResultCard(event.data) && pendingToolResults.length < 8)
                 pendingToolResults.push({kind:'monthly_bill',data:event.data})
             } else if (event.type === 'card_result') {
@@ -369,10 +387,20 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             } else if (event.type === 'done') {
               receivedDone = true
               if (!event.message) return
-              savedReply = event.message
+              const completedMessage: Message = {
+                ...event.message,
+                ...(event.message.ui_view == null && pendingUiView != null ? { ui_view: pendingUiView } : {}),
+                ...(event.message.subscription_results == null && pendingSubscriptionResults.length
+                  ? { subscription_results: pendingSubscriptionResults }
+                  : {}),
+              }
+              savedReply = completedMessage
               const validated = toolResultListSchema.safeParse(pendingToolResults)
-              if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[event.message!.id]:validated.data}))
-              setMessages((prev) => [...prev, event.message as Message])
+              if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[completedMessage.id]:validated.data}))
+              if (pendingUiStatus === 'fallback') setUiStatusByMessage(current => ({ ...current, [completedMessage.id]: 'fallback' }))
+              setStreamingUiStatus(null)
+              setStreamingUiView(null)
+              setMessages((prev) => [...prev, completedMessage])
             }
           },
         })
@@ -424,6 +452,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           receiveController.current = null
           setReceiving(false)
           setStreamingText('')
+          setStreamingUiStatus(null)
+          setStreamingUiView(null)
         }
         if (isCurrent() && conversationId && !sessionExpired) {
           try {
@@ -517,5 +547,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [token, sending, actionBlocked])
 
   function stopReceiving() { receiveController.current?.abort() }
-  return { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

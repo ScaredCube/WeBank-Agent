@@ -55,13 +55,22 @@ class AgentLoop:
                      intent_tokens: tuple[str, str] | None = None,
                      intent_amount_fen: int | None = None,
                      original_request: str | None = None,
-                     conversation_id: int | None = None) -> AsyncIterator[AgentEvent]:
+                     conversation_id: int | None = None,
+                     view_selection: dict[str, Any] | None = None) -> AsyncIterator[AgentEvent]:
         # One canonical system-prompt assembly. Intent is already verified
         # upstream; the ToolExecutor remains the authority on business actions.
         messages: list[dict[str, Any]] = assemble_agent_prompt(
             verified_intent_action=intent_action,
         ).model_messages()
         messages.extend(history)
+        # A selected view contains a server-verified aggregate that can answer
+        # a narrow follow-up without another bank query or model-authored facts.
+        from app.agent.view_followup import render_view_followup
+        view_reply = (render_view_followup(original_request or "", view_selection)
+                      if intent_action is None else None)
+        if view_reply is not None:
+            yield AgentEvent("delta", {"text": view_reply})
+            return
         registry = create_agent_registry()
         executor = ToolExecutor(registry, self.guard)
         trusted = VerifiedToolContext(

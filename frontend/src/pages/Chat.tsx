@@ -17,6 +17,10 @@ import { CardStatusResult } from '@/features/intelligent-ui/CardStatusResult'
 import { InternalTransferResult } from '@/features/intelligent-ui/InternalTransferResult'
 import { cardStatusSnapshotSchema } from '@/features/intelligent-ui/card-status-schema'
 import { messageToolResults } from '@/features/intelligent-ui/tool-results'
+import { SubscriptionResult } from '@/features/generative-ui/SubscriptionResult'
+import { ViewPanel } from '@/features/generative-ui/ViewPanel'
+import { ViewSummary } from '@/features/generative-ui/ViewSummary'
+import { parseView, type ViewEnvelope } from '@/features/generative-ui/view'
 import { AssetsPane } from '@/features/assets/AssetsPane'
 import type { AssetIntent } from '@/features/assets/intent'
 import { ActivityPane } from '@/features/workspace/ActivityPane'
@@ -36,6 +40,7 @@ import { cn } from '@/lib/utils'
 
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
 type SourceNavigation = { origin: CardOrigin; status: 'opening' | 'located' | 'conversation-missing' | 'message-missing' }
+type ActiveViewContext = { conversationId: number; view_id: string; revision: number }
 
 const bankingStarters: readonly ChatStarterPrompt[] = [
   { label: '查看本月收支', prompt: '请帮我查询本月账单，分析主要支出分类。', art: 'chart' },
@@ -55,6 +60,28 @@ function desktopViewport() {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(min-width: 1024px)').matches
+}
+
+function messageView(message: { ui_view?: unknown | null }, conversationId: number | null): ViewEnvelope | null {
+  if (conversationId === null) return null
+  const view = parseView(message.ui_view)
+  return view?.conversation_id === conversationId ? view : null
+}
+
+function subscriptionSnapshots(value: unknown | null | undefined): unknown[] {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
+}
+
+function selectedCategoryLabel(view: ViewEnvelope | null): string | null {
+  const selected = view?.interaction_state.selected_category
+  if (!selected || !view) return null
+  const dataset = Object.values(view.trusted_data.datasets).find(item => item.kind === 'categories')
+  const row = dataset?.rows.find(item => item.id === selected)
+  if (!dataset || !row) return null
+  const label = dataset.columns.find(column => column.format === 'text')
+  const value = label ? row[label.key] : row.id
+  return typeof value === 'string' ? value : null
 }
 
 export function ChatPage() {
@@ -80,6 +107,13 @@ function ChatWorkspace() {
   const [actionPreparing, setActionPreparing] = useState(false)
   const [cardLossRecovery, setCardLossRecovery] = useState<ReadonlyMap<number, CardLossRecovery>>(() => new Map())
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
+  const [workspaceView, setWorkspaceView] = useState<ViewEnvelope | null>(null)
+  const [workspaceOrigin, setWorkspaceOrigin] = useState<CardOrigin | null>(null)
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+  const [viewInteractionBlocked, setViewInteractionBlocked] = useState(false)
+  const [viewContext, setViewContext] = useState<ActiveViewContext | null>(null)
   const [intentCapsule, setIntentCapsule] = useState<AssetIntent | null>(null)
   const [referencesByConversation, setReferencesByConversation] = useState<Record<string, BankObjectReference[]>>({})
   const [sourceNavigation, setSourceNavigation] = useState<SourceNavigation | null>(null)
@@ -90,6 +124,8 @@ function ChatWorkspace() {
   const [cardError, setCardError] = useState<string | null>(null)
   const referenceSearchCache = useRef<{ key: string; promise: Promise<BankObjectReference[]> } | null>(null)
   const assetsRef = useRef<HTMLDivElement>(null)
+  const workspaceRequest = useRef(0)
+  const latestViewMessage = useRef<{ conversationId: number; messageId: number } | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
@@ -101,7 +137,18 @@ function ChatWorkspace() {
   }, [])
 
   const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => { setPendingAction(event); setActionOpen(true) }, [])
-  const onConversationChange = useCallback(() => setUtilityOpen(false), [])
+  const onConversationChange = useCallback(() => {
+    setUtilityOpen(false)
+    setWorkspaceOpen(false)
+    setWorkspaceView(null)
+    setWorkspaceOrigin(null)
+    setWorkspaceLoading(false)
+    setWorkspaceError(null)
+    setViewContext(null)
+    setViewInteractionBlocked(false)
+    workspaceRequest.current += 1
+    latestViewMessage.current = null
+  }, [])
   const onConversationCreated = useCallback((id: number) => {
     setReferencesByConversation(current => {
       const selected = current.new
@@ -124,10 +171,32 @@ function ChatWorkspace() {
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
 
-  const { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({
-    token, actionBlocked: actionPreparing || !!pendingAction, onActionRequired,
+  const { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({
+    token, actionBlocked: actionPreparing || !!pendingAction || workspaceLoading || viewInteractionBlocked, onActionRequired,
     onActionWarning: setActionWarning, onConversationChange, onConversationCreated,
   })
+
+  const activeViewContext = viewContext?.conversationId === activeId
+    ? { view_id: viewContext.view_id, revision: viewContext.revision }
+    : undefined
+
+  useEffect(() => {
+    if (activeId === null || loadingMessages) return
+    const latest = [...messages].reverse().find(message => message.role === 'assistant' && messageView(message, activeId))
+    if (!latest) {
+      latestViewMessage.current = null
+      return
+    }
+    if (latestViewMessage.current?.conversationId === activeId && latestViewMessage.current.messageId === latest.id) return
+    const view = messageView(latest, activeId)
+    if (!view) return
+    latestViewMessage.current = { conversationId: activeId, messageId: latest.id }
+    setViewContext({ conversationId: activeId, view_id: view.view_id, revision: view.revision })
+    if (workspaceOpen) {
+      setWorkspaceView(view)
+      setWorkspaceOrigin({ conversationId: activeId, messageId: latest.id })
+    }
+  }, [messages, activeId, loadingMessages, workspaceOpen])
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -234,6 +303,67 @@ function ChatWorkspace() {
 
   const activeConversation = conversations.find((item) => item.id === activeId)
   const isHome = messages.length === 0 && !sending && !loadingMessages && !historyUnavailable
+  const viewForContext = workspaceView?.view_id === activeViewContext?.view_id
+    ? workspaceView
+    : [...messages].reverse()
+        .map(message => messageView(message, activeId))
+        .find(view => view?.view_id === activeViewContext?.view_id) ?? null
+  const contextSelection = selectedCategoryLabel(viewForContext)
+
+  async function openView(view: ViewEnvelope, origin: CardOrigin, refreshLatest: boolean) {
+    if (!token || activeId === null || view.conversation_id !== activeId) return
+    setWorkspaceError(null)
+    if (!refreshLatest) {
+      setWorkspaceView(view)
+      setWorkspaceOrigin(origin)
+      setViewContext({ conversationId: activeId, view_id: view.view_id, revision: view.revision })
+      setWorkspaceOpen(true)
+      return
+    }
+
+    const conversationId = activeId
+    const requestId = ++workspaceRequest.current
+    setWorkspaceLoading(true)
+    try {
+      const latest = parseView(await api.view(token, view.view_id))
+      if (requestId !== workspaceRequest.current || conversationId !== activeId) return
+      if (!latest || latest.view_id !== view.view_id || latest.conversation_id !== conversationId) {
+        throw new Error('视图与当前会话不匹配')
+      }
+      setWorkspaceView(latest)
+      setWorkspaceOrigin(origin)
+      setViewContext({ conversationId, view_id: latest.view_id, revision: latest.revision })
+      setWorkspaceOpen(true)
+    } catch {
+      if (requestId === workspaceRequest.current) setWorkspaceError('无法打开分析工作区，请稍后重试。')
+    } finally {
+      if (requestId === workspaceRequest.current) setWorkspaceLoading(false)
+    }
+  }
+
+  function openMessageWorkspace(message: (typeof messages)[number], view: ViewEnvelope) {
+    if (activeId === null) return
+    const latestMessage = [...messages].reverse().find(item => item.role === 'assistant' && messageView(item, activeId))
+    const isLatestMessage = latestMessage?.id === message.id
+    void openView(view, { conversationId: activeId, messageId: message.id }, isLatestMessage)
+  }
+
+  function canOpenOriginal(message: (typeof messages)[number], view: ViewEnvelope) {
+    if (workspaceView?.view_id === view.view_id && workspaceView.revision > view.revision) return true
+    return messages.some(item => item.role === 'assistant' && item.id > message.id && messageView(item, activeId) !== null)
+  }
+
+  function continueFromWorkspace() {
+    if (!workspaceView || activeId === null || workspaceView.conversation_id !== activeId) return
+    setViewContext({ conversationId: activeId, view_id: workspaceView.view_id, revision: workspaceView.revision })
+    if (compact) setWorkspaceOpen(false)
+  }
+
+  function openWorkspaceSource() {
+    if (!workspaceOrigin) return
+    setWorkspaceOpen(false)
+    setSourceNavigation({ origin: workspaceOrigin, status: 'opening' })
+  }
 
   function clearIntent() {
     if (intentCapsule && draft === intentCapsule.prefill) updateDraft('')
@@ -255,7 +385,7 @@ function ChatWorkspace() {
     const text = draft
     const display = intentCapsule?.label
     setIntentCapsule(null)
-    void sendMessage(text, references, payload, display)
+    void sendMessage(text, references, payload, display, activeViewContext)
   }
 
   function openUtility(tab: UtilityTabName = 'conversations') {
@@ -282,7 +412,7 @@ function ChatWorkspace() {
     onStop={receiving ? stopReceiving : undefined}
     intentSlot={intentCapsule ? <IntentCapsule intent={intentCapsule} onRemove={clearIntent} /> : undefined}
     intentActive={!!intentCapsule}
-    disabled={sending || creatingConversation || loadingMessages || historyUnavailable || actionPreparing || !!pendingAction}
+    disabled={sending || creatingConversation || loadingMessages || historyUnavailable || actionPreparing || !!pendingAction || workspaceLoading || viewInteractionBlocked}
   />
 
   const errorFeedback = error && (
@@ -297,7 +427,7 @@ function ChatWorkspace() {
 
   function handleLogout() {
     setIntentCapsule(null); setPendingAction(null); setCompletedByMessage({}); setCardLossRecovery(new Map())
-    setUtilityOpen(false); setAssetsOpen(false)
+    setUtilityOpen(false); setAssetsOpen(false); setWorkspaceOpen(false); setWorkspaceView(null); setViewContext(null)
     logout(); navigate('/login', { replace: true })
   }
 
@@ -308,13 +438,13 @@ function ChatWorkspace() {
     activeId={activeId}
     user={user}
     hideActiveConversation={isHome && activeConversation?.title === '新对话'}
-    disabled={sending || creatingConversation || actionPreparing || !!pendingAction}
-    disabledReason={actionPreparing || pendingAction ? '请先处理当前操作，再切换或新建会话。' : undefined}
+    disabled={sending || creatingConversation || actionPreparing || !!pendingAction || workspaceLoading || viewInteractionBlocked}
+    disabledReason={actionPreparing || pendingAction ? '请先处理当前操作，再切换或新建会话。' : workspaceLoading || viewInteractionBlocked ? '请等待分析视图保存完成。' : undefined}
     newDisabled={loadingMessages}
     collections={<CollectionPanel userId={user.id} hidden={privacy.hidden} token={token}
       onStartChat={() => { setUtilityOpen(false); updateDraft('请帮我查询本月账单，并生成一张消费分析卡片。') }}
       onOpenSource={openSavedSource}
-      sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction} />}
+      sourceDisabled={sending || loadingMessages || creatingConversation || actionPreparing || !!pendingAction || workspaceLoading || viewInteractionBlocked} />}
     activity={<ActivityPane token={token} embedded />}
     onSelect={(id) => { clearIntent(); setSourceNavigation(null); setUtilityOpen(false); void openConversation(id) }}
     onNew={startNewConversation}
@@ -364,13 +494,32 @@ function ChatWorkspace() {
       </AnimatePresence>
     : assetsPanel) : null
 
-  return <AppShell assets={assets} utility={utility} utilityOpen={utilityOpen && !!utility} onCloseUtility={() => setUtilityOpen(false)}>
+  const workspace = workspaceOpen && workspaceView && token && user && activeId === workspaceView.conversation_id
+    ? <ViewPanel
+        view={workspaceView}
+        token={token}
+        hidden={privacy.hidden}
+        onChange={next => {
+          setWorkspaceView(next)
+          setViewContext({ conversationId: next.conversation_id, view_id: next.view_id, revision: next.revision })
+        }}
+        onClose={() => setWorkspaceOpen(false)}
+        onFollow={continueFromWorkspace}
+        onSource={openWorkspaceSource}
+        onBlockedChange={setViewInteractionBlocked}
+        externalBusy={sending || loadingMessages || workspaceLoading}
+      />
+    : null
+
+  return <AppShell assets={assets} utility={utility} workspace={workspace} utilityOpen={utilityOpen && !!utility} onCloseUtility={() => setUtilityOpen(false)}>
     <AppHeader title={activeConversation?.title ?? '新对话'} isHome={isHome}
       assetsOpen={assetsOpen} onToggleAssets={() => setAssetsOpen((open) => !open)}
       onNewConversation={startNewConversation}
-      newConversationDisabled={sending || creatingConversation || actionPreparing || !!pendingAction || loadingMessages}
+      newConversationDisabled={sending || creatingConversation || actionPreparing || !!pendingAction || loadingMessages || workspaceLoading || viewInteractionBlocked}
       utilityOpen={utilityOpen} onOpenUtility={() => openUtility()} />
     {healthUnavailable && <p role="status" className="border-b border-line bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:hidden">无法读取连接状态，仍可尝试发送。</p>}
+    {workspaceLoading && <p role="status" className="border-b border-line px-4 py-2 text-xs text-muted">正在读取分析工作区…</p>}
+    {workspaceError && <div role="alert" className="flex shrink-0 items-start gap-3 border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800"><span className="flex-1">{workspaceError}</span><button type="button" onClick={() => setWorkspaceError(null)} className="shrink-0 underline">已了解</button></div>}
     {sourceNavigationFeedback && <div role={sourceNavigationFeedback.type === 'error' ? 'alert' : 'status'} aria-live="polite" className={cn('flex shrink-0 items-start gap-3 border-b px-4 py-2.5 text-sm', sourceNavigationFeedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-jade-200 bg-jade-50 text-jade-900')}>
       <span className="flex-1">{sourceNavigationFeedback.message}</span>
       <button type="button" onClick={() => setSourceNavigation(null)} className="shrink-0 underline">已了解</button>
@@ -388,32 +537,71 @@ function ChatWorkspace() {
                 if (message.role !== 'assistant') return null
                 const list = toolResultLists[message.id] ?? messageToolResults(message)
                 const completed = completedByMessage[message.id] ?? []
-                if (!list.length && !completed.length) return null
+                const view = messageView(message, activeId)
+                const invalidView = message.ui_view != null && !view
+                const fallbackStatus = uiStatusByMessage[message.id] === 'fallback'
+                const subscriptions = subscriptionSnapshots(message.subscription_results)
+                const monthlyResults = list.filter(result => result.kind === 'monthly_bill')
+                const otherResults = list.filter(result => result.kind !== 'monthly_bill')
+                const hasRawResults = monthlyResults.length > 0 || subscriptions.length > 0
+                if (!view && !invalidView && !fallbackStatus && !list.length && !completed.length && !subscriptions.length) return null
+                const origin = activeId !== null && message.id > 0
+                  ? { conversationId: activeId, messageId: message.id }
+                  : null
                 return <motion.div className="space-y-4"
                   initial={reduced ? false : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }}>
-                  {list.map((result, index) => {
-                  if (result.kind === 'monthly_bill') {
-                    return token && user && activeId && message.id > 0
-                      ? <SaveBillCard key={`${message.id}-${index}`} value={result.data} hidden={privacy.hidden} userId={user.id} token={token} origin={{ conversationId: activeId, messageId: message.id }} />
-                      : null
-                  }
-                  if (result.kind === 'internal_transfer') return <InternalTransferResult key={`${message.id}-${index}`} value={result.data} />
-                  if (cardStatusSnapshotSchema.safeParse(result.data).success)
-                    return <CardStatusResult key={index} value={result.data} hidden={privacy.hidden} onOpenAssets={() => setAssetsOpen(true)} />
-                  return null
-                })}
-                {completed.map((event, index) => <CompletedActionCard key={`${message.id}-completed-${event.action.id}-${index}`} event={event} />)}
+                  {view && origin && <ViewSummary
+                    view={view}
+                    hidden={privacy.hidden}
+                    hasOriginal={canOpenOriginal(message, view)}
+                    onOpen={() => openMessageWorkspace(message, view)}
+                    onOpenOriginal={() => void openView(view, origin, false)}
+                  />}
+                  {invalidView && <p role="status" className="text-xs text-muted">此视图暂时无法展示，原始结果仍可查看。</p>}
+                  {!view && !invalidView && fallbackStatus && <p role="status" className="text-xs text-muted">未能生成交互式分析视图，已保留可信结果。</p>}
+                  {view && hasRawResults && <details className="max-w-[560px] rounded-xl border border-line bg-panel px-4 py-3">
+                    <summary className="cursor-pointer text-xs font-medium text-jade-800">查看原始结果</summary>
+                    <div className="mt-3 space-y-4">
+                      {monthlyResults.map((result, index) => token && user && origin
+                        ? <SaveBillCard key={`${message.id}-bill-${index}`} value={result.data} hidden={privacy.hidden} userId={user.id} token={token} origin={origin} />
+                        : null)}
+                      {subscriptions.map((result, index) => <SubscriptionResult key={`${message.id}-subscription-${index}`} value={result} hidden={privacy.hidden} />)}
+                    </div>
+                  </details>}
+                  {!view && <>
+                    {monthlyResults.map((result, index) => token && user && origin
+                      ? <SaveBillCard key={`${message.id}-bill-${index}`} value={result.data} hidden={privacy.hidden} userId={user.id} token={token} origin={origin} />
+                      : null)}
+                    {subscriptions.map((result, index) => <SubscriptionResult key={`${message.id}-subscription-${index}`} value={result} hidden={privacy.hidden} />)}
+                  </>}
+                  {otherResults.map((result, index) => {
+                    if (result.kind === 'internal_transfer') return <InternalTransferResult key={`${message.id}-operation-${index}`} value={result.data} />
+                    if (cardStatusSnapshotSchema.safeParse(result.data).success)
+                      return <CardStatusResult key={`${message.id}-card-${index}`} value={result.data} hidden={privacy.hidden} onOpenAssets={() => setAssetsOpen(true)} />
+                    return null
+                  })}
+                  {completed.map((event, index) => <CompletedActionCard key={`${message.id}-completed-${event.action.id}-${index}`} event={event} />)}
                 </motion.div>
               }}
-              streamingText={streamingText} thinking={sending && !streamingText}
+              streamingText={streamingText}
+              streamStatus={streamingUiStatus === 'composing'
+                ? parseView(streamingUiView)?.conversation_id === activeId
+                  ? '分析界面已准备，正在整理回复…'
+                  : '正在生成交互式分析…'
+                : null}
+              thinking={sending && !streamingText}
               focusMessageId={sourceTarget?.conversationId === activeId ? sourceTarget.messageId : null}
               onFocusMessageResolved={onFocusMessageResolved} />
         }
       </div>
 
       {!isHome && <div className="shrink-0 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 md:px-6">
+        {activeViewContext && <div className="mx-auto mb-2 flex max-w-[680px] items-center gap-3 rounded-xl border border-jade-200 bg-jade-50 px-3 py-2 text-xs text-jade-900" role="status">
+          <span className="min-w-0 flex-1 truncate">基于工作区版本 {activeViewContext.revision} 继续分析{contextSelection ? ` · 筛选：${contextSelection}` : ''}</span>
+          <button type="button" onClick={() => setViewContext(null)} className="shrink-0 underline">清除</button>
+        </div>}
         {actionWarning && <div role="alert" className="mx-auto mb-2 flex w-full max-w-[680px] items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span className="flex-1">{actionWarning}</span><button type="button" onClick={() => setActionWarning(null)} className="shrink-0 underline">已了解</button></div>}
         {pendingAction && !actionOpen && <PendingActionBanner event={pendingAction} onOpen={() => setActionOpen(true)} />}
         {hasNewContent && <button type="button" className="mx-auto mb-2 block rounded-full border border-line bg-white px-3 py-1 text-xs text-jade-800" onClick={jumpToLatest}>查看新消息</button>}

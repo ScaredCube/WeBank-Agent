@@ -74,6 +74,17 @@ uv run python scripts/rehearse_chat_schema.py --json
 
 此工具**只支持 SQLite 的增量建表**，不覆盖其他业务表字段演进、不提供 PostgreSQL 迁移或在线无停机升级；正式部署或对团队目标数据库升级前，必须确认数据库版本、完整备份、停机窗口以及升级和回滚责任。
 
+启用 Generative UI 的现有 SQLite 数据库还需要单独升级视图快照和消息版本关联表：
+
+```powershell
+uv run python scripts/check_generative_ui_schema.py
+# 预检并确认后，由操作者显式运行：
+uv run python scripts/check_generative_ui_schema.py --apply
+uv run python scripts/check_generative_ui_schema.py
+```
+
+该脚本同样默认只预检；`--apply` 会先生成 `.bak` 备份，再只创建缺失的 `uiview`、`viewrevision`、`viewinteraction` 和 `messageview` 表。已有表结构漂移时拒绝修复。更新后的启动门禁会检查 chat 与视图两组表，因此旧库须分别完成对应迁移；全新空库仍可首次启动时自动初始化。
+
 接入真实模型时修改 `backend/.env`：
 
 ```env

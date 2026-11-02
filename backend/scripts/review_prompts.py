@@ -132,6 +132,15 @@ def runtime_versions() -> dict[str, str]:
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]
+    followup_source = (REPO / "backend/app/agent/view_followup.py").read_text(
+        encoding="utf-8",
+    ).replace("\r\n", "\n")
+    loop_source = (REPO / "backend/app/agent/loop.py").read_text(
+        encoding="utf-8",
+    ).replace("\r\n", "\n")
+    versions["agent_loop"] = "agent_loop:" + sha256(
+        (loop_source + "\n" + followup_source).encode("utf-8"),
+    ).hexdigest()[:16]
     scope_sources = (
         "backend/app/tools/account_tools.py",
         "backend/app/tools/subscription_tools.py",
@@ -144,8 +153,15 @@ def runtime_versions() -> dict[str, str]:
     versions["scope_contract"] = "scope_contract:" + sha256(scope_bytes).hexdigest()[:16]
     snapshot_files = (
         "backend/app/schemas/tool_results.py",
+        "backend/app/schemas/chat.py",
+        "backend/app/schemas/generative_ui.py",
+        "backend/app/agent/ui_composer.py",
+        "fixtures/generative-ui/catalog-prompt.txt",
         "backend/app/services/chat_messages.py",
         "backend/app/services/chat_turn.py",
+        "backend/app/services/trusted_ui_results.py",
+        "backend/app/services/view_service.py",
+        "backend/app/api/routes/views.py",
     )
     snapshot_bytes = "\n".join(
         (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")

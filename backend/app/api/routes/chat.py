@@ -171,6 +171,19 @@ async def send_message(
     user: CurrentUser,
 ) -> EventSourceResponse:
     conversation = _require_conversation(session, user, conversation_id)
+    view_snapshot = None
+    if payload.view_context is not None:
+        from app.services.view_service import ViewConflict, ViewNotFound, load_view_snapshot
+        try:
+            view_snapshot = load_view_snapshot(
+                session, user_id=user.id, conversation_id=conversation_id,
+                view_id=payload.view_context.view_id,
+                revision=payload.view_context.revision, validate_sources=True,
+            )
+        except ViewNotFound:
+            raise HTTPException(status_code=404, detail="视图不可用") from None
+        except ViewConflict:
+            raise HTTPException(status_code=409, detail="视图数据来源不可用，请重新查询") from None
 
     # A client-side chip is NOT authorization. Resolve ownership and status before
     # saving the message, minting a token or dispatching an Agent request.
@@ -218,12 +231,43 @@ async def send_message(
                     raise HTTPException(status_code=400, detail="此前所选银行卡不可用，请重新选择")
             reused_readonly_selection = True
 
+    view_account_ids = {
+        item["metadata"]["account_id"] for item in (view_snapshot.trusted_results if view_snapshot else [])
+        if item["kind"] == "monthly_bill"
+    }
+    if selected_account is not None and view_account_ids and selected_account.id not in view_account_ids:
+        raise HTTPException(status_code=400, detail="所选账户与分析视图不一致，请重新选择")
+    if selected_card is not None and view_account_ids and selected_card[1].id not in view_account_ids:
+        raise HTTPException(status_code=400, detail="所选银行卡与分析视图不一致，请重新选择")
+    if (view_snapshot is not None and len(view_account_ids) == 1 and selected_account is None
+            and payload.intent is None and allow_readonly_followup(payload.content)):
+        selected_account = session.exec(select(Account).where(
+            Account.id == next(iter(view_account_ids)), Account.user_id == user.id,
+            Account.status == "active", Account.currency == "CNY")).first()
+        if selected_account is None:
+            raise HTTPException(status_code=409, detail="视图账户不可用，请重新查询")
+        reused_readonly_selection = True
+
     if selected_account is not None and selected_card is not None and selected_card[1].id != selected_account.id:
         raise HTTPException(status_code=400, detail="所选银行卡与付款账户不一致，请重新选择")
 
     display_content = payload.content
     trusted_notes: list[TrustedContextNote] = []
     injection = detect_injection(display_content)
+    view_selection = None
+    if view_snapshot is not None and not injection.blocked:
+        from app.services.trusted_ui_results import resolve_view_selection_context
+        view_selection = resolve_view_selection_context(
+            trusted_results=view_snapshot.trusted_results,
+            selected_category_id=view_snapshot.envelope.interaction_state.selected_category,
+            selected_ids=view_snapshot.envelope.interaction_state.selected_ids,
+        )
+        if view_selection:
+            trusted_notes.append(TrustedContextNote(
+                source="trusted_view_context",
+                content="[服务端核验的只读视图选择，非金融操作授权："
+                        + json.dumps(view_selection, ensure_ascii=False) + "]",
+            ))
     intent_prompt = None
     if payload.intent is not None and not injection.blocked:
         try:
@@ -244,7 +288,8 @@ async def send_message(
             attempt, claimed = claim_submission(
                 session, user_id=user.id, conversation_id=conversation_id,
                 request_id=payload.request_id,
-                payload_digest=fingerprint(payload.content, payload.references, payload.intent),
+                payload_digest=fingerprint(payload.content, payload.references, payload.intent,
+                                           payload.view_context),
             )
         except SubmissionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
@@ -356,6 +401,7 @@ async def send_message(
             session.commit()
         except VaultError:
             session.rollback()
+            advance_submission(submission_id=submission_id, state="failed")
             raise HTTPException(status_code=503, detail="对象引用服务暂时不可用") from None
     user_message = append_message(session, conversation, "user", display_content)
     advance_submission(submission_id=submission_id, state="processing",
@@ -403,6 +449,10 @@ async def send_message(
         verified=VerifiedToolContext(
             user_id=user.id,
             verified_account_token=verified_account_token,
+            verified_account_id=(
+                selected_account.id if selected_account is not None else
+                selected_card[1].id if selected_card is not None else None
+            ),
             verified_card_id=verified_card_id,
             verified_contact_token=verified_contact_token,
             verified_recipient_name=verified_recipient_name,
@@ -417,6 +467,8 @@ async def send_message(
         injection_blocked=injection.blocked,
         transfer_needs_amount=transfer_needs_amount,
         intent_needs_amount=intent_needs_amount,
+        view_snapshot=view_snapshot,
+        view_selection=view_selection,
     )
 
     return EventSourceResponse(

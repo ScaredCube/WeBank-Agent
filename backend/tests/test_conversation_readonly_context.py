@@ -192,7 +192,7 @@ def test_provider_failure_after_first_trusted_result_keeps_snapshot(
     events=events_for(send(client,auth_headers,cid,
         "查询这张银行卡状态和 2026-01 账单",
         [{"kind":"account","id":aid}]))
-    assert [event["type"] for event in events] == ["bill_result","delta","done"]
+    assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result","delta","done"]
     messages=client.get(f"/api/chat/conversations/{cid}/messages",
                         headers=auth_headers).json()
     assert messages[-1]["tool_results"][0]["kind"]=="monthly_bill"
