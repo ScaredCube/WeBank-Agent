@@ -19,7 +19,7 @@
 
 ## 自动化基线
 
-`current-manifest.json` 保存静态 System/Guard/Recovery Prompt 摘要、六个已验证意图的装配版本、完整 Tool Registry Schema/描述/风险级别摘要，以及影响模型回答的 `response_policy.py`、`response_recovery.py`、`read_completion.py`、`financial_summary.py`、`compound_read_summary.py`、`read_result_recovery.py` 与 `loop.py` 的跨平台规范化源码摘要，并记录账户交易查询/订阅扫描的范围契约摘要，以及服务端可信结果校验、SSE 交付与加密历史读取的快照契约摘要。它不保存客户数据、令牌或 API Key。
+`current-manifest.json` 保存静态 System/Guard/Recovery Prompt 摘要、六个已验证意图的装配版本、完整 Tool Registry Schema/描述/风险级别摘要，以及影响模型回答的 `response_policy.py`、`response_recovery.py`、`read_completion.py`、`financial_summary.py`、`compound_read_summary.py`、`read_result_recovery.py` 与 `loop.py` 的跨平台规范化源码摘要，并记录账户交易查询/订阅扫描的范围契约摘要，以及服务端可信结果校验、SSE 交付与加密历史读取的快照契约摘要。前端聊天控制器的重发状态核对也以 `chat_request_recovery` 版本摘要纳入同一行为审查。它不保存客户数据、令牌或 API Key。
 
 `backend/tests/test_prompt_review_baseline.py` 会验证实际装配与基线一致。此测试**只能提示发生变动，无法证明 UX 修改合理**。有意识修改生效 Prompt 时，必须先完成人工差异审查，再重新生成并更新基线：
 

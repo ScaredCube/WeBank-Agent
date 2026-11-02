@@ -280,12 +280,13 @@ it('异常没有错误文案时仍保留草稿并显示通用结果提示', asyn
   expect(onActionWarning).toHaveBeenCalledWith(expect.stringContaining('发送结果暂不确定'))
 })
 
-it('网络失败后同一条消息重试沿用 requestId，新内容改用新 ID', async () => {
+it('网络失败且状态无法核实时，不再重复 POST；发送不同新问题可使用新 ID', async () => {
   vi.spyOn(api, 'submissionStatus').mockRejectedValue(new ApiError('查询暂不可用', 503))
   const stream = vi.spyOn(sse, 'streamChat').mockRejectedValue(new TypeError('模拟网络中断'))
+  const warning = vi.fn()
   const { result } = renderHook(() => useChatController({
     token: 'synthetic-token', actionBlocked: false,
-    onActionRequired: vi.fn(), onActionWarning: vi.fn(),
+    onActionRequired: vi.fn(), onActionWarning: warning,
     onConversationChange: vi.fn(),
   }))
   await waitFor(() => expect(result.current.loadingMessages).toBe(false))
@@ -295,10 +296,11 @@ it('网络失败后同一条消息重试沿用 requestId，新内容改用新 ID
   expect(firstId).toMatch(/^[\da-f-]{36}$/i)
 
   await act(async () => { await result.current.sendMessage('查询这个账户的账单') })
-  expect(stream.mock.calls[1][0].requestId).toBe(firstId)
+  expect(stream).toHaveBeenCalledTimes(1)
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('已阻止再次发送'))
 
   await act(async () => { await result.current.sendMessage('另一条问题') })
-  expect(stream.mock.calls[2][0].requestId).not.toBe(firstId)
+  expect(stream.mock.calls[1][0].requestId).not.toBe(firstId)
 })
 
 it('断线后状态查询确认回复已经保存，就恢复历史并消除不确定告警', async () => {
@@ -398,4 +400,125 @@ it('刷新后处理中请求仅要求核对，不触发工具自动重试', asyn
   await waitFor(()=>expect(warning).toHaveBeenCalledWith(expect.stringContaining('不要重复发起')))
   expect(send).not.toHaveBeenCalled()
   expect(JSON.parse(sessionStorage.getItem('xiaowe:chat-inflight:v1') || '[]')).toHaveLength(1)
+})
+
+it('服务端明确 failed 后，先提示核对并解除旧 ID；再次主动发送才创建新请求', async () => {
+  const status = vi.spyOn(api, 'submissionStatus').mockResolvedValue({
+    request_id:'req-failed-case', state:'failed',
+    user_message_id:32, pending_action_id:null, message:null,
+  })
+  const stream = vi.spyOn(sse, 'streamChat')
+    .mockRejectedValueOnce(new TypeError('连接失败'))
+    .mockImplementationOnce(async ({onEvent}) => {
+      onEvent({type:'done', message:{id:91,role:'assistant',content:'重新查询完成',created_at:''}})
+    })
+  const warning = vi.fn()
+  const {result} = renderHook(() => useChatController({
+    token:'synthetic-token', actionBlocked:false, onActionRequired:vi.fn(),
+    onActionWarning:warning, onConversationChange:vi.fn(),
+  }))
+  await waitFor(() => expect(result.current.loadingMessages).toBe(false))
+  const raw='查询该账户近期交易'
+  act(() => result.current.updateDraft(raw))
+  await act(async () => { await result.current.sendMessage(raw) })
+  const firstId=stream.mock.calls[0][0].requestId
+  expect(stream).toHaveBeenCalledTimes(1)
+  await act(async () => { await result.current.sendMessage(raw) })
+  expect(stream).toHaveBeenCalledTimes(1)
+  expect(status).toHaveBeenCalledWith('synthetic-token', 1, firstId)
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('无法据此排除已经发生的模拟操作'))
+  expect(result.current.draft).toBe(raw)
+  expect(sessionStorage.getItem('xiaowe:chat-inflight:v1')).toBeNull()
+
+  await act(async () => { await result.current.sendMessage(raw) })
+  expect(stream).toHaveBeenCalledTimes(2)
+  expect(stream.mock.calls[1][0].requestId).not.toBe(firstId)
+})
+
+it('旧请求被服务端确认为 completed 时只恢复历史，不再重复 POST', async () => {
+  const saved: Message={id:88,role:'assistant',content:'可信结果已保存',created_at:''}
+  vi.spyOn(api,'submissionStatus')
+    .mockRejectedValueOnce(new ApiError('查询状态失败',503))
+    .mockResolvedValue({request_id:'completed-request',state:'completed',
+      user_message_id:22,pending_action_id:null,message:saved})
+  const stream=vi.spyOn(sse,'streamChat').mockRejectedValueOnce(new TypeError('断线'))
+  const warning=vi.fn()
+  const {result}=renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+    onActionWarning:warning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(result.current.loadingMessages).toBe(false))
+  const raw='查询月度账单'
+  act(()=>result.current.updateDraft(raw))
+  await act(async()=>{await result.current.sendMessage(raw)})
+  await act(async()=>{await result.current.sendMessage(raw)})
+  expect(stream).toHaveBeenCalledTimes(1)
+  expect(result.current.draft).toBe('')
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('不会再次调用 Agent'))
+})
+
+it.each(['processing','interrupted'] as const)(
+  '旧请求为 %s 时阻止重放，并保留草稿',
+  async state => {
+    vi.spyOn(api,'submissionStatus')
+      .mockRejectedValueOnce(new ApiError('暂时不可用',503))
+      .mockResolvedValue({request_id:'ongoing-case',state,
+        user_message_id:41,pending_action_id:null,message:null})
+    const stream=vi.spyOn(sse,'streamChat').mockRejectedValueOnce(new TypeError('断线'))
+    const warning=vi.fn()
+    const {result}=renderHook(()=>useChatController({
+      token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+      onActionWarning:warning,onConversationChange:vi.fn(),
+    }))
+    await waitFor(()=>expect(result.current.loadingMessages).toBe(false))
+    const raw='查询交易记录'
+    act(()=>result.current.updateDraft(raw))
+    await act(async()=>{await result.current.sendMessage(raw)})
+    await act(async()=>{await result.current.sendMessage(raw)})
+    expect(stream).toHaveBeenCalledTimes(1)
+    expect(result.current.draft).toBe(raw)
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('不能安全重复执行'))
+  },
+)
+
+it('旧请求有待确认操作时停止重发，且绝不重新下发确认令牌', async () => {
+  vi.spyOn(api,'submissionStatus')
+    .mockRejectedValueOnce(new ApiError('暂时不可用',503))
+    .mockResolvedValue({request_id:'pending-action-case',state:'action_pending',
+      user_message_id:45,pending_action_id:98,message:null})
+  const stream=vi.spyOn(sse,'streamChat').mockRejectedValueOnce(new TypeError('断线'))
+  const onActionRequired=vi.fn(), warning=vi.fn()
+  const {result}=renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired,
+    onActionWarning:warning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(result.current.loadingMessages).toBe(false))
+  const raw='向账户转账1元'
+  act(()=>result.current.updateDraft(raw))
+  await act(async()=>{await result.current.sendMessage(raw)})
+  await act(async()=>{await result.current.sendMessage(raw)})
+  expect(stream).toHaveBeenCalledTimes(1)
+  expect(onActionRequired).not.toHaveBeenCalled()
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('不会重新生成或下发确认令牌'))
+})
+
+it('刷新后明确 failed 的请求只提示核对并清理状态标记，不自动重发', async () => {
+  const requestId='req-reload-failed-case'
+  sessionStorage.setItem('xiaowe:chat-inflight:v1',JSON.stringify([
+    {conversationId:1,requestId,createdAt:Date.now()},
+  ]))
+  const inspect=vi.spyOn(api,'submissionStatus').mockResolvedValue({
+    request_id:requestId,state:'failed',user_message_id:57,
+    pending_action_id:null,message:null,
+  })
+  const stream=vi.spyOn(sse,'streamChat'),warning=vi.fn()
+  renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+    onActionWarning:warning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(inspect).toHaveBeenCalledWith('synthetic-token',1,requestId))
+  expect(stream).not.toHaveBeenCalled()
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('已被服务端确认失败'))
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('先核对历史与操作记录'))
+  expect(sessionStorage.getItem('xiaowe:chat-inflight:v1')).toBeNull()
 })

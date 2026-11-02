@@ -1,5 +1,5 @@
 {
-  "source_revision": "27753f8ca8361d739b23304f652d05ed36ea60ef",
+  "source_revision": "5befdd913552f7f919a7d264f7c5a21c51221ae4",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
@@ -24,6 +24,7 @@
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
     "agent_loop": "agent_loop:bd9b3523b46c09a5",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
-    "snapshot_contract": "snapshot_contract:2f643e31a1138fe5"
+    "snapshot_contract": "snapshot_contract:2f643e31a1138fe5",
+    "chat_request_recovery": "chat_request_recovery:372925108ceed90b"
   }
 }

@@ -42,6 +42,7 @@ REVIEW_PATHS = (
     "backend/app/risk/injection.py",
     "backend/app/api/routes/chat.py",
     "backend/app/agent/llm.py",
+    "frontend/src/features/chat/useChatController.ts",
 )
 
 
@@ -148,6 +149,12 @@ def runtime_versions() -> dict[str, str]:
         for relative in snapshot_files
     ).encode("utf-8")
     versions["snapshot_contract"] = "snapshot_contract:" + sha256(snapshot_bytes).hexdigest()[:16]
+    controller_source = (REPO / "frontend/src/features/chat/useChatController.ts").read_text(
+        encoding="utf-8",
+    ).replace("\r\n", "\n")
+    versions["chat_request_recovery"] = "chat_request_recovery:" + sha256(
+        controller_source.encode("utf-8"),
+    ).hexdigest()[:16]
     return versions
 
 
