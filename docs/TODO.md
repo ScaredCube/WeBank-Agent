@@ -407,3 +407,5 @@
 
 - [x] **T-RUNTIME-ACTION-EDIT-02b1 红色验证码门禁和资金编辑 E2E**：使用隔离模拟银行和真实 Chrome，在夜间风险测试环境下验证旧 RED 动作取消、新 RED 动作独立准备、错误验证码拒绝且不执行、正确验证码后恰好一次执行；数据库与审计断言通过。黄色同流程回归及后端 29 项定向测试 PASS。额外提供安全可选测试端口，不干扰正在运行的 GUI 并行服务。详见 `docs/agent-action-edit-review-2026-11-02.md`。
 - [ ] **T-RUNTIME-ACTION-EDIT-02b2 剩余集成验证**：补真实模型多样本、红色 password_face 以及 GUI 并行线的历史可信结果恢复集成。
+- [x] **T-RUNTIME-ACTION-EDIT-02b2a password_face 双阶段验证闭环**：隔离 Chrome + Agent Runtime + 风控 ContextVar + SQLite，旧 1 元动作取消、新 2 元动作独立准备，错误验证码不执行、正确验证码后不执行、模拟人脸通过后仅执行一次；Guard/验证审计与数据库核对 PASS。黄/红原路径回归 PASS，后端相关 24 项 PASS。详细证据：`docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b2b 真实模型与 Generative UI 集成**：真实 DeepSeek 多样本、不同业务 Tool 使用、GUI 并行线的可信结果与历史状态恢复，须在并行成果稳定后统一验收。

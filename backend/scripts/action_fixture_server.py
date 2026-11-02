@@ -3,9 +3,11 @@
 Never use in production; only the explicit synthetic-bank E2E runner imports it.
 """
 import json
+import os
 import re
 
 from app.agent.llm import LLMChunk
+from app.agent.guard import GuardVerdict
 import app.agent.loop as loop
 from app.main import app
 
@@ -38,3 +40,15 @@ class FixtureTransferModel:
 
 
 loop.get_llm = lambda: FixtureTransferModel()
+
+
+if os.environ.get('BANK_AGENT_ACTION_E2E_FACE') == '1':
+    class FixtureEscalatingGuard:
+        async def review(self, call):
+            # Synthetic, isolated negative Guard verdict. The real risk engine
+            # must still demand both code and face before execution.
+            if call.tool != 'prepare_transfer':
+                return GuardVerdict(True, 'allowed')
+            return GuardVerdict(False, 'rejected')
+
+    loop.get_guard = lambda: FixtureEscalatingGuard()

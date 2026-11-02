@@ -54,7 +54,9 @@ def verify_synthetic_database(database: Path) -> dict:
 
 
 
-def verify_synthetic_edit_database(database: Path, *, risk_level: str = 'yellow') -> dict:
+def verify_synthetic_edit_database(
+    database: Path, *, risk_level: str = 'yellow', face_required: bool = False,
+) -> dict:
     """Old action must be cancelled; only the new 2-yuan transfer is executed."""
     with closing(sqlite3.connect(database)) as db:
         accounts = db.execute("SELECT name,balance_fen FROM account ORDER BY id").fetchall()
@@ -66,6 +68,12 @@ def verify_synthetic_edit_database(database: Path, *, risk_level: str = 'yellow'
             'SELECT amount_fen FROM "transaction" WHERE category=?', ("模拟转账",)
         ).fetchall()
         events = [r[0] for r in db.execute("SELECT event_type FROM auditlog")]
+        face_details = [json.loads(row[0]).get('verification') for row in db.execute(
+            "SELECT details_json FROM pendingaction ORDER BY id"
+        )]
+        verification_rows = db.execute(
+            "SELECT status,attempts FROM verificationsession ORDER BY action_id"
+        ).fetchall()
     assert accounts == [("演示活期账户", 499800), ("零钱账户", 386012)], (
         "Only the edited 2-yuan action may change the synthetic account"
     )
@@ -81,10 +89,16 @@ def verify_synthetic_edit_database(database: Path, *, risk_level: str = 'yellow'
     if risk_level == 'red':
         assert 'verification_started' in events, 'Red action did not start verification'
         assert 'verification_failed' in events, 'Incorrect code was not rejected'
+    if face_required:
+        assert face_details == ['password_face', 'password_face'], 'Face gate not recorded in both actions'
+        assert verification_rows == [('verified', 1)], 'Final action not face-verified after one failed code'
+        assert events.count('verification_succeeded') >= 2, 'Code and face must be separate verification steps'
+        assert events.count('guard_denied') == 2, 'Synthetic Guard escalation did not occur twice'
     assert "transfer_completed" in events
     return {"actions": 2, "cancelled": 1, "completed": 1,
             "only_executed_amount_fen": 200, "ledger_rows": len(ledger),
-            "original_action_not_executed": True}
+            "original_action_not_executed": True,
+            "face_required_and_verified": face_required}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -97,6 +111,8 @@ def main() -> int:
                         help="Live-only sanitized tool-shape trace; no argument values")
     parser.add_argument('--backend-port', type=int, default=BACKEND_PORT)
     parser.add_argument('--frontend-port', type=int, default=FRONTEND_PORT)
+    parser.add_argument('--face', action='store_true',
+                        help='Synthetic Guard escalation: require red code + face')
     parser.add_argument('--red', action='store_true',
                         help='Test-only simulated night-time red transfer verification')
     parser.add_argument('--edit', action='store_true',
@@ -106,6 +122,8 @@ def main() -> int:
         parser.error('--edit currently requires --fixture')
     if args.red and not (args.fixture and args.edit):
         parser.error('--red requires --fixture --edit')
+    if args.face and not (args.fixture and args.edit and args.red):
+        parser.error('--face requires --fixture --edit --red')
     browser_entry = (FRONTEND / 'scripts' / 'competition_action_edit_e2e.cjs') if args.edit else BROWSER
     if args.diagnose and not args.live:
         parser.error("--diagnose requires --live")
@@ -128,6 +146,8 @@ def main() -> int:
             env['BANK_AGENT_ACTION_E2E_BASE'] = f'http://127.0.0.1:{args.frontend_port}'
             if args.fixture:
                 env["LLM_API_KEY"] = ""
+            if args.face:
+                env['BANK_AGENT_ACTION_E2E_FACE'] = '1'
             if args.red:
                 # Force only the ephemeral test process into its red night window.
                 # Runs quickly; fail closed if the local hour changes midway.
@@ -186,7 +206,9 @@ def main() -> int:
             screen_result = json.loads(browser.stdout.strip().splitlines()[-1])
             if screen_result.get("result") != "PASS":
                 raise AssertionError("Browser did not confirm the action")
-            verified = (verify_synthetic_edit_database(database, risk_level='red' if args.red else 'yellow') if args.edit
+            verified = (verify_synthetic_edit_database(
+                database, risk_level='red' if args.red else 'yellow', face_required=args.face
+            ) if args.edit
                         else verify_synthetic_database(database))
             print(json.dumps({
                 "result": "PASS", "scope": "isolated_synthetic_only",

@@ -56,6 +56,8 @@ async function run(){
   await dialog.waitFor({timeout:25000})
   requireTrue((await dialog.innerText()).includes('¥2.00'),'Edited amount missing from new action')
   const red = process.env.BANK_AGENT_ACTION_E2E_RED === '1'
+  const face = process.env.BANK_AGENT_ACTION_E2E_FACE === '1'
+  if(face) requireTrue((await dialog.innerText()).includes('人脸'),'Face verification was not disclosed')
   const execution=page.waitForResponse(r=>r.request().method()==='POST'&&/\/api\/transfers\/\d+\/execute$/.test(r.url()),{timeout:20000})
   if(red){
     await dialog.getByRole('button',{name:'开始模拟验证'}).click()
@@ -68,6 +70,14 @@ async function run(){
     requireTrue(executedRequests===0,'Transfer executed after invalid code')
     await dialog.getByLabel('模拟验证码').fill('123456')
     await dialog.getByRole('button',{name:'验证',exact:true}).click()
+    if(face){
+      const faceButton=dialog.getByRole('button',{name:'开始人脸识别'})
+      await faceButton.waitFor({state:'visible',timeout:15000})
+      requireTrue(executedRequests===0,'Code alone incorrectly executed a face-gated transfer')
+      const faceRequest=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().includes('/verification/face'),{timeout:15000})
+      await faceButton.click()
+      requireTrue((await faceRequest).status()===200,'Synthetic face verification failed')
+    }
   } else {
     await dialog.getByRole('button',{name:'确认',exact:true}).click()
     await dialog.getByText('已确认，操作尚未执行。').waitFor({timeout:15000})

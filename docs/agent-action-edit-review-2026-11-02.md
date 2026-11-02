@@ -63,3 +63,21 @@ uv run python scripts/run_action_e2e.py --fixture --edit --backend-port 8042 --f
 **验证**：RED 浏览器全链路 PASS；黄色编辑链路独立回归 PASS；后端 `test_verification.py`、`test_actions.py`、`test_transfers.py` 共 29 项 PASS。数据库精确核验两笔不同准备动作、首笔取消、第二笔完成、唯一 200 分交易流水；RED 验证审计包含 started / failed / succeeded。真实资金操作 0，未改生产库、Guard、Prompt、业务执行模块，也未修改 Generative UI 协作者的工作区。
 
 **仍待验证**：红色 `password_face` 专属业务、真实 DeepSeek 多样本，以及跨设备/会话失效恢复。本轮使用固定模型 Tool 调用，不应据此宣称模型在所有自然语言输入上稳定。默认隔离端口不变，仅在显式命令行指定时改用其他端口。
+
+## 2026-11-02 · password_face 双阶段验证实际端到端验收
+
+**测试路径**：真实 Chrome + FastAPI + AgentLoop/ToolExecutor + 服务端 Guard 风险升级 + VerificationSession + 临时 SQLite。只在独立 E2E 进程中注入一个返回拒绝的模拟 Guard，以验证原有服务端风险引擎是否把红色转账升级为 `password_face`；主 Guard、Prompt、风控阈值及业务执行源码未更改。命令：
+
+```powershell
+uv run python scripts/run_action_e2e.py --fixture --edit --red --face --backend-port 8042 --frontend-port 5242
+```
+
+**Before / After（测试能力）**：
+
+- 原 `--red` 场景只检查验证码验证后执行；新增 `--face`（必须同时有 `--fixture --edit --red`），构造真实调用链中的风险升级，并要求双阶段验证。
+- Chrome 先提交错误验证码，HTTP 拒绝且没有执行 POST；提交正确验证码后进入人脸阶段，**依旧没有执行 POST**；明确点击模拟人脸验证并返回成功后才发生唯一一次执行。
+- SQLite 严格检查：首笔 100 分准备动作已取消，新笔 200 分动作已完成，唯一 200 分流水；两个动作均为红色且 `details.verification=password_face`，验证会话为 `verified` 且仅一次错误尝试，审计含 Guard 拒绝、验证失败、两次验证成功与转账完成。
+
+**验证结果**：`--face` 完整测试 PASS；原黄色编辑 E2E PASS、红色仅验证码编辑 E2E PASS；`test_verification.py`、`test_guard.py`、`test_actions.py` 共 **24 passed**。独立端口测试，不改动 GUI 并行线。无真实资金/正式数据。
+
+**严格边界**：这是固定模型 Tool 调用及模拟 Guard 返回值的受控验收；并不等同于真实 DeepSeek 在不同意图下稳定触发升级，也不代表模拟人脸具有真实身份识别能力。真实模型多样本和 Generative UI 历史恢复的集成仍是独立未完成事项。
