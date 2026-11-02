@@ -77,20 +77,32 @@ def _database_summary(path: Path) -> dict:
     if not path.is_file():
         raise AssertionError("Synthetic database disappeared")
     with closing(sqlite3.connect(path)) as db:
-        account_rows = db.execute("SELECT balance_fen FROM account ORDER BY id").fetchall()
+        account_rows = db.execute(
+            "SELECT name,masked_number,balance_fen FROM account ORDER BY id"
+        ).fetchall()
         transfers = db.execute("SELECT status,amount_fen,transaction_id FROM transferrequest").fetchall()
+        pending_actions = db.execute("SELECT id FROM pendingaction").fetchall()
+        preparations = db.execute("SELECT id FROM operationpreparation").fetchall()
         ledger = db.execute(
             "SELECT amount_fen FROM \"transaction\" WHERE category='模拟转账'"
         ).fetchall()
         submission_states = db.execute(
             "SELECT state, COUNT(*) FROM chatsubmission GROUP BY state ORDER BY state"
         ).fetchall()
-    if len(account_rows) != 1 or account_rows[0][0] != 500000:
-        raise AssertionError("Read-only browser test must never alter synthetic balance")
-    if transfers or ledger:
-        raise AssertionError("Read-only browser test unexpectedly created a transfer")
+    # The current demo seed creates TWO accounts. Verify each exact identity
+    # and opening balance rather than silently accepting any state drift.
+    expected_accounts = [
+        ("演示活期账户", "**** 0001", 500000),
+        ("零钱账户", "**** 0002", 386012),
+    ]
+    if account_rows != expected_accounts:
+        raise AssertionError("Read-only browser test altered synthetic account state")
+    if transfers or ledger or pending_actions or preparations:
+        raise AssertionError("Read-only browser test unexpectedly created an operation")
     return {"synthetic_balance_unchanged": True, "transfer_rows": len(transfers),
-            "ledger_rows": len(ledger), "submission_states": dict(submission_states)}
+            "ledger_rows": len(ledger), "pending_action_rows": len(pending_actions),
+            "preparation_rows": len(preparations),
+            "submission_states": dict(submission_states)}
 
 
 def main() -> int:

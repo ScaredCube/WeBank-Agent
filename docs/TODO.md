@@ -359,3 +359,8 @@
 - [x] **T-RUNTIME-PROMPT-01 小We 身份和工具描述同步**：明确小We与「We在你身边」的角色气质，避免反复自我介绍；转账可选附言不再阻塞准备；更新业务能力与 Guard 只读判断依据；通过 99 项定向测试，以及两次真实模型身份/转账准备验证。
 - [~] **T-RUNTIME-PROMPT-02 自然语言与可信结果融合**：重点修复复杂账单分析中的重复 Tool、只输出固定结果卡、必要澄清和 Recovery 成本；验收须包含真实模型工具轨迹与可信结果对比。
 - [ ] **T-RUNTIME-PROMPT-03 演示环境安全配置与网页验收**：独立工作区 DATA 加密密钥仍需配置并核对历史库兼容；JWT 强度需提升，再对 Web 完整交互做实际验收。
+
+## 2026-11-02 · klutz-runtime 真实浏览器 QA
+
+- [x] **T-RUNTIME-UI-E2E-01 正常只读链路与请求异常恢复 Chrome 验收（P1）**：修复 `run_competition_e2e.py` 过时的单账户种子断言，严格核验当前两张模拟账户及固定余额；新增待确认操作/操作准备记录必须为零的安全断言。真实 DeepSeek + FastAPI/Vite + Chrome 在隔离 SQLite 下完成桌面银行卡引用、账单/卡状态结果、刷新恢复及移动端历史恢复，浏览器 JS 错误为零；真实 Chrome + 模拟 HTTP 额外通过 5 个异常重发场景（failed、processing、interrupted、action_pending、completed）。审查见 `docs/prompt-reviews/f98cbb3-browser-e2e-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02 黄色/红色动作完整浏览器交互与跨设备一致性验收（P1）**：仅在独立合成银行数据库中验证服务端确认、风险验证、操作记录与刷新恢复；遇到网络中断/未知状态不得自动重试资金操作。验收须包含真实浏览器实际动作轨迹、后端精确一次执行断言、异常后状态核对，以及独立的安全审查；不触碰真实银行或正式业务库。
