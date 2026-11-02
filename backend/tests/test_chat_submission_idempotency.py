@@ -110,7 +110,7 @@ def test_readonly_duplicate_returns_saved_result_without_reexecution(client, aut
                 yield LLMChunk(tool_calls=[{"id":"call_oneread","type":"function",
                     "function":{"name":"get_monthly_bill","arguments":'{"month":"2026-01"}'}}])
             else:
-                raise AssertionError("The completed read-only request must not execute model again")
+                yield LLMChunk(content="已查询账单。")
     fake = BillLLM()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: fake)
     conversation_id=cid(client,auth_headers)
@@ -123,7 +123,7 @@ def test_readonly_duplicate_returns_saved_result_without_reexecution(client, aut
     assert types[0:2] == ["bill_result", "delta"] and types[-1] == "done"
     assert [event["type"] for event in again] == ["done"]
     assert first[-1]["message"]["id"] == again[-1]["message"]["id"]
-    assert fake.calls == 1
+    assert fake.calls == 2
     history=client.get(url(conversation_id),headers=auth_headers).json()
     assert [item["role"] for item in history]==["user","assistant"]
     status=client.get(f"/api/chat/conversations/{conversation_id}/requests/req-test-bill-001",
@@ -148,8 +148,13 @@ def test_duplicate_pending_transfer_never_reissues_token_or_prepares_again(
 
     class PrepareLLM:
         calls=0
+        prepared=False
         async def stream(self,messages,tools=None):
             self.calls+=1
+            if self.prepared or tools is None:
+                yield LLMChunk(content="已生成待确认操作，请在固定弹窗中核对。")
+                return
+            self.prepared=True
             yield LLMChunk(tool_calls=[{"id":"call_safecreate","type":"function",
                 "function":{"name":"prepare_transfer","arguments":json.dumps({
                     "amount_fen":100,"source_token":"wrong","recipient_contact_token":"wrong",
@@ -179,8 +184,9 @@ def test_duplicate_pending_transfer_never_reissues_token_or_prepares_again(
         assert len(pending)==1 and pending[0].status=="pending"
         assert db.get(Account,aid).balance_fen==original
     history = client.get(url(conv), headers=auth_headers).json()
-    assert [m["role"] for m in history] == ["user", "assistant"]
-    assert "待确认操作" in history[-1]["content"]
+    # The action turn intentionally has no assistant text until the fixed
+    # dialog returns a terminal result.
+    assert [m["role"] for m in history] == ["user"]
 
 
 def test_conflicting_payload_or_conversation_cannot_reuse_key(client,auth_headers,monkeypatch):

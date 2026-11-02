@@ -40,6 +40,9 @@ from app.services.chat_submissions import (SubmissionConflict, fingerprint,
 from app.services.conversation_context import (allow_readonly_followup, remember_selection,
                                                previously_selected, latest_trusted_bill_month)
 from app.services.intent_service import IntentError, build_intent_prompt
+from app.services.pending_intent_service import (
+    clear_intent, is_short_affirmation, load_intent, remember_intent,
+)
 from app.services.vault import VaultError, create_account_token, create_contact_token
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
@@ -277,6 +280,8 @@ async def send_message(
                         + json.dumps(view_selection, ensure_ascii=False) + "]",
             ))
     intent_prompt = None
+    reused_intent = False
+    carried_amount_fen: int | None = None
     if payload.intent is not None and not injection.blocked:
         try:
             intent_prompt = build_intent_prompt(session, user.id, payload.intent)
@@ -287,7 +292,27 @@ async def send_message(
         # display copy keeps the user-visible capsule above the bubble; the
         # model copy substitutes opaque tokens. Neither leaks a raw card/phone.
         display_content = intent_prompt.display + "\n\n" + display_content
+        remember_intent(
+            session, conversation_id=conversation_id, user_id=user.id,
+            intent=payload.intent,
+            amount_fen=requested_intent_amount_fen(payload.content),
+        )
         record(session, user_id=user.id, event_type="intent_validated", result="success")
+    elif (payload.intent is None and not payload.references
+          and not injection.blocked and is_short_affirmation(payload.content)):
+        carried = load_intent(session, conversation_id=conversation_id, user_id=user.id)
+        if carried is not None:
+            carried_intent, carried_amount_fen = carried
+            try:
+                intent_prompt = build_intent_prompt(session, user.id, carried_intent)
+            except IntentError:
+                clear_intent(session, conversation_id=conversation_id, user_id=user.id)
+            else:
+                reused_intent = True
+    elif payload.intent is None and not injection.blocked:
+        # A non-affirmative turn ends the short clarification window. A new
+        # explicit intent above replaces it; this simply prevents stale reuse.
+        clear_intent(session, conversation_id=conversation_id, user_id=user.id)
     # Claim before minting object tokens, saving chat history or executing the
     # model. Database uniqueness protects against simultaneous duplicate POSTs.
     submission_id: int | None = None
@@ -351,7 +376,20 @@ async def send_message(
     verified_transfer_amount_fen = requested_transfer_amount_fen(payload.content)
     intent_amount_fen = (requested_intent_amount_fen(payload.content)
                          if intent_prompt is not None else None)
+    if intent_amount_fen is None and reused_intent:
+        intent_amount_fen = carried_amount_fen
     intent_needs_amount = bool(intent_prompt is not None and intent_amount_fen is None)
+    if reused_intent and intent_prompt is not None and intent_amount_fen is not None:
+        whole, cents = divmod(intent_amount_fen, 100)
+        trusted_notes.append(TrustedContextNote(
+            source="validated_intent",
+            content=(
+                "[服务端复核的上一轮前置意图仍有效："
+                f"动作={intent_prompt.action}，金额={intent_amount_fen} 分"
+                f"（{whole}.{cents:02d} 元）。本轮用户已作短确认；"
+                "请按该金额调用对应工具，仍须由服务端确认或验证，不得直接执行。]"
+            ),
+        ))
     transfer_needs_amount = bool(
         selected_contact is not None and is_transfer_request(display_content)
         and verified_transfer_amount_fen is None

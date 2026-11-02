@@ -7,7 +7,9 @@ from sqlmodel import Session, select
 from app.agent.llm import LLMChunk
 from app.db.session import get_engine
 from app.models import Account, Contact, TransferRequest
-from app.risk.transfer_intent import requested_transfer_amount_fen
+from app.risk.transfer_intent import (
+    requested_intent_amount_fen, requested_transfer_amount_fen,
+)
 
 
 @pytest.mark.parametrize(("text", "amount"), [
@@ -91,12 +93,11 @@ def test_missing_or_ambiguous_amount_requires_user_clarification(
         account_id=db.exec(select(Account)).first().id
         contact_id=db.exec(select(Contact)).first().id
 
-    class NeverCallModel:
+    class AmountModel:
         async def stream(self, messages, tools=None):
-            raise AssertionError("Model must not be invoked for ambiguous transfer amount")
-            yield LLMChunk(content="invalid")  # pragma: no cover
+            yield LLMChunk(content="请告诉我明确的转账金额。")
 
-    monkeypatch.setattr("app.agent.loop.get_llm", NeverCallModel)
+    monkeypatch.setattr("app.agent.loop.get_llm", AmountModel)
     conversation=client.post("/api/chat/conversations",headers=auth_headers,json={}).json()["id"]
     url=f"/api/chat/conversations/{conversation}/messages"
     response=client.post(url,headers=auth_headers,json={
@@ -109,3 +110,71 @@ def test_missing_or_ambiguous_amount_requires_user_clarification(
     assert "金额" in client.get(url,headers=auth_headers).json()[-1]["content"]
     with Session(get_engine()) as db:
         assert db.exec(select(TransferRequest)).all() == []
+
+def test_short_confirmation_reuses_previous_validated_intent(
+    client, auth_headers, monkeypatch,
+):
+    with Session(get_engine()) as db:
+        account = db.exec(select(Account)).first()
+        contact = db.exec(select(Contact)).first()
+        assert account and contact
+        account_id, contact_id, original = account.id, contact.id, account.balance_fen
+
+    class ClarifyThenPrepare:
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls <= 2:
+                yield LLMChunk(content="金额是 500 元吗？")
+            elif self.calls == 3:
+                assert any(
+                    "500.00" in str(message.get("content")) for message in messages
+                )
+                yield LLMChunk(tool_calls=[{
+                    "id": "call_reused_intent", "type": "function",
+                    "function": {"name": "prepare_transfer", "arguments": json.dumps({
+                        "amount_fen": 50000,
+                        "recipient_name": "untrusted",
+                        "source_token": "untrusted",
+                        "recipient_contact_token": "untrusted",
+                    }, ensure_ascii=False)},
+                }])
+            else:
+                yield LLMChunk(content="已准备待确认转账，请在固定弹窗中核对。")
+
+    model = ClarifyThenPrepare()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
+    cid = client.post("/api/chat/conversations", headers=auth_headers, json={}).json()["id"]
+    url = f"/api/chat/conversations/{cid}/messages"
+    first = client.post(url, headers=auth_headers, json={
+        "content": "转账金额：500块，还钱",
+        "intent": {
+            "action": "transfer",
+            "source": {"kind": "account", "id": account_id},
+            "target": {"kind": "contact", "id": contact_id},
+        },
+    })
+    assert first.status_code == 200
+    assert "500 元吗" in first.text
+
+    second = client.post(url, headers=auth_headers, json={"content": "是"})
+    assert second.status_code == 200
+    events = [json.loads(line[6:]) for line in second.text.splitlines()
+              if line.startswith("data: ")]
+    action = next(event for event in events if event["type"] == "action_required")
+    assert action["action"]["details"]["amount_fen"] == 50000
+    assert action["action"]["details"]["recipient_name"] == contact.name
+    with Session(get_engine()) as db:
+        assert db.get(Account, account_id).balance_fen == original
+        transfers = db.exec(select(TransferRequest)).all()
+        assert len(transfers) == 1 and transfers[0].status == "pending"
+
+@pytest.mark.parametrize(("text", "amount"), [
+    ("转账金额：500块，还钱", 50000),
+    ("转账金额：500元，还钱", 50000),
+    ("转账金额：500", None),
+    ("转账金额：500元或者600元", None),
+])
+def test_typed_intent_amount_allows_note_after_explicit_unit(text, amount):
+    assert requested_intent_amount_fen(text) == amount

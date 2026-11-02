@@ -161,7 +161,7 @@ def test_guard_timeout_escalates_transfer_and_keeps_balance(
                         "amount_fen": 100, "recipient_name": "模拟收款人",
                     })}}])
             else:
-                yield LLMChunk(content="I have transferred the money")
+                yield LLMChunk(content="已准备待确认转账。")
 
     class UnavailableGuard:
         async def review(self, call):
@@ -179,7 +179,7 @@ def test_guard_timeout_escalates_transfer_and_keeps_balance(
     action = next(entry for entry in events if entry["type"] == "action_required")
     assert action["action"]["risk_level"] == "red"
     assert action["action"]["details"]["verification"] == "password"
-    assert "transferred the money" not in str(events)
+    assert "已准备待确认转账。" in str(events)
     with Session(get_engine()) as db:
         assert db.exec(select(PendingAction)).one()
         assert db.exec(select(TransferRequest)).one().status == "pending"

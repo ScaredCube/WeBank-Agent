@@ -6,6 +6,9 @@ from app.schemas.actions import (
 )
 from app.schemas.verification import StartVerificationRequest, VerificationResponse, VerifyCodeRequest
 from app.services.action_service import cancel_pending_action, confirm_pending_action, get_pending_action
+from app.services.action_reply_service import (
+    TERMINAL_STATUSES, compose_and_persist_action_reply,
+)
 from app.services.verification_service import (
     VerificationError, start_verification, verify_code, verify_face,
 )
@@ -81,3 +84,24 @@ def verify_action_face(
     response.headers["Cache-Control"] = "no-store"
     return VerificationResponse(action_id=action_id, status="verified",
                                 message="模拟人脸识别通过。")
+
+@router.post("/{action_id}/chat-reply")
+async def action_chat_reply(
+    action_id: int, response: Response, session: SessionDep, user: CurrentUser,
+) -> dict:
+    """Generate the assistant reply after the fixed dialog reaches a terminal state.
+
+    The client cannot claim success: the terminal status is read from the
+    authenticated PendingAction. No fallback text is produced when the optional
+    wording pass fails; the completed card remains authoritative.
+    """
+    action = get_pending_action(session, user_id=user.id, action_id=action_id)
+    if action is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="待确认操作不存在")
+    if action.get("status") not in TERMINAL_STATUSES:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="操作尚未结束")
+    message = await compose_and_persist_action_reply(
+        session, user_id=user.id, action_id=action_id,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {"message": message}

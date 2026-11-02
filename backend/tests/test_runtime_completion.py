@@ -58,7 +58,7 @@ def test_bill_then_subscription_detection_continues_agent_loop(client, auth_head
     assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result", "delta", "done"]
     saved = events[-1]["message"]
     assert saved["bill_result"]["month"] == "2026-01"
-    assert "订阅" in saved["content"]
+    assert saved["content"] == "两项核查已完成。"
 
 
 def test_server_original_request_prevents_fake_fast_completion(

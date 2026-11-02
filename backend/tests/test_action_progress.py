@@ -27,9 +27,14 @@ def prepare_from_chat(client, headers, monkeypatch, request_id):
 
     class OneTool:
         calls = 0
+        prepared = False
 
         async def stream(self, messages, tools=None):
             self.calls += 1
+            if self.prepared or tools is None:
+                yield LLMChunk(content="已生成待确认操作，请在固定弹窗中核对。")
+                return
+            self.prepared = True
             yield LLMChunk(tool_calls=[{
                 "id": "call_progress_1",
                 "type": "function",
@@ -234,7 +239,10 @@ def test_agent_can_read_only_latest_verified_action_in_its_conversation(
                 }])
             else:
                 self.observation = json.loads(messages[-1]["content"])
-                yield LLMChunk(content="未经核实，转账已经成功。")
+                if self.observation.get("data") is None:
+                    yield LLMChunk(content="没有找到可核验的操作状态。")
+                else:
+                    yield LLMChunk(content="这笔操作尚未执行，请确认状态。")
 
     model = StatusModel()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
@@ -268,3 +276,39 @@ def test_agent_can_read_only_latest_verified_action_in_its_conversation(
     assert second_model.observation["data"] is None
     assert "没有找到" in other_result.text
     assert action["confirmation_token"] not in other_result.text
+
+def test_action_reply_is_generated_after_execution(client, auth_headers, monkeypatch):
+    cid, payload, action, _ = prepare_from_chat(
+        client, auth_headers, monkeypatch, "req-action-reply-001",
+    )
+    confirmed = client.post(
+        f"/api/actions/{action['action']['id']}/confirm",
+        json={"token": action["confirmation_token"]}, headers=auth_headers,
+    )
+    assert confirmed.status_code == 200
+    executed = client.post(
+        f"/api/transfers/{action['transfer_id']}/execute", headers=auth_headers,
+    )
+    assert executed.status_code == 200
+
+    class ReplyModel:
+        async def stream(self, messages, tools=None):
+            assert tools is None
+            yield LLMChunk(content="转账已完成，金额 1.00 元。")
+
+    monkeypatch.setattr(
+        "app.services.action_reply_service.get_llm", lambda: ReplyModel(),
+    )
+    reply = client.post(
+        f"/api/actions/{action['action']['id']}/chat-reply", headers=auth_headers,
+    )
+    assert reply.status_code == 200
+    message = reply.json()["message"]
+    assert message["role"] == "assistant"
+    assert message["content"] == "转账已完成，金额 1.00 元。"
+
+    history = client.get(
+        f"/api/chat/conversations/{cid}/messages", headers=auth_headers,
+    ).json()
+    assert history[-1]["id"] == message["id"]
+    assert history[-1]["content"] == "转账已完成，金额 1.00 元。"

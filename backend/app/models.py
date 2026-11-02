@@ -63,6 +63,24 @@ class ConversationSelection(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class ConversationIntent(SQLModel, table=True):
+    """Last validated drag intent awaiting clarification or preparation.
+
+    Stores only entity IDs, never tokens or labels. Each reuse re-validates
+    ownership and current status, and the user must still pass the fixed
+    confirmation dialog before any money moves.
+    """
+    conversation_id: int = Field(foreign_key="conversation.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    action: str = Field(max_length=32)
+    source_kind: str = Field(max_length=16)
+    source_id: int
+    target_kind: str = Field(max_length=16)
+    target_id: int
+    amount_fen: int | None = None
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class MessageResult(SQLModel, table=True):
     """Encrypted server-authored banking result or completed-operation receipt."""
     id: int | None = Field(default=None, primary_key=True)

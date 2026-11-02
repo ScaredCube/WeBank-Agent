@@ -3,21 +3,27 @@ import { z } from 'zod'
 const key = z.string().min(1).max(120)
 const scalar = z.union([z.string().max(500), z.number().finite(), z.boolean(), z.null()])
 const dataset = z.object({ kind: z.enum(['categories', 'comparison', 'records', 'subscriptions', 'candidates']), title: z.string().max(200), columns: z.array(z.object({ key, label: z.string().max(200), format: z.enum(['text', 'currency', 'number', 'percent']) }).strict()).max(20), rows: z.array(z.record(z.string(), scalar).and(z.object({ id: z.string().min(1).max(160) }))).max(200) }).strict()
-const envelope = z.object({
-  schema_version: z.literal(1), catalog_version: z.literal(1), view_id: key, revision: z.number().int().positive(), conversation_id: z.number().int().positive(), result_refs: z.array(key).max(20), observed_at: z.string().refine(v => Number.isFinite(Date.parse(v))),
+const viewData = z.object({ metrics: z.record(key, z.object({ label: z.string().max(200), value: z.number().finite().nullable(), format: z.enum(['currency', 'number', 'percent']), period: z.string().max(200).nullish().transform(v => v ?? undefined), note: z.string().max(500).nullish().transform(v => v ?? undefined) }).strict()), datasets: z.record(key, dataset) }).strict()
+const base = {
+  catalog_version: z.literal(1), view_id: key, revision: z.number().int().positive(), conversation_id: z.number().int().positive(), result_refs: z.array(key).max(20), observed_at: z.string().refine(v => Number.isFinite(Date.parse(v))),
   spec: z.object({ root: key, elements: z.record(key, z.object({ type: key, props: z.record(z.string(), z.unknown()), children: z.array(key).max(40).nullish().transform(v => v ?? undefined) }).strict()) }).strict(),
   interaction_state: z.object({ selected_category: z.string().max(160).nullable(), selected_ids: z.array(z.string().min(1).max(160)).max(100), sort: z.enum(['default', 'amount_desc', 'amount_asc']), filter: z.enum(['all', 'active', 'renewal_soon']) }).strict(),
   allowed_actions: z.array(z.enum(['select_category', 'select_ids', 'set_sort', 'set_filter', 'clear_filters'])).max(5),
-  trusted_data: z.object({ metrics: z.record(key, z.object({ label: z.string().max(200), value: z.number().finite().nullable(), format: z.enum(['currency', 'number', 'percent']), period: z.string().max(200).nullish().transform(v => v ?? undefined), note: z.string().max(500).nullish().transform(v => v ?? undefined) }).strict()), datasets: z.record(key, dataset) }).strict(),
-}).strict()
-export type ViewEnvelope = z.infer<typeof envelope>
+}
+const v1 = z.object({ ...base, schema_version: z.literal(1), trusted_data: viewData }).strict()
+const v2 = z.object({ ...base, schema_version: z.literal(2), view_data: viewData, source_digest: z.string().min(16).max(64).regex(/^[a-f0-9]+$/), review: z.object({ reviewer_version: z.string().min(1).max(80), attempts: z.number().int().positive().max(3), result: z.literal('passed') }).strict() }).strict()
+export type ViewEnvelope = z.infer<typeof v1>
 const datasets: Record<string, string[]> = { MetricComparison: ['comparison'], CategoryBarChart: ['categories'], ComparisonTable: ['comparison'], RecordList: ['records'], SelectableList: ['subscriptions', 'candidates'], Filter: ['subscriptions', 'candidates'], Selector: ['categories'] }
 
 /** Treat the layout as untrusted even when its data came from the server. */
 export function parseView(raw: unknown): ViewEnvelope | null {
-  const parsed = envelope.safeParse(raw)
+  const parsed = z.union([v1, v2]).safeParse(raw)
   if (!parsed.success) return null
-  const v = parsed.data, entries = Object.entries(v.spec.elements)
+  const source = parsed.data
+  const v: ViewEnvelope = source.schema_version === 2
+    ? { ...source, schema_version: 1, trusted_data: source.view_data }
+    : source
+  const entries = Object.entries(v.spec.elements)
   if (Object.keys(v.trusted_data.metrics).length > 100 || Object.keys(v.trusted_data.datasets).length > 40) return null
   if (Object.values(v.trusted_data.metrics).some(m => m.format === 'currency' && m.value !== null && !Number.isSafeInteger(m.value))) return null
   for (const data of Object.values(v.trusted_data.datasets)) for (const col of data.columns) if (col.format === 'currency' && data.rows.some(row => row[col.key] !== null && !Number.isSafeInteger(row[col.key]))) return null

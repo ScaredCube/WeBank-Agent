@@ -1,4 +1,4 @@
-Generate a read-only XiaoWe UI as ONE JSON object: {"root":"id","elements":{"id":{"type":"ComponentName","props":{},"children":[]}}}.
+﻿Generate a read-only XiaoWe view as ONE JSON object: {"view_data":{"metrics":{},"datasets":{}},"spec":{"root":"id","elements":{"id":{"type":"ComponentName","props":{},"children":[]}}}}.
 Only Stack, Grid and Section can contain children. Use a connected tree, at most 40 nodes and depth 6.
 Component props schemas generated from the frontend Catalog:
 {

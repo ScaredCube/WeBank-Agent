@@ -1,43 +1,52 @@
-"""Bounded model/tool loop. Financial Tool execution belongs to ToolExecutor."""
+"""Bounded model/tool loop.
+
+The model is the only author of user-visible conversational text. Deterministic
+code keeps the banking boundary: tool authorization, risk checks, trusted result
+cards and protocol events. Final text is reviewed against the authenticated Tool
+observations before it can be emitted.
+"""
 import json
-import re
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.goal_completion import missing_bill_goal
+from app.agent.compound_read_summary import missing_read_goal_for_retry
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
-from app.agent.compound_read_summary import (
-    missing_read_goal_for_retry, summarize_transaction_subscription_review,
-)
-from app.agent.financial_summary import (
-    incomplete_bill_comparison, summarize_bill_comparison,
-)
-from app.agent.read_completion import completed_readonly_summary
 from app.agent.read_result_recovery import (
-    CACHEABLE_READ_TOOLS, read_cache_key, verified_partial_read_reply,
+    CACHEABLE_READ_TOOLS, read_cache_key,
 )
-from app.agent.response_policy import (
-    NoToolScope, ReplyRoute, classify_no_tool_request,
-    decide_no_tool_reply, tool_free_reply,
+from app.agent.reply_grounding import (
+    ReplyGroundingError, ReplyGroundingRejected, get_reply_grounding,
 )
-from app.agent.response_recovery import recover_no_tool_reply
-from app.agent.response_synthesis import ResponseSynthesizer, TurnOutcome, should_synthesize_readoutcome
-from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
+from app.agent.tool_executor import (
+    ToolExecutor, VerifiedToolContext, required_intent_tool,
+)
+from app.core.config import settings
 from app.tools.register import create_agent_registry
-from app.tools.presentation import render_tool_result
 from app.services.redaction import mask_text, mask_value
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
+
+_MODEL_UNAVAILABLE = "模型服务暂时不可用，请稍后再试。"
+_GROUNDING_REJECTED = "回复未能通过可信结果校验，请重试。"
+_GENERATION_FAILED = "回复生成失败，请稍后再试。"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AgentEvent:
     type: str
     data: dict[str, Any] = field(default_factory=dict)
+
+
+class _ReplyGenerationError(RuntimeError):
+    pass
 
 
 class AgentLoop:
@@ -58,24 +67,24 @@ class AgentLoop:
                      intent_amount_fen: int | None = None,
                      original_request: str | None = None,
                      conversation_id: int | None = None,
-                     view_selection: dict[str, Any] | None = None) -> AsyncIterator[AgentEvent]:
+                     view_selection: dict[str, Any] | None = None,
+                     turn_constraints: str | None = None) -> AsyncIterator[AgentEvent]:
         # One canonical system-prompt assembly. Intent is already verified
         # upstream; the ToolExecutor remains the authority on business actions.
         messages: list[dict[str, Any]] = assemble_agent_prompt(
             verified_intent_action=intent_action,
         ).model_messages()
         messages.extend(history)
-        # A selected view contains a server-verified aggregate that can answer
-        # a narrow follow-up without another bank query or model-authored facts.
-        from app.agent.view_followup import render_view_followup
-        view_reply = (render_view_followup(original_request or "", view_selection)
-                      if intent_action is None else None)
-        if view_reply is not None:
-            view_reply = await ResponseSynthesizer(self.llm).compose_view(
-                user_goal=original_request or "", verified_summary=view_reply,
-            )
-            yield AgentEvent("delta", {"text": view_reply})
-            return
+        if turn_constraints:
+            messages.append({"role": "system", "content": turn_constraints})
+        if view_selection:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "本轮用户正在追问服务端已核验的视图选择。"
+                    "只能依据上下文中已经给出的事实回答，不得重新猜测数值。"
+                ),
+            })
         registry = create_agent_registry()
         executor = ToolExecutor(registry, self.guard)
         trusted = VerifiedToolContext(
@@ -95,8 +104,14 @@ class AgentLoop:
         tool_results: list[tuple[str, dict]] = []
         read_cache: dict[tuple[str, str], dict] = {}
         prior_calls: list[str] = []
+        request = original_request or ""
         continuation_target: str | None = None
+        intent_nudged = False
         attempted_nonread = False
+        action_status = "none"
+        malformed_rounds = 0
+        no_progress_rounds = 0
+        continuation_violations = 0
 
         try:
             for round_index in range(MAX_TOOL_ROUNDS + 1):
@@ -107,14 +122,28 @@ class AgentLoop:
                         content.append(chunk.content)
                     if chunk.tool_calls:
                         tool_calls = chunk.tool_calls
+                candidate = "".join(content).strip()
+
                 if not tool_calls:
-                    # Allow one model-directed chance to finish an explicit,
-                    # unattempted second read goal. No extra read permission,
-                    # automatic Tool execution, or unlimited retry is granted.
+                    required_tool = required_intent_tool(intent_action)
+                    if (required_tool is not None and intent_amount_fen is not None
+                            and not tool_results and not intent_nudged
+                            and action_status == "none"):
+                        intent_nudged = True
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                "本轮用户消息开头包含服务端已校验的前置意图和金额。"
+                                f"必须调用 {required_tool} 处理；不得要求用户重新提供"
+                                "账户、联系人、金额或重新描述意图。"
+                                "如工具返回错误，再依据错误如实说明。"
+                            ),
+                        })
+                        continue
                     missing_goal = (missing_read_goal_for_retry(
-                        tool_results, user_request=original_request or "",
+                        tool_results, user_request=request,
                     ) or missing_bill_goal(
-                        tool_results, user_request=original_request or "",
+                        tool_results, user_request=request,
                     ))
                     if (missing_goal is not None and continuation_target is None
                             and intent_action is None
@@ -132,149 +161,111 @@ class AgentLoop:
                             ),
                         })
                         continue
-                    if tool_results:
-                        # Calculator-only educational turns may retain a safe
-                        # explanation. Account, payment and other bank Tool
-                        # results continue to use deterministic presentation.
-                        request = original_request or ""
-                        candidate = "".join(content).strip()
-                        general_education = (
-                            classify_no_tool_request(request) == NoToolScope.EDUCATIONAL
-                            and not any(cue in request for cue in (
-                                "我的", "本人", "这笔", "这张", "该账户", "我的账户",
-                                "本月", "上个月", "刚才", "刚刚", "上次", "之前",
-                            ))
+                    if not candidate:
+                        candidate = await self._ask_with_note(
+                            messages,
+                            note="请直接回答用户当前的问题。若缺少可信数据，请如实说明并给出下一步。",
+                            tool_results=tool_results,
+                            action_status=action_status,
+                            request=request,
                         )
-                        if (general_education and candidate
-                                and all(name == "calculate" and result.get("ok")
-                                        for name, result in tool_results)):
-                            # The model may explain a concept, but it cannot
-                            # certify newly authored numerical conclusions.
-                            # Render every calculation from the Tool instead.
-                            explanation = "\n".join(
-                                line for line in candidate.splitlines()
-                                if not any(ch.isdigit() for ch in line)
-                                and not re.search(r"[￥¥]|[零一二两三四五六七八九十百千万亿]+(?:元|块|分)", line)
-                                and not line.lstrip().startswith(("计算结果", "|"))
-                                and not (line.lstrip().startswith("#") and any(
-                                    cue in line for cue in ("算一遍", "表格", "代入数字")
-                                ))
-                            ).strip()
-                            checked = tool_free_reply(explanation, user_request=request)
-                            if explanation and checked == explanation:
-                                verified_calculations = "\n".join(
-                                    render_tool_result(name, result)
-                                    for name, result in tool_results
-                                )
-                                yield AgentEvent("delta", {
-                                    "text": explanation + "\n\n" + verified_calculations,
-                                })
-                                return
-                        fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
-                                              for name, result in tool_results)
-                        missing_evidence = incomplete_bill_comparison(
-                            tool_results, original_request or "",
-                        )
-                        compound_summary = summarize_transaction_subscription_review(
-                            tool_results, user_request=original_request or "",
-                        )
-                        if compound_summary is not None:
-                            # The summary states coverage and evidence limits.
-                            # Preserve the exact verified transaction details below.
-                            summary = compound_summary + "\n\n" + "\n\n".join(
-                                render_tool_result(name, result)
-                                for name, result in tool_results
-                            )
-                        elif fully_supported and len(tool_results) > 1:
-                            summary = (summarize_bill_comparison(tool_results)
-                                       or f"已完成 {len(tool_results)} 项查询，结果见下方。")
-                        elif missing_evidence is not None:
-                            summary = missing_evidence
-                        else:
-                            summary = "\n\n".join(
-                                ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
-                                 else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
-                                 else render_tool_result(name, result))
-                                for name, result in tool_results)
-                        if should_synthesize_readoutcome(request, tool_results):
-                            summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
-                                user_goal=request,
-                                verified_results=tuple(tool_results),
-                                fallback_text=summary,
-                            ))
-                        messages.append({"role": "assistant", "content": summary})
-                        yield AgentEvent("delta", {"text": summary})
                     else:
-                        if getattr(self.llm, "mode", None) == "mock":
-                            text = "当前是演示模式，离线 Mock 不会调用银行工具。"
-                        else:
-                            # Model free text is useful for greetings, explaining
-                            # capabilities and asking for missing parameters.
-                            # A response without an authenticated Tool result
-                            # must never assert bank balances or executed actions.
-                            # Scope is derived from the user's current message,
-                            # never from an LLM's assertion that it used a bank Tool.
-                            latest_request = next(
-                                (str(item.get("content") or "") for item in reversed(history)
-                                 if item.get("role") == "user"), ""
-                            )
-                            decision = decide_no_tool_reply(
-                                "".join(content),
-                                user_request=(original_request if original_request is not None
-                                              else latest_request),
-                                financial_context=bool(
-                                    verified_account_token or verified_card_id
-                                    or verified_contact_token or has_selected_contact
-                                ),
-                            )
-                            # Ordinary accepted chat remains single-call; missing
-                            # data, status checks, and action clarification may use
-                            # a separate bounded tool-free wording pass.
-                            if (decision.route in {
-                                    ReplyRoute.CLARIFY_ACTION,
-                                    ReplyRoute.QUERY_REQUIRED,
-                                    ReplyRoute.VERIFY_STATUS,
-                                } and getattr(self.llm, "mode", None) == "openai"):
-                                text = await recover_no_tool_reply(decision, model=self.llm)
-                            else:
-                                text = decision.safe_text
-                        messages.append({"role": "assistant", "content": text})
-                        yield AgentEvent("delta", {"text": text})
+                        candidate = await self._finalize_reply(
+                            candidate, request=request,
+                            tool_results=tool_results,
+                            action_status=action_status,
+                        )
+                    messages.append({"role": "assistant", "content": candidate})
+                    yield AgentEvent("delta", {"text": candidate})
                     return
+
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
-                    yield AgentEvent("error", {"message": "查询步骤过多，请简化请求后重试。"})
+                    messages.append({
+                        "role": "assistant",
+                        "content": mask_text("".join(content)) or None,
+                        "tool_calls": mask_value(tool_calls),
+                    })
+                    for call in tool_calls:
+                        if not isinstance(call, dict) or not isinstance(call.get("id"), str):
+                            continue
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": mask_text(call["id"]),
+                            "content": json.dumps({
+                                "ok": False, "data": None,
+                                "error": "本轮工具调用已达到上限，未执行。",
+                            }, ensure_ascii=False),
+                        })
+                    text = await self._ask_with_note(
+                        messages,
+                        note=(
+                            "本轮工具调用已达到上限或数量过多，不能再调用工具。"
+                            "请基于已经取得的可信结果回答用户；缺失的部分如实说明。"
+                        ),
+                        tool_results=tool_results,
+                        action_status=action_status,
+                        request=request,
+                    )
+                    messages.append({"role": "assistant", "content": text})
+                    yield AgentEvent("delta", {"text": text})
                     return
+
                 if any(not isinstance(call, dict) or not isinstance(call.get("id"), str)
                        or not call["id"] or call.get("type") != "function"
                        or not isinstance(call.get("function"), dict)
                        or not isinstance(call["function"].get("name"), str)
                        or not isinstance(call["function"].get("arguments"), str)
                        for call in tool_calls):
-                    yield AgentEvent("error", {"message": "模型返回的工具调用格式无效。"})
-                    return
+                    malformed_rounds += 1
+                    if malformed_rounds > 1:
+                        text = await self._ask_with_note(
+                            messages,
+                            note="工具调用格式连续无效，不能再调用工具。请基于已有可信结果回答用户。",
+                            tool_results=tool_results,
+                            action_status=action_status,
+                            request=request,
+                        )
+                        messages.append({"role": "assistant", "content": text})
+                        yield AgentEvent("delta", {"text": text})
+                        return
+                    messages.append({
+                        "role": "system",
+                        "content": "上一轮工具调用格式无效。请修正参数后重试，或直接回答用户。",
+                    })
+                    continue
+
                 if (continuation_target is not None and (
                         len(tool_calls) != 1
                         or tool_calls[0]["function"]["name"] != continuation_target)):
-                    # The extra turn is authorized only to complete the single
-                    # remaining READ goal. Do not execute unrelated tools.
-                    partial = summarize_transaction_subscription_review(
-                        tool_results, user_request=original_request or "",
-                    )
-                    if partial is not None:
-                        answer = partial + "\n\n" + "\n\n".join(
-                            render_tool_result(name, result)
-                            for name, result in tool_results
+                    continuation_violations += 1
+                    if continuation_violations > 1:
+                        text = await self._ask_with_note(
+                            messages,
+                            note=(
+                                "服务端只允许完成剩余只读目标，不能继续调用其他工具。"
+                                "请基于已有可信结果回答用户。"
+                            ),
+                            tool_results=tool_results,
+                            action_status=action_status,
+                            request=request,
                         )
-                        yield AgentEvent("delta", {"text": answer})
-                    else:
-                        yield AgentEvent("error", {
-                            "message": "剩余查询未完成，请重试或缩小请求范围。",
-                        })
-                    return
+                        messages.append({"role": "assistant", "content": text})
+                        yield AgentEvent("delta", {"text": text})
+                        return
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            f"本轮只允许调用只读工具 {continuation_target} 完成剩余查询目标。"
+                            "不要调用其他工具。"
+                        ),
+                    })
+                    continue
+
                 messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
                                  "tool_calls": mask_value(tool_calls)})
                 executed_count = 0
-                for call in tool_calls:
+                stop_requested = False
+                for call_index, call in enumerate(tool_calls):
                     name = call["function"]["name"]
                     cache_key = (read_cache_key(name, call["function"]["arguments"])
                                  if not attempted_nonread else None)
@@ -288,13 +279,53 @@ class AgentLoop:
                             # A write or dynamic Tool may change state. Never
                             # serve earlier read snapshots after it is attempted.
                             read_cache.clear()
-                        outcome = await executor.execute(call, trusted, prior_calls)
+                        try:
+                            outcome = await executor.execute(call, trusted, prior_calls)
+                        except Exception:
+                            observation = {
+                                "ok": False,
+                                "data": None,
+                                "error": "工具执行失败，请稍后重试或改用其他方式。",
+                            }
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": mask_text(call["id"]),
+                                "content": json.dumps(observation, ensure_ascii=False),
+                            })
+                            continue
                         executed_count += 1
                         for event in outcome.events:
                             yield AgentEvent(event.type, event.data)
                         if outcome.stop_reason:
-                            return
-                        # Approval tokens travel only in client events.
+                            action_status = "waiting_approval"
+                            stop_requested = True
+                            if outcome.observation is not None:
+                                observation = outcome.observation
+                            else:
+                                observation = {
+                                    "ok": True,
+                                    "data": {"status": "awaiting_user_confirmation"},
+                                    "note": "操作已准备，等待用户在固定确认界面核对。",
+                                }
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": mask_text(call["id"]),
+                                "content": json.dumps(observation, ensure_ascii=False),
+                            })
+                            # The model must see one tool response per call. Do
+                            # not execute later calls in this batch after a
+                            # confirmation boundary.
+                            for remaining in tool_calls[call_index + 1:]:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": mask_text(remaining["id"]),
+                                    "content": json.dumps({
+                                        "ok": False,
+                                        "data": None,
+                                        "error": "本轮已进入用户确认流程，此工具未执行。",
+                                    }, ensure_ascii=False),
+                                })
+                            break
                         if outcome.observation is None:
                             raise RuntimeError("Nonterminal Tool execution had no observation")
                         observation = outcome.observation
@@ -309,43 +340,91 @@ class AgentLoop:
                         "tool_call_id": mask_text(call["id"]),
                         "content": json.dumps(observation, ensure_ascii=False),
                     })
+                if stop_requested:
+                    # The fixed action dialog now owns the turn. The main Agent
+                    # must stop and wait for the action result; the reply is
+                    # generated later by the action-result composer.
+                    return
                 if executed_count == 0:
-                    # Model repeated only already verified read calls. Do not
-                    # spend the remaining rounds on a no-progress loop.
-                    partial = verified_partial_read_reply(
-                        tool_results, user_request=original_request or "",
-                    )
-                    if partial is not None:
-                        yield AgentEvent("delta", {"text": partial})
-                    else:
-                        yield AgentEvent("error", {
-                            "message": "查询没有取得新的可信结果，请简化请求后重试。",
-                        })
-                    return
-                # When the requested verified read-only results are already complete,
-                # the server can finish deterministically. A further model round may
-                # otherwise produce redundant/unsafe tool calls without new value.
-                final_readonly_text = completed_readonly_summary(
-                    history, tool_results, user_request=original_request,
-                )
-                if final_readonly_text is not None:
-                    if should_synthesize_readoutcome(original_request or "", tool_results):
-                        final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
-                            user_goal=original_request or "",
-                            verified_results=tuple(tool_results),
-                            fallback_text=final_readonly_text,
-                        ))
-                    yield AgentEvent("delta", {"text": final_readonly_text})
-                    return
+                    no_progress_rounds += 1
+                    if no_progress_rounds > 1:
+                        text = await self._ask_with_note(
+                            messages,
+                            note=(
+                                "查询没有取得新的可信结果，不能继续重复调用。"
+                                "请基于已有结果回答用户，并说明未完成的部分。"
+                            ),
+                            tool_results=tool_results,
+                            action_status=action_status,
+                            request=request,
+                        )
+                        messages.append({"role": "assistant", "content": text})
+                        yield AgentEvent("delta", {"text": text})
+                        return
+                    messages.append({
+                        "role": "system",
+                        "content": "这些查询已经完成，不要重复调用相同工具和参数。请基于已有结果回答用户。",
+                    })
+                    continue
+                # No deterministic completion here: give the model another turn
+                # to use the new observations and write the final answer.
+            text = await self._ask_with_note(
+                messages,
+                note="请基于本轮已经取得的可信结果回答用户。",
+                tool_results=tool_results,
+                action_status=action_status,
+                request=request,
+            )
+            messages.append({"role": "assistant", "content": text})
+            yield AgentEvent("delta", {"text": text})
+        except ReplyGroundingRejected:
+            yield AgentEvent("error", {"message": _GROUNDING_REJECTED})
+        except ReplyGroundingError:
+            yield AgentEvent("error", {"message": _GENERATION_FAILED})
+        except _ReplyGenerationError:
+            yield AgentEvent("error", {"message": _GENERATION_FAILED})
         except Exception:
-            # The provider or a later READ tool can fail after earlier tools
-            # succeeded. Preserve those verified observations; never invent
-            # the missing step or claim that a PREPARE operation succeeded.
-            partial = (verified_partial_read_reply(
-                tool_results, user_request=original_request or "",
-            ) if not attempted_nonread else None)
-            if partial is not None:
-                yield AgentEvent("delta", {"text": partial})
-            else:
-                yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
-            return
+            logger.exception("agent loop failed")
+            # The provider or a Tool can fail after earlier Tools succeeded.
+            # Verified cards already emitted by the executor remain visible.
+            yield AgentEvent("error", {"message": _MODEL_UNAVAILABLE})
+
+    async def _ask_with_note(
+        self, messages: list[dict[str, Any]], *, note: str,
+        tool_results: list[tuple[str, dict]], action_status: str,
+        request: str,
+    ) -> str:
+        """One bounded tool-free completion used to finish a turn."""
+        final_messages = [*messages, {"role": "system", "content": note}]
+        chunks: list[str] = []
+        try:
+            async for chunk in self.llm.stream(final_messages, tools=None):
+                if getattr(chunk, "tool_calls", None):
+                    raise _ReplyGenerationError("final turn attempted a tool call")
+                part = getattr(chunk, "content", "") or ""
+                if not isinstance(part, str):
+                    raise _ReplyGenerationError("final turn returned non-text")
+                chunks.append(part)
+        except _ReplyGenerationError:
+            raise
+        except Exception as exc:
+            raise _ReplyGenerationError("final turn unavailable") from exc
+        candidate = "".join(chunks).strip()
+        if not candidate:
+            raise _ReplyGenerationError("final turn was empty")
+        return await self._finalize_reply(
+            candidate, request=request, tool_results=tool_results,
+            action_status=action_status,
+        )
+
+    async def _finalize_reply(
+        self, candidate: str, *, request: str,
+        tool_results: list[tuple[str, dict]], action_status: str,
+    ) -> str:
+        if not settings.reply_grounding_enabled:
+            return candidate
+        grounding = get_reply_grounding(self.llm)
+        return await grounding.compose(
+            candidate, user_request=request, tool_results=tool_results,
+            action_status=action_status,
+        )

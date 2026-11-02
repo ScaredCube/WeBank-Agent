@@ -42,7 +42,7 @@ def test_holding_reference_is_verified_and_not_a_write_authorization(
     response = client.post(url, headers=auth_headers,
                            json={"content": "看看这个持仓", "references": [{"kind": "holding", "id": owned_id}]})
     assert response.status_code == 200
-    assert len(observed) == 2  # A separate tool-free clarification is now allowed.
+    assert len(observed) == 1
     assert f"holding_id={owned_id}" in observed[0]
     assert "V2模拟稳健理财" in observed[0]
     assert "该只读引用不得用于准备交易" in observed[0]

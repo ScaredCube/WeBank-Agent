@@ -102,7 +102,7 @@ def test_chat_bill_tool_fixed_rendering_and_audit(client, auth_headers, monkeypa
                     "name": "get_monthly_bill", "arguments": json.dumps({"month": "2026-01"})}}])
             else:
                 assert json.loads(messages[-1]["content"])["data"]["expense_fen"] == 100000
-                yield LLMChunk(content="虚构金额999999元")
+                yield LLMChunk(content="已查询账单，金额以结果卡为准。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation_id = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
@@ -110,7 +110,8 @@ def test_chat_bill_tool_fixed_rendering_and_audit(client, auth_headers, monkeypa
                            json={"content": "分析2026年1月的消费"})
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     content = events[-1]["message"]["content"]
-    assert "账单已查询" in content and "999999" not in content
+    assert content == "已查询账单，金额以结果卡为准。"
+    assert "999999" not in content
     assert events[0]["type"] == "bill_result"
     assert events[0]["data"]["expense_fen"] == 100000
     audit = client.get("/api/audit", headers=auth_headers).json()
@@ -194,11 +195,11 @@ def test_bill_masks_sensitive_fields_in_api_model_and_chat(client, auth_headers,
     assert chat.status_code == 200
     events = [json.loads(line[6:]) for line in chat.text.splitlines() if line.startswith("data: ")]
     assert events[-1]["type"] == "done"
-    # The server now finishes a fulfilled read-only request without a second
-    # LLM round. Sensitive Tool payload therefore never reaches the model.
-    assert llm.calls == 1
-    assert llm.tool_result is None
-    assert events[-1]["message"]["content"] == "账单已查询，明细见下方结果卡。"
+    # The model receives the masked Tool observation and writes the final text.
+    assert llm.calls == 2
+    assert llm.tool_result is not None
+    assert_private(llm.tool_result)
+    assert events[-1]["message"]["content"] == "不会采用模型生成的账单文本"
     assert_private(json.dumps(events[0]["data"], ensure_ascii=False))
     assert len(events[0]["data"]["anomalies"]) == 1
     assert_private(chat.text)

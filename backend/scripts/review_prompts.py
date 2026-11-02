@@ -17,15 +17,22 @@ import sys
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS_FILE = "backend/app/agent/prompts.py"
-PROMPT_NAMES = ("SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "RESPONSE_RECOVERY_PROMPT")
+PROMPT_NAMES = (
+    "SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "REPLY_GROUNDING_PROMPT",
+    "REPLY_REWRITE_PROMPT", "VIEW_REVIEW_PROMPT", "ACTION_REPLY_PROMPT",
+)
 REVIEW_PATHS = (
     "backend/app/agent/prompts.py",
     "backend/app/agent/prompt_assembly.py",
     "backend/app/agent/context_assembly.py",
-    "backend/app/agent/response_policy.py",
-    "backend/app/agent/response_recovery.py",
-    "backend/app/agent/read_completion.py",
-    "backend/app/agent/financial_summary.py",
+    "backend/app/agent/reply_grounding.py",
+    "backend/app/agent/view_review.py",
+    "backend/app/agent/ui_composer.py",
+    "backend/app/services/view_generation.py",
+    "backend/app/services/view_service.py",
+    "backend/app/services/trusted_ui_results.py",
+    "backend/app/schemas/generative_ui.py",
+    "fixtures/generative-ui/catalog-prompt.txt",
     "backend/app/agent/compound_read_summary.py",
     "backend/app/agent/read_result_recovery.py",
     "backend/app/agent/loop.py",
@@ -83,7 +90,9 @@ def manifest_for_source(source: str) -> dict[str, str]:
 def runtime_versions() -> dict[str, str]:
     sys.path.insert(0, str(REPO / "backend"))
     from app.agent.prompt_assembly import (
-        assemble_agent_prompt, assemble_guard_prompt, assemble_recovery_prompt,
+        assemble_agent_prompt, assemble_guard_prompt,
+        assemble_action_reply_prompt, assemble_reply_grounding_prompt, assemble_reply_rewrite_prompt,
+        assemble_view_review_prompt,
     )
     from app.agent.tool_executor import required_intent_tool
     from app.tools.register import create_agent_registry
@@ -94,7 +103,10 @@ def runtime_versions() -> dict[str, str]:
     versions = {
         "agent": assemble_agent_prompt().version,
         "guard": assemble_guard_prompt().version,
-        "recovery": assemble_recovery_prompt().version,
+        "reply_grounding": assemble_reply_grounding_prompt().version,
+        "reply_rewrite": assemble_reply_rewrite_prompt().version,
+        "view_review": assemble_view_review_prompt().version,
+        "action_reply": assemble_action_reply_prompt().version,
     }
     for action in actions:
         if required_intent_tool(action) is None:
@@ -121,26 +133,17 @@ def runtime_versions() -> dict[str, str]:
     # Track these targeted files without forcing every unrelated Runtime change
     # to update the Prompt review baseline.
     for label, relative in (
-        ("reply_policy", "backend/app/agent/response_policy.py"),
-        ("recovery_policy", "backend/app/agent/response_recovery.py"),
-        ("read_completion", "backend/app/agent/read_completion.py"),
-        ("grounded_summary", "backend/app/agent/financial_summary.py"),
         ("compound_read_summary", "backend/app/agent/compound_read_summary.py"),
         ("read_result_recovery", "backend/app/agent/read_result_recovery.py"),
+        ("reply_grounding_module", "backend/app/agent/reply_grounding.py"),
+        ("view_review_module", "backend/app/agent/view_review.py"),
+        ("action_reply_module", "backend/app/agent/action_reply.py"),
+        ("view_generation", "backend/app/services/view_generation.py"),
         ("agent_loop", "backend/app/agent/loop.py"),
         ("tool_executor", "backend/app/agent/tool_executor.py"),
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]
-    followup_source = (REPO / "backend/app/agent/view_followup.py").read_text(
-        encoding="utf-8",
-    ).replace("\r\n", "\n")
-    loop_source = (REPO / "backend/app/agent/loop.py").read_text(
-        encoding="utf-8",
-    ).replace("\r\n", "\n")
-    versions["agent_loop"] = "agent_loop:" + sha256(
-        (loop_source + "\n" + followup_source).encode("utf-8"),
-    ).hexdigest()[:16]
     scope_sources = (
         "backend/app/tools/account_tools.py",
         "backend/app/tools/subscription_tools.py",

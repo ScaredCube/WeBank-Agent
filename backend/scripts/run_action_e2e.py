@@ -145,7 +145,10 @@ def main() -> int:
             env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{args.backend_port}'
             env['BANK_AGENT_ACTION_E2E_BASE'] = f'http://127.0.0.1:{args.frontend_port}'
             if args.fixture:
-                env["LLM_API_KEY"] = ""
+                # Startup requires a provider; fixture mode injects a
+                # deterministic tool model and never makes a real network call.
+                env["LLM_API_KEY"] = "synthetic-action-e2e-no-call"
+                env["REPLY_GROUNDING_ENABLED"] = "false"
             if args.face:
                 env['BANK_AGENT_ACTION_E2E_FACE'] = '1'
             if args.red:
@@ -180,7 +183,7 @@ def main() -> int:
                 f"http://127.0.0.1:{args.backend_port}/api/health", timeout=5
             ) as response:
                 model = json.load(response).get("llm", {})
-            expected_mode = "mock" if args.fixture else "openai"
+            expected_mode = "openai"
             if model.get("mode") != expected_mode:
                 raise RuntimeError("Unexpected model mode in isolated Agent E2E")
             browser = subprocess.run(

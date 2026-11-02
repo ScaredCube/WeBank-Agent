@@ -130,9 +130,12 @@ class ToolExecutor:
                 if token_args is None or len(context.intent_tokens) != 2:
                     argument_error = "前置意图引用无效"
                     rejection_reason = "invalid_arguments"
-                elif (type(args.get("amount_fen")) is not int
-                      or context.intent_amount_fen is None
-                      or args["amount_fen"] != context.intent_amount_fen):
+                elif context.intent_amount_fen is None:
+                    argument_error = "模型金额与用户原文不一致，已拒绝"
+                    rejection_reason = "invalid_arguments"
+                elif (args.get("amount_fen") is not None
+                      and (type(args.get("amount_fen")) is not int
+                           or args["amount_fen"] != context.intent_amount_fen)):
                     argument_error = "模型金额与用户原文不一致，已拒绝"
                     rejection_reason = "invalid_arguments"
                 else:

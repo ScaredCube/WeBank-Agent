@@ -121,8 +121,5 @@ class LLMGuard:
         return _parse_verdict(text)
 
 
-def get_guard() -> GuardProvider | None:
-    provider = get_llm()
-    if getattr(provider, "mode", None) == "mock":
-        return None
-    return LLMGuard(provider)
+def get_guard() -> GuardProvider:
+    return LLMGuard(get_llm())

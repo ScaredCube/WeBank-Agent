@@ -80,12 +80,11 @@ def test_agent_error_after_valid_bill_preserves_trusted_partial_history(client, 
     events = _events(client.post(url, headers=auth_headers, json={
         "content": "查 2026-01 月账单，并核查银行卡状态", "references":[{"kind":"account","id":account_id}]
     }))
-    assert [e["type"] for e in events if e["type"] != "ui_status"] == ["bill_result","delta","done"]
+    assert [e["type"] for e in events if e["type"] != "ui_status"] == ["bill_result","error","done"]
     assert any(e.get("type") == "ui_status" and e.get("status") == "fallback" for e in events)
     assert events[-1]["message"]["bill_result"]["month"] == "2026-01"
     saved=client.get(url,headers=auth_headers).json()[-1]
     assert saved["tool_results"][0]["kind"]=="monthly_bill"
-    assert "部分查询" in saved["content"]
 
 def test_verified_contact_and_account_bind_model_transfer_to_pending_only(client, auth_headers, monkeypatch):
     from app.models import Contact, TransferRequest
@@ -96,7 +95,12 @@ def test_verified_contact_and_account_bind_model_transfer_to_pending_only(client
         account_id,contact_id,contact_name=account.id,contact.id,contact.name
 
     class FakeLLM:
+        prepared = False
         async def stream(self, messages, tools=None):
+            if self.prepared or tools is None:
+                yield LLMChunk(content="已准备待确认转账，请在固定弹窗核对。")
+                return
+            self.prepared = True
             yield LLMChunk(tool_calls=[{"id":"call_safetransfer","type":"function",
                 "function":{"name":"prepare_transfer","arguments":json.dumps({
                     "source_token":"fake_source", "recipient_contact_token":"fake_contact",

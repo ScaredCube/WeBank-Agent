@@ -21,6 +21,8 @@ from uuid import uuid4
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.agent.llm import validate_llm_config
+    validate_llm_config()
     init_db()
     from app.services.chat_submissions import recover_stale_submissions
     with session_scope() as session:

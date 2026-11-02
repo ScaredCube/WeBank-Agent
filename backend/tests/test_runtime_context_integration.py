@@ -24,7 +24,7 @@ def test_context_is_compiled_once_with_verified_object_and_prior_history(
         calls = []
 
         async def stream(self, messages, tools=None):
-            self.calls.append(messages)
+            self.calls.append([dict(item) for item in messages])
             yield LLMChunk(content="您好，需要什么帮助？")
 
     llm = CaptureModel()
@@ -114,28 +114,18 @@ def test_natural_prefixed_clarification_avoids_second_model_call(
     assert events[-1]["message"]["content"] == "可以的。请问你想从哪个账户转账？"
 
 
-def test_live_recovery_only_adds_bounded_question_without_bank_tools(
+def test_missing_transfer_details_are_asked_by_the_model(
     client, auth_headers, monkeypatch,
 ):
-    class RecoveringModel:
+    class ClarifyingModel:
         mode = "openai"
         calls = []
 
         async def stream(self, messages, tools=None):
             self.calls.append((messages, tools))
-            if len(self.calls) == 1:
-                yield LLMChunk(content="转账已成功完成。")
-            else:
-                assert tools is None
-                assert all(
-                    "确认令牌" not in item["content"] and "转账已成功完成" not in item["content"]
-                    for item in messages
-                )
-                yield LLMChunk(content=json.dumps({
-                    "question": "请问您想从哪个账户转账？",
-                }, ensure_ascii=False))
+            yield LLMChunk(content="请问您想从哪个账户转账，金额是多少？")
 
-    model = RecoveringModel()
+    model = ClarifyingModel()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
     cid = client.post(
         "/api/chat/conversations", json={}, headers=auth_headers,
@@ -144,10 +134,7 @@ def test_live_recovery_only_adds_bounded_question_without_bank_tools(
         f"/api/chat/conversations/{cid}/messages",
         json={"content": "我想转账"}, headers=auth_headers,
     ))
-    assert len(model.calls) == 2
-    assert model.calls[0][1] is not None
+    assert len(model.calls) == 1
     text = events[-1]["message"]["content"]
-    assert "本轮尚未创建待确认转账" in text
-    assert "请问您想从哪个账户转账？" in text
-    assert "转账已成功完成" not in text
+    assert text == "请问您想从哪个账户转账，金额是多少？"
     assert all(event["type"] != "action_required" for event in events)

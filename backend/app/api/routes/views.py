@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.api.deps import CurrentUser, SessionDep, security_gate
-from app.schemas.generative_ui import ViewEnvelope, ViewInteractionRequest
+from app.schemas.generative_ui import AnyViewEnvelope, ViewInteractionRequest
 from app.services.view_service import (
     InvalidViewInteraction, ViewConflict, ViewNotFound,
     apply_view_interaction, load_view_snapshot,
@@ -11,7 +11,7 @@ from app.services.view_service import (
 router = APIRouter(prefix="/views", tags=["views"], dependencies=[Depends(security_gate)])
 
 
-@router.get("/{view_id}", response_model=ViewEnvelope)
+@router.get("/{view_id}", response_model=AnyViewEnvelope)
 def get_view(view_id: str, response: Response, session: SessionDep,
              user: CurrentUser, revision: int | None = Query(default=None, ge=1)):
     response.headers["Cache-Control"] = "no-store"
@@ -22,7 +22,7 @@ def get_view(view_id: str, response: Response, session: SessionDep,
         raise HTTPException(status_code=404, detail=str(exc)) from None
 
 
-@router.post("/{view_id}/interactions", response_model=ViewEnvelope)
+@router.post("/{view_id}/interactions", response_model=AnyViewEnvelope)
 def interact(view_id: str, payload: ViewInteractionRequest, response: Response,
              user: CurrentUser):
     response.headers["Cache-Control"] = "no-store"

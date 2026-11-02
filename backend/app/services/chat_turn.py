@@ -17,23 +17,21 @@ from app.services.audit_service import conversation_context, record_separately
 from app.services.chat_messages import persist_assistant, finalize_assistant
 from app.core.config import settings
 from app.core.time import utcnow
-from app.agent.ui_composer import get_ui_composer
+from app.db.session import session_scope
 from app.services.chat_submissions import advance_submission
+from app.services.pending_intent_service import clear_intent
 from app.services.security_service import record_failure
 
 logger = logging.getLogger(__name__)
 EventT = TypeVar("EventT")
-_SAFE_VIEW_VALIDATION_REASONS = frozenset({
-    "view root does not exist", "view contains too many elements",
-    "unsupported view component", "component props do not match its catalog schema",
-    "view children must be unique within a parent", "leaf components cannot contain children",
-    "view child does not exist", "unsupported section title", "unsupported action link",
-    "metric reference does not exist", "dataset reference does not exist",
-    "dataset reference has the wrong semantic kind", "data reference is not bound to a result",
-    "view nesting is too deep", "view graph contains a cycle",
-    "view components may have only one parent", "view root cannot have a parent",
-    "view contains unreachable elements",
-})
+
+
+def _clear_pending_intent(conversation_id: int, user_id: int) -> None:
+    try:
+        with session_scope() as session:
+            clear_intent(session, conversation_id=conversation_id, user_id=user_id)
+    except Exception:
+        logger.warning("clearing pending intent failed")
 
 
 @dataclass(frozen=True)
@@ -67,6 +65,17 @@ async def stream_chat_turn(
     injection_blocked = turn.injection_blocked
     transfer_needs_amount = turn.transfer_needs_amount
     intent_needs_amount = turn.intent_needs_amount
+    constraints: list[str] = []
+    if transfer_needs_amount:
+        constraints.append(
+            "本轮用户已选择收款联系人并要求转账，但没有提供明确金额。"
+            "不得调用 prepare_transfer；请用自然语言询问明确的转账金额。"
+        )
+    if intent_needs_amount:
+        constraints.append(
+            "本轮前置意图缺少明确金额。不得准备或执行资金操作；"
+            "请用自然语言询问用户希望处理的明确金额。"
+        )
 
     def finish_reply(content: str, bill: dict | None = None,
                      cards: dict | None = None,
@@ -93,11 +102,6 @@ async def stream_chat_turn(
             yield encode({"type": "delta", "text": text})
             yield encode({"type": "done", "message": finish_reply(text)})
             return
-        if transfer_needs_amount or intent_needs_amount:
-            clarification = "请在消息中提供一个明确金额（例如 100 元），我会按前置意图校验后继续。"
-            yield encode({"type": "delta", "text": clarification})
-            yield encode({"type": "done", "message": finish_reply(clarification)})
-            return
         async for event in loop.stream(
             history, user_id=user_id,
             verified_account_token=turn.verified.verified_account_token,
@@ -112,7 +116,8 @@ async def stream_chat_turn(
             intent_amount_fen=turn.verified.intent_amount_fen,
             original_request=turn.original_request,
             conversation_id=conversation_id,
-            **({"view_selection": turn.view_selection} if turn.view_selection else {}),
+            view_selection=turn.view_selection,
+            turn_constraints="\n".join(constraints) or None,
         ):
             if await is_disconnected():
                 # The model/tool may already have completed a side effect.
@@ -163,6 +168,7 @@ async def stream_chat_turn(
                     return
                 saved = receipt.model_dump()
                 trusted_results.append({"kind": "internal_transfer", "data": saved})
+                _clear_pending_intent(conversation_id, user_id)
                 yield encode({"type": "operation_result", "kind": "internal_transfer",
                               "data": saved})
             elif event.type == "card_result":
@@ -180,31 +186,35 @@ async def stream_chat_turn(
                     yield encode({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
                     return
                 trusted_results.append({"kind": "card_status", "data": trusted_cards})
+                ui_results.append({
+                    "kind": "card_status", "data": trusted_cards,
+                    "metadata": {}, "result_ref": uuid4().hex,
+                    "observed_at": utcnow().isoformat(),
+                })
                 yield encode({"type": "card_result", "data": trusted_cards})
             elif event.type == "action_required":
                 action_pending = True
                 pending = event.data.get("action") or {}
                 advance_submission(submission_id=submission_id, state="action_pending",
                                    pending_action_id=pending.get("id"))
-                if not collected:
-                    # Keep a durable assistant row so the conversation never
-                    # looks empty after a tool-only prepare round.
-                    collected.append("已生成待确认操作，请在固定弹窗中核对后继续。")
+                _clear_pending_intent(conversation_id, user_id)
                 yield encode({"type": "action_required", "tool_calls": [], **event.data})
             elif event.type == "error":
+                if action_pending:
+                    # The fixed dialog already holds the prepared action. A
+                    # wording-review failure must not turn that action into a
+                    # failed submission or show a misleading error.
+                    break
                 if not trusted_results:
                     # Preserve the established explicit-error contract for
                     # requests which produced no trustworthy bank result.
                     advance_submission(submission_id=submission_id, state="failed")
                     yield encode({"type": "error", "message": event.data["message"]})
                     return
-                # An already verified card/bill must survive later model
-                # failures and be restorable from encrypted chat history.
-                explanation = "部分查询已完成，其余步骤未成功。已完成的结果见下方卡片。"
-                collected.append(explanation)
-                yield encode({"type": "delta", "text": explanation})
-                # Preserve the verified results through the normal persistence
-                # and optional view composition path below.
+                # Verified cards already emitted stay visible. The model did
+                # not produce a safe final message, so expose only the protocol
+                # error and keep the trusted results.
+                yield encode({"type": "error", "message": event.data["message"]})
                 break
 
         if ui_results and not action_pending:
@@ -215,24 +225,15 @@ async def stream_chat_turn(
             view = None
             if settings.generative_ui_enabled:
                 try:
-                    from app.services.view_service import (prepare_view_composition,
-                        create_or_append_view, view_context_for_composer)
-                    combined, catalog = prepare_view_composition(turn.view_snapshot, ui_results)
+                    from app.services.view_generation import generate_reviewed_view
                     yield encode({"type": "ui_status", "status": "composing"})
-                    spec = await get_ui_composer().compose(
-                        question=turn.original_request, catalog=catalog,
-                        context=view_context_for_composer(turn.view_snapshot))
-                    if spec is not None:
-                        view = create_or_append_view(user_id=user_id, conversation_id=conversation_id,
-                                                     results=combined, spec=spec, context=turn.view_snapshot)
-                except ValidationError as exc:
-                    reasons = set()
-                    for error in exc.errors(include_input=False):
-                        reason = str(error.get("ctx", {}).get("error", ""))
-                        reasons.add(reason if reason in _SAFE_VIEW_VALIDATION_REASONS else "schema_validation")
-                    logger.warning("view composition rejected: %s", ", ".join(sorted(reasons)))
+                    view = await generate_reviewed_view(
+                        user_id=user_id, conversation_id=conversation_id,
+                        question=turn.original_request, results=ui_results,
+                        context=turn.view_snapshot, model=loop.llm,
+                    )
                 except Exception as exc:
-                    logger.warning("view composition failed: %s", type(exc).__name__)
+                    logger.warning("view generation failed: %s", type(exc).__name__)
             if saved_message is not None:
                 try:
                     message = finalize_assistant(conversation_id, saved_message["id"],
@@ -259,8 +260,14 @@ async def stream_chat_turn(
                 if turn.view_snapshot is not None and not trusted_results and not action_pending
                 else None
             )
-            message = finish_reply("".join(collected), trusted_bill, trusted_cards,
-                                   trusted_results, view=context_view)
+            if action_pending and not collected:
+                # The fixed dialog owns the turn. Keep the submission in
+                # action_pending; the action-result composer will create the
+                # assistant reply after confirmation, cancellation or expiry.
+                message = None
+            else:
+                message = finish_reply("".join(collected), trusted_bill, trusted_cards,
+                                       trusted_results, view=context_view)
         yield encode({"type": "done", "message": message})
     except asyncio.CancelledError:
         # The request was accepted, but the connection ended before the
@@ -276,6 +283,33 @@ async def stream_chat_turn(
         raise
     except Exception:
         logger.exception("chat event stream failed")
+        # Never lose an answer that was already streamed to the client. Trusted
+        # snapshots may be unavailable (for example when data keys are not
+        # configured), but the assistant text and submission must still commit.
+        message = None
+        if saved_message is not None:
+            try:
+                message = finalize_assistant(
+                    conversation_id, saved_message["id"], submission_id=submission_id,
+                )
+            except Exception:
+                logger.exception("finalizing streamed reply failed")
+                message = saved_message
+        elif collected:
+            try:
+                message = persist_assistant(
+                    conversation_id, "".join(collected), trusted_bill,
+                    trusted_cards, trusted_results, submission_id=submission_id,
+                )
+            except Exception:
+                logger.exception("persisting streamed reply failed")
+        if message is not None:
+            try:
+                advance_submission(submission_id=submission_id, state="completed")
+            except Exception:
+                logger.exception("completing recovered submission failed")
+            yield encode({"type": "done", "message": message})
+            return
         advance_submission(submission_id=submission_id, state="failed")
         yield encode({"type": "error", "message": "服务出现异常，请稍后再试。"})
     finally:

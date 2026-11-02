@@ -17,7 +17,9 @@ from app.models import (
 from app.risk.injection import detect_injection
 from app.services.redaction import mask_text
 from app.schemas.generative_ui import (
-    ActionName, InteractionState, ViewEnvelope, ViewInteractionRequest, ViewSpec,
+    ActionName, AnyViewEnvelope, InteractionState, TrustedData,
+    ViewEnvelope, ViewEnvelopeV2, ViewInteractionRequest, ViewReview, ViewSpec,
+    view_data_of,
 )
 from app.services.trusted_ui_results import (
     TrustedResultError, available_actions, build_trusted_data,
@@ -40,7 +42,7 @@ class InvalidViewInteraction(ValueError):
 
 @dataclass(frozen=True)
 class ViewSnapshot:
-    envelope: ViewEnvelope
+    envelope: AnyViewEnvelope
     trusted_results: list[dict[str, Any]]
     current_revision: int
 
@@ -52,7 +54,13 @@ def _decode_revision(row: ViewRevision, *, view_id: str,
                      conversation_id: int) -> ViewSnapshot:
     try:
         payload = decrypt_result_snapshot(row.ciphertext, row.key_version)
-        envelope = ViewEnvelope.model_validate(payload.get("envelope"))
+        raw_envelope = payload.get("envelope")
+        if not isinstance(raw_envelope, dict):
+            raise ValueError("view revision lacks an envelope")
+        if raw_envelope.get("schema_version") == 2:
+            envelope: AnyViewEnvelope = ViewEnvelopeV2.model_validate(raw_envelope)
+        else:
+            envelope = ViewEnvelope.model_validate(raw_envelope)
         if (envelope.view_id != view_id or envelope.revision != row.revision
                 or envelope.conversation_id != conversation_id):
             raise ValueError("view revision binding mismatch")
@@ -113,7 +121,7 @@ def load_view_snapshot(session: Session, *, user_id: int, view_id: str,
 
 
 def load_view_for_message(session: Session, *, view_id: str,
-                          revision: int, conversation_id: int) -> ViewEnvelope | None:
+                          revision: int, conversation_id: int) -> AnyViewEnvelope | None:
     view = session.exec(select(UIView).where(
         UIView.id == view_id, UIView.conversation_id == conversation_id,
     )).first()
@@ -131,7 +139,7 @@ def load_view_for_message(session: Session, *, view_id: str,
         return None
 
 
-def load_views_for_messages(session: Session, messages: list[Message]) -> dict[int, ViewEnvelope]:
+def load_views_for_messages(session: Session, messages: list[Message]) -> dict[int, AnyViewEnvelope]:
     """Load valid historical views in bounded queries, keyed by assistant message ID.
 
     The database joins verify the message/view/revision/conversation/user binding.
@@ -154,7 +162,7 @@ def load_views_for_messages(session: Session, messages: list[Message]) -> dict[i
     if not message_ids:
         return {}
 
-    restored: dict[int, ViewEnvelope] = {}
+    restored: dict[int, AnyViewEnvelope] = {}
     for offset in range(0, len(message_ids), VIEW_HISTORY_BATCH_SIZE):
         chunk = message_ids[offset:offset + VIEW_HISTORY_BATCH_SIZE]
         statement = (
@@ -198,7 +206,7 @@ def _selected_category_label(snapshot: ViewSnapshot | None) -> str | None:
     selected_id = snapshot.envelope.interaction_state.selected_category
     if selected_id is None:
         return None
-    for dataset in snapshot.envelope.trusted_data.datasets.values():
+    for dataset in view_data_of(snapshot.envelope).datasets.values():
         if dataset.kind != "categories":
             continue
         for row in dataset.rows:
@@ -214,7 +222,7 @@ def _selected_category_source(snapshot: ViewSnapshot | None) -> tuple[str, dict[
     selected_id = snapshot.envelope.interaction_state.selected_category
     if selected_id is None:
         return None
-    for ref, dataset in snapshot.envelope.trusted_data.datasets.items():
+    for ref, dataset in view_data_of(snapshot.envelope).datasets.items():
         if dataset.kind != "categories":
             continue
         row = next((item for item in dataset.rows if item.id == selected_id), None)
@@ -300,6 +308,162 @@ def prepare_view_composition(context: ViewSnapshot | None,
         combined, selected_category=_selected_category_label(context))
     return combined, build_composer_catalog(
         trusted_data, [item["result_ref"] for item in combined])
+
+
+def prepare_ai_view_composition(
+    context: ViewSnapshot | None, new_results: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], TrustedData, dict[str, Any]]:
+    """Build source facts and a reference catalog for the AI composer."""
+    combined = _merge_results(context.trusted_results if context else [], new_results)
+    source_data = build_trusted_data(
+        combined, selected_category=_selected_category_label(context))
+    catalog = build_composer_catalog(
+        source_data, [item["result_ref"] for item in combined])
+    return combined, source_data, catalog
+
+
+def _source_digest(source_data: TrustedData) -> str:
+    canonical = json.dumps(
+        source_data.model_dump(mode="json"), ensure_ascii=False,
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_ai_view_data(view_data: TrustedData, source_data: TrustedData) -> None:
+    """Reject AI edits to source facts while allowing reviewed derived values."""
+    for ref, metric in view_data.metrics.items():
+        source = source_data.metrics.get(ref)
+        if source is None:
+            continue
+        if (metric.value != source.value or metric.format != source.format
+                or metric.period != source.period):
+            raise ValueError("视图指标与可信来源不一致")
+    for ref, dataset in view_data.datasets.items():
+        source = source_data.datasets.get(ref)
+        if source is None:
+            continue
+        if dataset.kind != source.kind:
+            raise ValueError("视图数据集类型与可信来源不一致")
+        source_rows = {row.id: row for row in source.rows}
+        for row in dataset.rows:
+            original = source_rows.get(row.id)
+            if original is None:
+                if dataset.kind in {"categories", "subscriptions", "candidates"}:
+                    raise ValueError("可交互视图行必须来自可信来源")
+                continue
+            for column in source.columns:
+                if getattr(row, column.key, None) != getattr(original, column.key, None):
+                    raise ValueError("视图数据与可信来源不一致")
+
+
+def create_ai_view(*, user_id: int, conversation_id: int,
+                   results: list[dict[str, Any]], view_data: dict[str, Any] | TrustedData,
+                   spec: dict[str, Any] | ViewSpec, review: dict[str, Any] | ViewReview,
+                   context: ViewSnapshot | None = None) -> ViewEnvelopeV2:
+    """Persist a reviewed v2 view; source results remain the fact authority."""
+    combined = _merge_results(context.trusted_results if context else [], results)
+    selected_source = _selected_category_source(context)
+    selected_label = selected_source[0] if selected_source else None
+    source_data = build_trusted_data(combined, selected_category=selected_label)
+    parsed_data = (view_data if isinstance(view_data, TrustedData)
+                   else TrustedData.model_validate(view_data))
+    validate_ai_view_data(parsed_data, source_data)
+    result_refs = [item["result_ref"] for item in combined]
+    spec_model = spec if isinstance(spec, ViewSpec) else ViewSpec.model_validate(spec)
+    review_model = review if isinstance(review, ViewReview) else ViewReview.model_validate(review)
+
+    prior_state = context.envelope.interaction_state if context else InteractionState()
+    state_data = prior_state.model_dump()
+    if selected_source is not None:
+        old_result = selected_source[1]
+        target_result = None
+        if old_result is not None and old_result["kind"] == "monthly_bill":
+            identity = (old_result["metadata"]["account_id"], old_result["data"]["currency"],
+                        old_result["data"]["month"])
+            target_result = next((item for item in combined
+                                  if item["kind"] == "monthly_bill"
+                                  and (item["metadata"]["account_id"], item["data"]["currency"],
+                                       item["data"]["month"]) == identity), None)
+        if target_result is not None:
+            category_dataset = source_data.datasets.get(f"{target_result['result_ref']}:categories")
+            selected_row = (next((row for row in category_dataset.rows
+                                  if getattr(row, "label", None) == selected_label), None)
+                            if category_dataset is not None else None)
+            state_data["selected_category"] = selected_row.id if selected_row is not None else None
+        else:
+            state_data["selected_category"] = None
+    selectable_ids = {
+        row.id for dataset in parsed_data.datasets.values()
+        if dataset.kind in {"subscriptions", "candidates"} for row in dataset.rows
+    }
+    state_data["selected_ids"] = [value for value in prior_state.selected_ids
+                                   if value in selectable_ids]
+    state = InteractionState.model_validate(state_data)
+
+    with session_scope() as session:
+        same_view = False
+        current_view: UIView | None = None
+        if context is not None:
+            current_view = session.exec(select(UIView).where(
+                UIView.id == context.envelope.view_id,
+                UIView.user_id == user_id,
+                UIView.conversation_id == conversation_id,
+            )).first()
+            if current_view is None:
+                raise ViewNotFound("视图不存在")
+            same_view = current_view.current_revision == context.envelope.revision
+
+        if same_view and current_view is not None:
+            view_id = current_view.id
+            revision_number = current_view.current_revision + 1
+        else:
+            view_id = secrets.token_urlsafe(24)
+            revision_number = 1
+
+        envelope = ViewEnvelopeV2.model_validate({
+            "schema_version": 2,
+            "catalog_version": 1,
+            "view_id": view_id,
+            "revision": revision_number,
+            "conversation_id": conversation_id,
+            "result_refs": result_refs,
+            "source_digest": _source_digest(source_data),
+            "observed_at": latest_observed_at(combined),
+            "spec": spec_model.model_dump(mode="json"),
+            "interaction_state": state.model_dump(mode="json"),
+            "allowed_actions": available_actions(parsed_data),
+            "view_data": parsed_data.model_dump(mode="json"),
+            "review": review_model.model_dump(mode="json"),
+        })
+        payload = {
+            "envelope": envelope.model_dump(mode="json"),
+            "trusted_results": combined,
+        }
+        ciphertext, key_version = encrypt_result_snapshot(payload)
+
+        if same_view and current_view is not None:
+            result = session.execute(update(UIView).where(
+                UIView.id == view_id,
+                UIView.user_id == user_id,
+                UIView.current_revision == context.envelope.revision,
+            ).values(current_revision=revision_number, updated_at=utcnow()))
+            if result.rowcount != 1:
+                session.rollback()
+                raise ViewConflict("视图已更新，请重新载入后重试")
+        else:
+            session.add(UIView(id=view_id, user_id=user_id,
+                               conversation_id=conversation_id,
+                               current_revision=revision_number))
+
+        session.add(ViewRevision(view_id=view_id, revision=revision_number,
+                                 ciphertext=ciphertext, key_version=key_version))
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise ViewConflict("视图已更新，请重新载入后重试") from exc
+    return envelope
 
 
 def create_or_append_view(*, user_id: int, conversation_id: int,
@@ -402,21 +566,21 @@ def create_or_append_view(*, user_id: int, conversation_id: int,
     return envelope
 
 
-def apply_interaction_state(envelope: ViewEnvelope, action: ActionName,
+def apply_interaction_state(envelope: AnyViewEnvelope, action: ActionName,
                             value: Any = None) -> InteractionState:
     if action not in envelope.allowed_actions:
         raise InvalidViewInteraction("该视图不允许此交互")
     state = envelope.interaction_state.model_dump()
     if action == "select_category":
         category_ids = {
-            row.id for dataset in envelope.trusted_data.datasets.values()
+            row.id for dataset in view_data_of(envelope).datasets.values()
             if dataset.kind == "categories" for row in dataset.rows
         }
         if type(value) is not str or value not in category_ids:
             raise InvalidViewInteraction("分类选择无效")
         state["selected_category"] = value
     elif action == "select_ids":
-        selectable = [dataset for dataset in envelope.trusted_data.datasets.values()
+        selectable = [dataset for dataset in view_data_of(envelope).datasets.values()
                       if dataset.kind in {"subscriptions", "candidates"}]
         valid_ids = [row.id for dataset in selectable for row in dataset.rows]
         if len(valid_ids) != len(set(valid_ids)):
@@ -435,7 +599,7 @@ def apply_interaction_state(envelope: ViewEnvelope, action: ActionName,
         if type(value) is not str or value not in {"all", "active", "renewal_soon"}:
             raise InvalidViewInteraction("筛选条件无效")
         if not any(dataset.kind == "subscriptions"
-                   for dataset in envelope.trusted_data.datasets.values()):
+                   for dataset in view_data_of(envelope).datasets.values()):
             raise InvalidViewInteraction("此视图没有可筛选的订阅数据")
         state["filter"] = value
     else:
@@ -456,7 +620,7 @@ def _interaction_digest(payload: ViewInteractionRequest) -> str:
 
 def _read_interaction_result(session: Session, *, view_id: str,
                              receipt: ViewInteraction,
-                             conversation_id: int) -> ViewEnvelope:
+                             conversation_id: int) -> AnyViewEnvelope:
     row = session.exec(select(ViewRevision).where(
         ViewRevision.view_id == view_id,
         ViewRevision.revision == receipt.result_revision,
@@ -468,7 +632,7 @@ def _read_interaction_result(session: Session, *, view_id: str,
 
 
 def _find_duplicate(view_id: str, event_id: str, digest: str,
-                    user_id: int) -> ViewEnvelope | None:
+                    user_id: int) -> AnyViewEnvelope | None:
     with Session(get_engine()) as session:
         view = session.exec(select(UIView).where(
             UIView.id == view_id, UIView.user_id == user_id,
@@ -489,7 +653,7 @@ def _find_duplicate(view_id: str, event_id: str, digest: str,
 
 
 def apply_view_interaction(*, user_id: int, view_id: str,
-                           payload: ViewInteractionRequest) -> ViewEnvelope:
+                           payload: ViewInteractionRequest) -> AnyViewEnvelope:
     digest = _interaction_digest(payload)
     try:
         with session_scope() as session:

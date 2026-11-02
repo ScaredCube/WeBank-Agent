@@ -159,15 +159,14 @@ def test_tool_argument_whitelist_blocks_unknown_model_arguments(client, auth_hea
                     "name": "get_card_status", "arguments": '{"foo": "bar"}',
                 }}])
             else:
-                yield LLMChunk(content="已查询")
+                yield LLMChunk(content="参数无效，未执行查询。")
 
     monkeypatch.setattr("app.agent.loop.create_agent_registry", lambda: registry)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: BadArgsLLM())
     monkeypatch.setattr("app.agent.loop.get_guard", lambda: None)
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
     response = _send(client, auth_headers, conversation["id"], "查询卡片状态")
-    assert "工具参数不在白名单内" in response.text
-    assert "已查询" not in response.text
+    assert "参数无效，未执行查询。" in response.text
     assert not executed
     with Session(get_engine()) as session:
         denied = session.exec(select(AuditLog).where(

@@ -6,13 +6,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.bills import MonthlyBill
+from app.schemas.card_results import CardStatusSnapshot
 from app.schemas.generative_ui import TrustedData, allowed_components_for_dataset
 from app.schemas.subscriptions import SubscriptionCandidateData, SubscriptionData
 from app.risk.injection import detect_injection
 from app.services.redaction import mask_text
 
 
-TrustedKind = Literal["monthly_bill", "subscriptions", "subscription_candidates"]
+TrustedKind = Literal[
+    "monthly_bill", "subscriptions", "subscription_candidates", "card_status",
+]
 
 
 class TrustedResultRecord(BaseModel):
@@ -71,6 +74,10 @@ def validate_trusted_result(value: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("trusted bill account metadata is required")
             result["data"] = bill.model_dump(mode="json")
             result["metadata"] = {"account_id": account_id}
+        elif record.kind == "card_status":
+            cards = CardStatusSnapshot.model_validate(record.data)
+            result["data"] = cards.model_dump(mode="json")
+            result["metadata"] = {}
         else:
             result["data"] = sanitize_subscription_result(record.kind, record.data)
             result["metadata"] = {}
@@ -174,7 +181,7 @@ def build_trusted_data(results: list[dict[str, Any]], *,
                                     ("status", "状态", "text")),
                 "rows": visible_rows,
             }
-        else:
+        elif item["kind"] == "subscription_candidates":
             rows = item["data"]
             if len(rows) > 200:
                 raise TrustedResultError("疑似订阅结果过多，暂无法生成视图")
@@ -189,6 +196,24 @@ def build_trusted_data(results: list[dict[str, Any]], *,
                                              f"{row['merchant']}\0{row['amount_fen']}\0{row['last_occurred_at']}"),
                           **row}
                          for row in rows],
+            }
+        else:
+            cards = item["data"]["cards"]
+            datasets[f"{ref}:cards"] = {
+                "kind": "records", "title": "银行卡状态",
+                "columns": _columns(("account_name", "账户", "text"),
+                                    ("masked_number", "卡号", "text"),
+                                    ("status", "卡片状态", "text"),
+                                    ("account_status", "账户状态", "text")),
+                "rows": [{"id": f"{ref}:{card['card_id']}",
+                          "account_name": card["account_name"],
+                          "masked_number": card["masked_number"],
+                          "status": card["status"],
+                          "account_status": card["account_status"]}
+                         for card in cards],
+            }
+            metrics[f"{ref}:card_count"] = {
+                "label": "银行卡数量", "value": len(cards), "format": "number",
             }
 
     if len(bills) >= 2:

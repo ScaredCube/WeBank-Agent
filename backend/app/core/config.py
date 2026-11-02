@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     llm_extra_headers: dict[str, str] = Field(default_factory=dict)
     llm_timeout: float = 60.0
     llm_max_history: int = 20
+    # Output review is independent of the tool-call Guard. It rewrites an
+    # unsupported reply and never changes risk levels or executes tools.
+    reply_grounding_enabled: bool = True
+    reply_grounding_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    view_review_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    view_max_generations: int = Field(default=2, ge=1, le=3)
 
     @model_validator(mode="after")
     def validate_night_hours(self) -> "Settings":

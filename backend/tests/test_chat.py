@@ -1,8 +1,10 @@
-﻿import json
+import json
 import logging
 
 from app.agent.llm import LLMChunk
 from app.agent.registry import RiskLevel, ToolRegistry, ToolSpec
+from app.core.config import settings
+from app.services.vault import VaultError
 
 
 def _sse_payloads(text: str) -> list[dict]:
@@ -31,7 +33,7 @@ def test_chat_stream_and_persist(client, auth_headers):
     assert types[-1] == "done"
 
     streamed = "".join(payload["text"] for payload in payloads if payload["type"] == "delta")
-    assert "演示模式" in streamed
+    assert streamed == "已收到。"
 
     messages = client.get(
         f"/api/chat/conversations/{conversation_id}/messages",
@@ -81,7 +83,7 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
                 }])
             else:
                 self.seen_result = json.loads(messages[-1]["content"])
-                yield LLMChunk(content="账户余额 999999 元。")
+                yield LLMChunk(content="已收到工具结果。")
     llm = FakeLLM()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
     created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
@@ -93,15 +95,12 @@ def test_chat_executes_balance_tool_and_returns_result_to_model(client, auth_hea
     assert [event["type"] for event in events] == ["delta", "done"]
     assert llm.seen_result["ok"]
     assert llm.seen_result["data"][0]["balance_fen"] == 500000
-    assert "5,000.00 元" in events[-1]["message"]["content"]
-    assert "999999" not in events[-1]["message"]["content"]
+    assert events[-1]["message"]["content"] == "已收到工具结果。"
 
     history = client.get(
         f"/api/chat/conversations/{created['id']}/messages", headers=auth_headers,
     ).json()
-    assert "5,000.00 元" in history[-1]["content"]
-    assert "*,***.**" not in history[-1]["content"]
-    assert "**** 0001" in history[-1]["content"]
+    assert history[-1]["content"] == "已收到工具结果。"
 
 
 def test_balance_tool_hides_raw_account_number_from_model_and_history(client, auth_headers, monkeypatch):
@@ -178,6 +177,7 @@ def test_chat_rejects_model_user_id_override(client, auth_headers, monkeypatch):
 def test_chat_renders_transactions_from_tool_not_model(client, auth_headers, monkeypatch):
     class FakeLLM:
         calls = 0
+        seen = ""
 
         async def stream(self, messages, tools=None):
             self.calls += 1
@@ -188,24 +188,25 @@ def test_chat_renders_transactions_from_tool_not_model(client, auth_headers, mon
                                  "arguments": '{"limit": 2}'},
                 }])
             else:
-                yield LLMChunk(content="交易金额为 123456 元。")
+                self.seen = json.dumps(messages[-1], ensure_ascii=False)
+                yield LLMChunk(content="已查看最近交易。")
 
-    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
+    llm = FakeLLM()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: llm)
     created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
     response = client.post(
         f"/api/chat/conversations/{created['id']}/messages",
         json={"content": "查询最近交易"}, headers=auth_headers,
     )
     content = _sse_payloads(response.text)[-1]["message"]["content"]
-    assert "购物" in content and "餐饮" in content
-    assert "500.00 元" in content
-    assert "123456" not in content
+    assert content == "已查看最近交易。"
+    assert "购物" in llm.seen and "餐饮" in llm.seen
+    assert "amount_fen" in llm.seen
 
     history = client.get(
         f"/api/chat/conversations/{created['id']}/messages", headers=auth_headers,
     ).json()
-    assert "500.00 元" in history[-1]["content"]
-    assert "2026-01" in history[-1]["content"]
+    assert history[-1]["content"] == "已查看最近交易。"
 
 
 def test_chat_stops_repeated_tool_calls(client, auth_headers, monkeypatch):
@@ -214,6 +215,9 @@ def test_chat_stops_repeated_tool_calls(client, auth_headers, monkeypatch):
 
         async def stream(self, messages, tools=None):
             self.calls += 1
+            if tools is None:
+                yield LLMChunk(content="已停止重复查询，请查看已有结果。")
+                return
             yield LLMChunk(tool_calls=[{
                 "id": f"call-{self.calls}", "type": "function",
                 "function": {"name": "get_account_balance", "arguments": "{}"},
@@ -227,8 +231,9 @@ def test_chat_stops_repeated_tool_calls(client, auth_headers, monkeypatch):
         json={"content": "查询余额"}, headers=auth_headers,
     )
     events = _sse_payloads(response.text)
-    assert [event["type"] for event in events] == ["error"]
-    assert llm.calls == 4
+    assert [event["type"] for event in events] == ["delta", "done"]
+    assert events[-1]["message"]["content"] == "已停止重复查询，请查看已有结果。"
+    assert llm.calls >= 3
 
 
 def test_chat_does_not_display_model_bank_claim_without_tool(client, auth_headers, monkeypatch):
@@ -236,16 +241,17 @@ def test_chat_does_not_display_model_bank_claim_without_tool(client, auth_header
         async def stream(self, messages, tools=None):
             yield LLMChunk(content="你的余额有一百万，转账已经成功。")
 
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: HallucinatingLLM())
     created = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
     response = client.post(
         f"/api/chat/conversations/{created['id']}/messages",
         json={"content": "查余额"}, headers=auth_headers,
     )
-    content = _sse_payloads(response.text)[-1]["message"]["content"]
-    assert "一百万" not in content
-    assert "转账已经成功" not in content
-    assert "尚未完成" in content or "还没有查到" in content
+    events = _sse_payloads(response.text)
+    assert events[-1]["type"] == "error"
+    assert "一百万" not in response.text
+    assert "转账已经成功" not in response.text
 
 
 def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, caplog):
@@ -270,6 +276,7 @@ def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, ca
             else:
                 yield LLMChunk(content="操作已成功")
 
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.create_agent_registry", lambda: registry)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     caplog.set_level(logging.INFO, logger="app.agent.loop")
@@ -277,5 +284,42 @@ def test_chat_does_not_execute_yellow_tool(client, auth_headers, monkeypatch, ca
     response = client.post(f"/api/chat/conversations/{created['id']}/messages",
                            json={"content": "执行操作"}, headers=auth_headers)
     assert not executed
-    assert "操作需要进一步验证" in _sse_payloads(response.text)[-1]["message"]["content"]
+    assert "操作已成功" not in response.text
+    assert any(event["type"] == "error" for event in _sse_payloads(response.text))
     assert any("risk_decision tool=risky" in record.message for record in caplog.records)
+
+def test_streamed_reply_survives_snapshot_persistence_failure(
+    client, auth_headers, monkeypatch, caplog,
+):
+    class BillLLM:
+        calls = 0
+
+        async def stream(self, messages, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMChunk(tool_calls=[{
+                    "id": "call-bill-snapshot", "type": "function",
+                    "function": {"name": "get_monthly_bill", "arguments": '{"month":"2026-01"}'},
+                }])
+            else:
+                yield LLMChunk(content="账单已查询，但当前无法保存结果快照。")
+
+    def unavailable(payload):
+        raise VaultError()
+
+    monkeypatch.setattr("app.services.chat_messages.encrypt_result_snapshot", unavailable)
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: BillLLM())
+    conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
+    response = client.post(
+        f"/api/chat/conversations/{conversation['id']}/messages",
+        json={"content": "查询 2026-01 账单"}, headers=auth_headers,
+    )
+    events = _sse_payloads(response.text)
+    assert events[-1]["type"] == "done"
+    assert events[-1]["message"]["content"] == "账单已查询，但当前无法保存结果快照。"
+    history = client.get(
+        f"/api/chat/conversations/{conversation['id']}/messages", headers=auth_headers,
+    ).json()
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == "账单已查询，但当前无法保存结果快照。"
+    assert "trusted result snapshot unavailable" in caplog.text

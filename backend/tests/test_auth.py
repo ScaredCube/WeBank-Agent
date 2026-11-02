@@ -3,7 +3,7 @@ def test_health(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["llm"]["mode"] == "mock"
+    assert body["llm"]["mode"] in {"unconfigured", "openai", "test"}
 
 
 def test_login_success(client):

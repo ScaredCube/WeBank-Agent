@@ -33,20 +33,36 @@ def install(monkeypatch, *, currency="CNY", include_metadata=True):
         yield AgentEvent('delta', {'text': '查询已完成。'})
 
     class Composer:
-        async def compose(self, *, question, catalog, context=None):
+        async def compose(self, *, question, catalog, context=None,
+                          source_data=None, issues=None):
             calls['composer'] += 1
             # The result must already be durable before generation begins.
             with Session(get_engine()) as db:
                 assert db.exec(select(MessageResult)).first() is not None
             if calls['fallback']:
                 return None
-            data = next((d for d in catalog['datasets'] if d['kind'] == 'comparison'), catalog['datasets'][0])
-            return {'root': 'root', 'elements': {'root': {
-                'type': 'ComparisonTable' if data['kind'] == 'comparison' else 'CategoryBarChart',
-                'props': {'dataset_ref': data['dataset_ref']},
-            }}}
+            datasets = (source_data or {}).get('datasets') or {}
+            ref, data = next(
+                ((ref, dataset) for ref, dataset in datasets.items()
+                 if dataset.get('kind') == 'comparison'),
+                next(iter(datasets.items())),
+            )
+            component = 'ComparisonTable' if data['kind'] == 'comparison' else 'CategoryBarChart'
+            return {
+                'view_data': source_data or {},
+                'spec': {'root': 'root', 'elements': {'root': {
+                    'type': component, 'props': {'dataset_ref': ref},
+                }}},
+            }
+
+    class Reviewer:
+        async def review(self, **kwargs):
+            from app.agent.view_review import ViewReviewVerdict
+            return ViewReviewVerdict(valid=True)
+
     monkeypatch.setattr('app.agent.loop.AgentLoop.stream', stream)
-    monkeypatch.setattr('app.services.chat_turn.get_ui_composer', lambda: Composer())
+    monkeypatch.setattr('app.services.view_generation.get_ui_composer', lambda: Composer())
+    monkeypatch.setattr('app.services.view_generation.get_view_reviewer', lambda model: Reviewer())
     return calls
 
 
@@ -58,7 +74,7 @@ def test_chat_view_multiturn_is_durable_and_retry_does_not_recompose(client, aut
     view = next(e['view'] for e in first if e['type'] == 'ui_view')
     assert next(e['message'] for e in first if e['type'] == 'done')['ui_view'] == view
     assert [e['type'] for e in first].index('bill_result') < [e['type'] for e in first].index('ui_view')
-    category_id = next(iter(view['trusted_data']['datasets'].values()))['rows'][0]['id']
+    category_id = next(iter(view['view_data']['datasets'].values()))['rows'][0]['id']
     selected = client.post(f"/api/views/{view['view_id']}/interactions", headers=auth_headers,
         json={'event_id': 'select-category-01', 'base_revision': 1,
               'action': 'select_category', 'value': category_id}).json()
@@ -68,7 +84,7 @@ def test_chat_view_multiturn_is_durable_and_retry_does_not_recompose(client, aut
     second = events(client.post(url, headers=auth_headers, json=payload))
     new_view = next(e['view'] for e in second if e['type'] == 'ui_view')
     assert new_view['view_id'] == view['view_id'] and new_view['revision'] == 3
-    comparison = next(d for d in new_view['trusted_data']['datasets'].values() if d['kind'] == 'comparison')
+    comparison = next(d for d in new_view['view_data']['datasets'].values() if d['kind'] == 'comparison')
     assert any(row.get('metric') == '餐饮' and row.get('delta_fen') == 3000 for row in comparison['rows'])
     assert '餐饮' in calls['context'][1]['history'][-1]['content']
     assert calls['context'][1]['kwargs']['verified_account_token'] is not None
@@ -94,13 +110,13 @@ def test_tool_free_view_followup_persists_the_exact_context_revision(client, aut
     first = events(client.post(url, headers=auth_headers,
         json={'content': '看2026年10月消费结构', 'request_id': 'ui-context-first-01'}))
     initial_view = next(event['view'] for event in first if event['type'] == 'ui_view')
-    category_id = next(iter(initial_view['trusted_data']['datasets'].values()))['rows'][0]['id']
+    category_id = next(iter(initial_view['view_data']['datasets'].values()))['rows'][0]['id']
     selected = client.post(f"/api/views/{initial_view['view_id']}/interactions",
         headers=auth_headers,
         json={'event_id': 'ui-context-select-01', 'base_revision': 1,
               'action': 'select_category', 'value': category_id}).json()
     assert selected['revision'] == 2
-    dataset = next(dataset for dataset in selected['trusted_data']['datasets'].values()
+    dataset = next(dataset for dataset in selected['view_data']['datasets'].values()
                    if dataset['kind'] == 'categories')
     row = next(row for row in dataset['rows'] if row['id'] == category_id)
     label = row['label']
@@ -111,7 +127,7 @@ def test_tool_free_view_followup_persists_the_exact_context_revision(client, aut
         calls = 0
         async def stream(self, messages, tools=None):
             self.calls += 1
-            yield LLMChunk(content='这个回答不应调用模型')
+            yield LLMChunk(content=f'{label}这个分类：{expected_amount}，共 {row["count"]} 笔。')
 
     provider = Provider()
     monkeypatch.setattr(AgentLoop, 'stream', original_stream)
@@ -122,7 +138,7 @@ def test_tool_free_view_followup_persists_the_exact_context_revision(client, aut
         'request_id': 'ui-context-followup-01',
     }))
     message = next(event['message'] for event in second if event['type'] == 'done')
-    assert provider.calls == 0
+    assert provider.calls == 1
     assert message['ui_view'] == selected
     assert label in message['content'] and expected_amount in message['content']
     assert f"{row['count']} 笔" in message['content']
@@ -135,6 +151,7 @@ def test_tool_free_view_followup_persists_the_exact_context_revision(client, aut
 
 
 def test_chat_composer_failure_keeps_durable_financial_result(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(settings, "view_max_generations", 1)
     calls = install(monkeypatch)
     calls['fallback'] = True
     cid = client.post('/api/chat/conversations', headers=auth_headers, json={}).json()['id']
@@ -147,20 +164,24 @@ def test_chat_composer_failure_keeps_durable_financial_result(client, auth_heade
     assert calls['composer'] == 1
 
 
-def test_invalid_composed_reference_logs_safe_reason_and_falls_back(client, auth_headers, monkeypatch, caplog):
+def test_invalid_composed_reference_falls_back(client, auth_headers, monkeypatch, caplog):
+    monkeypatch.setattr(settings, "view_max_generations", 1)
     install(monkeypatch)
     class InvalidComposer:
         async def compose(self, **kwargs):
-            return {'root': 'root', 'elements': {'root': {
-                'type': 'CategoryBarChart', 'props': {'dataset_ref': 'untrusted-private-reference'},
-            }}}
-    monkeypatch.setattr('app.services.chat_turn.get_ui_composer', lambda: InvalidComposer())
+            return {
+                'view_data': kwargs.get('source_data') or {},
+                'spec': {'root': 'root', 'elements': {'root': {
+                    'type': 'CategoryBarChart',
+                    'props': {'dataset_ref': 'untrusted-private-reference'},
+                }}},
+            }
+    monkeypatch.setattr('app.services.view_generation.get_ui_composer', lambda: InvalidComposer())
     cid = client.post('/api/chat/conversations', headers=auth_headers, json={}).json()['id']
     output = events(client.post(f'/api/chat/conversations/{cid}/messages', headers=auth_headers,
         json={'content': '分析消费', 'request_id': 'ui-invalid-ref-01'}))
     assert {'type': 'ui_status', 'status': 'fallback'} in output
     assert output[-1]['message']['bill_result'] is not None
-    assert 'dataset reference does not exist' in caplog.text
     assert 'untrusted-private-reference' not in caplog.text
 
 
@@ -181,9 +202,10 @@ def test_verified_bill_still_composes_after_later_agent_error(client, auth_heade
         json={'content': '分析消费', 'request_id': 'ui-partial-error-01'}))
     view = next(event['view'] for event in output if event['type'] == 'ui_view')
     message = next(event['message'] for event in output if event['type'] == 'done')
-    assert '部分查询已完成' in message['content']
+    assert message['content'] == ''
     assert message['bill_result']['consumption_fen'] == 12000
     assert message['ui_view'] == view and calls['composer'] == 1
+    assert any(event['type'] == 'error' for event in output)
 
 
 def test_verified_selected_account_fills_missing_internal_result_provenance(client, auth_headers, monkeypatch):
@@ -198,7 +220,7 @@ def test_verified_selected_account_fills_missing_internal_result_provenance(clie
               'references': [{'kind': 'account', 'id': account_id}]}))
 
     view = next(event['view'] for event in output if event['type'] == 'ui_view')
-    assert view['trusted_data']['datasets']
+    assert view['view_data']['datasets']
     assert output[-1]['message']['bill_result']
 
 
@@ -245,7 +267,7 @@ def test_cancelled_composer_keeps_saved_reply_replayable(client, auth_headers, m
     class Composer:
         async def compose(self, **kwargs):
             raise asyncio.CancelledError()
-    monkeypatch.setattr('app.services.chat_turn.get_ui_composer', lambda: Composer())
+    monkeypatch.setattr('app.services.view_generation.get_ui_composer', lambda: Composer())
 
     async def run():
         async def connected(): return False

@@ -141,7 +141,30 @@ class InteractionState(StrictModel):
     filter: FilterName = "all"
 
 
+def _validate_envelope_bindings(
+    *, observed_at: str, result_refs: list[str], spec: ViewSpec,
+    view_data: TrustedData, allowed_actions: list[ActionName],
+) -> None:
+    value = observed_at[:-1] + "+00:00" if observed_at.endswith("Z") else observed_at
+    try:
+        observed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("observed_at must be an ISO 8601 timestamp") from exc
+    if observed.tzinfo is None:
+        raise ValueError("observed_at must include a timezone")
+    if len(result_refs) != len(set(result_refs)):
+        raise ValueError("result_refs must be unique")
+    validate_view_spec(spec, view_data, result_refs)
+    if len(allowed_actions) != len(set(allowed_actions)):
+        raise ValueError("allowed_actions must be unique")
+    for ref in [*view_data.metrics, *view_data.datasets]:
+        if ref.split(":", 1)[0] not in result_refs:
+            raise ValueError("view data is not bound to a result")
+
+
 class ViewEnvelope(StrictModel):
+    """Legacy v1 envelope: server-built trusted_data."""
+
     schema_version: Literal[1]
     catalog_version: Literal[1]
     view_id: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
@@ -156,22 +179,56 @@ class ViewEnvelope(StrictModel):
 
     @model_validator(mode="after")
     def validate_composed_spec(self):
-        value = self.observed_at[:-1] + "+00:00" if self.observed_at.endswith("Z") else self.observed_at
-        try:
-            observed = datetime.fromisoformat(value)
-        except ValueError as exc:
-            raise ValueError("observed_at must be an ISO 8601 timestamp") from exc
-        if observed.tzinfo is None:
-            raise ValueError("observed_at must include a timezone")
-        if len(self.result_refs) != len(set(self.result_refs)):
-            raise ValueError("result_refs must be unique")
-        validate_view_spec(self.spec, self.trusted_data, self.result_refs)
-        if len(self.allowed_actions) != len(set(self.allowed_actions)):
-            raise ValueError("allowed_actions must be unique")
-        for ref in [*self.trusted_data.metrics, *self.trusted_data.datasets]:
-            if ref.split(":", 1)[0] not in self.result_refs:
-                raise ValueError("trusted data is not bound to a result")
+        _validate_envelope_bindings(
+            observed_at=self.observed_at, result_refs=self.result_refs,
+            spec=self.spec, view_data=self.trusted_data,
+            allowed_actions=self.allowed_actions,
+        )
         return self
+
+
+class ViewReview(StrictModel):
+    reviewer_version: str = Field(min_length=1, max_length=80)
+    attempts: int = Field(ge=1, le=3)
+    result: Literal["passed"]
+
+
+class ViewEnvelopeV2(StrictModel):
+    """AI-composed view data and layout, validated against source results.
+
+    The result cards remain the authoritative banking facts. This envelope is
+    an explanation layer and carries its source digest for provenance.
+    """
+
+    schema_version: Literal[2]
+    catalog_version: Literal[1]
+    view_id: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    revision: int = Field(ge=1)
+    conversation_id: int = Field(gt=0)
+    result_refs: list[str] = Field(min_length=1, max_length=12)
+    source_digest: str = Field(min_length=16, max_length=64, pattern=r"^[a-f0-9]+$")
+    observed_at: str = Field(min_length=20, max_length=40)
+    spec: ViewSpec
+    interaction_state: InteractionState
+    allowed_actions: list[ActionName] = Field(max_length=5)
+    view_data: TrustedData
+    review: ViewReview
+
+    @model_validator(mode="after")
+    def validate_composed_spec(self):
+        _validate_envelope_bindings(
+            observed_at=self.observed_at, result_refs=self.result_refs,
+            spec=self.spec, view_data=self.view_data,
+            allowed_actions=self.allowed_actions,
+        )
+        return self
+
+
+AnyViewEnvelope = ViewEnvelope | ViewEnvelopeV2
+
+
+def view_data_of(envelope: AnyViewEnvelope) -> TrustedData:
+    return envelope.view_data if isinstance(envelope, ViewEnvelopeV2) else envelope.trusted_data
 
 
 _COMPONENT_PROPS: dict[str, tuple[set[str], str | None]] = {

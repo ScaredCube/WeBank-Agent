@@ -40,7 +40,10 @@ def test_drag_intent_is_rendered_as_tokenized_prompt(client, auth_headers, monke
         },
     })
     assert response.status_code == 200
-    prompt = seen["messages"][-1]["content"]
+    prompt = next(
+        message["content"] for message in seen["messages"]
+        if message.get("role") == "user" and "1000 元，饭钱" in str(message.get("content"))
+    )
     assert prompt.startswith("【前置意图】")
     assert "1000 元，饭钱" in prompt
     assert re.search(r"<CARD_[A-Za-z]{32}>", prompt)
@@ -283,7 +286,7 @@ def test_green_internal_transfer_summary_is_not_tool_unavailable(client, auth_he
     response = client.post(url, headers=auth_headers, json=request_payload)
     assert response.status_code == 200
     assert "工具不可用" not in response.text
-    assert "内部转账已完成" in response.text
+    assert "处理完成。" in response.text
 
     # The actual executed receipt must survive SSE completion, history reload
     # and a repeated GET; the card must come from the server, not model prose.

@@ -40,7 +40,7 @@ class BalanceLLM:
                 "name": "get_account_balance", "arguments": "{}",
             }}])
         else:
-            yield LLMChunk(content="你的余额是 999999 元。")
+            yield LLMChunk(content="已收到工具结果。")
 
 
 class TransferLLM:
@@ -56,7 +56,7 @@ class TransferLLM:
                 }, ensure_ascii=False),
             }}])
         else:
-            yield LLMChunk(content="转账已经成功。")
+            yield LLMChunk(content="已准备待确认操作。")
 
 
 class RecordingGuard:
@@ -77,7 +77,7 @@ def test_guard_allows_safe_call_and_records_it(client, auth_headers, monkeypatch
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: BalanceLLM())
     response = _chat(client, auth_headers, "查询余额")
     assert response.status_code == 200
-    assert "5,000.00 元" in response.text
+    assert "已收到工具结果。" in response.text
     assert len(guard.calls) == 1
     assert guard.calls[0].tool == "get_account_balance"
     assert guard.calls[0].previous_tools == ()
@@ -95,7 +95,7 @@ def test_guard_denial_elevates_transfer_to_red_instead_of_blocking(client, auth_
     action = next(item for item in payloads if item["type"] == "action_required")
     assert action["action"]["risk_level"] == "red"
     assert action["action"]["details"]["verification"] == "password"
-    assert "转账已经成功" not in response.text
+    assert "已准备待确认操作。" in response.text
     with Session(get_engine()) as session:
         entries = session.exec(select(AuditLog).where(AuditLog.event_type == "guard_denied")).all()
         assert len(entries) == 1 and entries[0].reason_codes == "guard_rejected"
@@ -119,7 +119,7 @@ def test_guard_denial_does_not_block_readonly_bill_query(client, auth_headers, m
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: BalanceLLM())
     response = _chat(client, auth_headers, "查询余额")
     assert response.status_code == 200
-    assert "5,000.00 元" in response.text
+    assert "已收到工具结果。" in response.text
     assert guard.calls and guard.calls[0].tool == "get_account_balance"
 
 
@@ -213,5 +213,5 @@ def test_llm_guard_timeout_and_provider_error_deny():
     assert asyncio.run(run(_BrokenProvider())).reason == "unavailable"
 
 
-def test_offline_mock_has_no_guard_provider():
-    assert get_guard() is None
+def test_guard_provider_is_always_the_llm_guard():
+    assert isinstance(get_guard(), LLMGuard)

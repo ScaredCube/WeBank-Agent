@@ -10,9 +10,15 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal
 
-from app.agent.prompts import GUARD_SYSTEM_PROMPT, SYSTEM_PROMPT, RESPONSE_RECOVERY_PROMPT
+from app.agent.prompts import (
+    ACTION_REPLY_PROMPT, GUARD_SYSTEM_PROMPT, REPLY_GROUNDING_PROMPT,
+    REPLY_REWRITE_PROMPT, SYSTEM_PROMPT, VIEW_REVIEW_PROMPT,
+)
 
-PromptRole = Literal["agent", "guard", "recovery"]
+PromptRole = Literal[
+    "agent", "guard", "reply_grounding", "reply_rewrite", "view_review",
+    "action_reply",
+]
 
 # An allowlist, deliberately not a user-provided tool name.
 _INTENT_TOOL_NAMES: dict[str, str] = {
@@ -72,8 +78,30 @@ def assemble_guard_prompt() -> PromptAssembly:
     return _assembly("guard", [{"role": "system", "content": GUARD_SYSTEM_PROMPT}])
 
 
-def assemble_recovery_prompt() -> PromptAssembly:
-    """A tool-free, question-only response repair prompt."""
+def assemble_reply_grounding_prompt() -> PromptAssembly:
+    """A tool-free output reviewer; it cannot authorize or execute anything."""
     return _assembly(
-        "recovery", [{"role": "system", "content": RESPONSE_RECOVERY_PROMPT}],
+        "reply_grounding",
+        [{"role": "system", "content": REPLY_GROUNDING_PROMPT}],
+    )
+
+
+def assemble_reply_rewrite_prompt() -> PromptAssembly:
+    """A tool-free rewrite instruction after an ungrounded verdict."""
+    return _assembly(
+        "reply_rewrite",
+        [{"role": "system", "content": REPLY_REWRITE_PROMPT}],
+    )
+
+
+def assemble_view_review_prompt() -> PromptAssembly:
+    """A tool-free reviewer for AI-composed read-only views."""
+    return _assembly(
+        "view_review", [{"role": "system", "content": VIEW_REVIEW_PROMPT}],
+    )
+
+def assemble_action_reply_prompt() -> PromptAssembly:
+    """A tool-free final reply after a fixed action result."""
+    return _assembly(
+        "action_reply", [{"role": "system", "content": ACTION_REPLY_PROMPT}],
     )

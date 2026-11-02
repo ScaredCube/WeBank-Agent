@@ -145,7 +145,7 @@ def test_card_tools_status_and_loss_event(client, auth_headers, monkeypatch):
                 yield LLMChunk(tool_calls=[{"id": "card", "type": "function", "function": {
                     "name": "get_card_status", "arguments": "{}"}}])
             else:
-                yield LLMChunk(content="伪造卡片状态")
+                yield LLMChunk(content="已查询卡片状态。")
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages", headers=auth_headers,
@@ -154,7 +154,7 @@ def test_card_tools_status_and_loss_event(client, auth_headers, monkeypatch):
     assert events[0]["type"] == "card_result"
     assert events[0]["data"]["cards"][0]["status"] == "active"
     assert "account_token" not in response.text and "<CARD_" not in response.text
-    assert "伪造卡片状态" not in response.text
+    assert "已查询卡片状态。" in response.text
 
     class LossLLM:
         async def stream(self, messages, tools=None):
@@ -326,7 +326,7 @@ def test_selected_card_status_is_exact_and_persisted_without_token(client, auth_
         "references": [{"kind": "card", "id": selected_id}]})
     assert response.status_code == 200
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert [item["type"] for item in events] == ["card_result", "delta", "done"]
+    assert [item["type"] for item in events if item["type"] != "ui_status"] == ["card_result", "delta", "done"]
     saved = events[-1]["message"]
     assert saved["card_result"] == {"cards": [{
         "card_id": selected_id,

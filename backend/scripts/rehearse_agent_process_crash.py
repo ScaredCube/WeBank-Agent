@@ -41,7 +41,11 @@ def _safe_env(database: Path) -> dict[str, str]:
     env.update({
         "BANK_AGENT_REHEARSAL_DB": str(database),
         "DATABASE_URL": "sqlite:///" + database.as_posix(),
-        "LLM_API_KEY": "", "JWT_SECRET": "synthetic-test-rehearsal-secret-123456",
+        # Startup requires a configured provider. This synthetic value is never
+        # used for a model call; the rehearsal exercises submissions directly.
+        "LLM_API_KEY": "synthetic-rehearsal-no-call",
+        "REPLY_GROUNDING_ENABLED": "false",
+        "JWT_SECRET": "synthetic-test-rehearsal-secret-123456",
         "DATA_ENCRYPTION_KEY": base64.urlsafe_b64encode(b"r" * 32).decode(),
         "DATA_HMAC_KEY": base64.urlsafe_b64encode(b"h" * 32).decode(),
         "DEMO_USERNAME": "rehearsal_user",

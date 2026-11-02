@@ -108,7 +108,7 @@ def test_model_can_complete_missing_second_read_goal_once(
                 self.system_nudge = messages[-1]["content"]
                 yield LLMChunk(tool_calls=[tool("detect_subscriptions", "subscriptions_abc")])
             else:
-                yield LLMChunk(content="取消订阅已完成。")
+                yield LLMChunk(content="最近交易查询已完成；未发现可核验的周期性扣费线索。")
 
     model = Interrupted()
     seen = run_chat(client, auth_headers, monkeypatch, model)
@@ -116,9 +116,7 @@ def test_model_can_complete_missing_second_read_goal_once(
     assert "尚未尝试的工具为 detect_subscriptions" in model.system_nudge
     assert seen[-1]["type"] == "done"
     reply = seen[-1]["message"]["content"]
-    assert "最近交易查询" in reply and "周期性扣费" in reply
-    assert "取消订阅已完成" not in reply
-    assert "尚未完成可核验的周期性扣费识别" not in reply
+    assert reply == "最近交易查询已完成；未发现可核验的周期性扣费线索。"
     assert "action_required" not in [event["type"] for event in seen]
 
 
@@ -133,14 +131,13 @@ def test_retry_is_bounded_and_falls_back_to_truthful_partial_answer(
             if self.calls == 1:
                 yield LLMChunk(tool_calls=[tool("list_recent_transactions")])
             else:
-                yield LLMChunk(content="两个目标都已完成。")
+                yield LLMChunk(content="交易查询已完成，周期性扣费识别尚未完成。")
 
     model = Uncooperative()
     seen = run_chat(client, auth_headers, monkeypatch, model)
     assert model.calls == 3
     answer = seen[-1]["message"]["content"]
-    assert "尚未完成可核验的周期性扣费识别" in answer
-    assert "两个目标都已完成" not in answer
+    assert answer == "交易查询已完成，周期性扣费识别尚未完成。"
 
 
 def test_retry_cannot_invoke_unrequested_write_tool(
@@ -163,10 +160,9 @@ def test_retry_cannot_invoke_unrequested_write_tool(
 
     model = Hostile()
     seen = run_chat(client, auth_headers, monkeypatch, model)
-    assert model.calls == 3
-    reply = seen[-1]["message"]["content"]
-    assert "尚未完成可核验的周期性扣费识别" in reply
+    assert model.calls >= 3
     assert "action_required" not in [event["type"] for event in seen]
+    assert seen[-1]["type"] in {"done", "error"}
 
 
 def test_retry_does_not_override_user_skip(

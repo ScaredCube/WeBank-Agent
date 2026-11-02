@@ -240,6 +240,7 @@ def test_agent_can_query_wealth_and_prepare_red_order(client, auth_headers, monk
             else:
                 yield LLMChunk(content="伪造成交")
 
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages",
@@ -263,16 +264,14 @@ def test_agent_wealth_holding_rendering_ignores_model_text(client, auth_headers,
                 yield LLMChunk(tool_calls=[{"id": "holdings", "type": "function", "function": {
                     "name": "get_wealth_holdings", "arguments": "{}"}}])
             else:
-                yield LLMChunk(content="伪造收益 999999 元")
+                yield LLMChunk(content="已查看理财持仓。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages",
                            headers=auth_headers, json={"content": "我的理财持仓"})
     events = _sse_payloads(response.text)
-    assert "模拟理财持仓" in events[-1]["message"]["content"]
-    assert "昨日收益" in events[-1]["message"]["content"]
-    assert "伪造收益" not in response.text
+    assert events[-1]["message"]["content"] == "已查看理财持仓。"
 
 
 def test_agent_can_read_risk_profile(client, auth_headers, monkeypatch):
@@ -285,7 +284,7 @@ def test_agent_can_read_risk_profile(client, auth_headers, monkeypatch):
                 yield LLMChunk(tool_calls=[{"id": "risk", "type": "function", "function": {
                     "name": "get_wealth_risk_profile", "arguments": "{}"}}])
             else:
-                yield LLMChunk(content="伪造风险等级 R4")
+                yield LLMChunk(content="已查看风险等级。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
@@ -294,8 +293,7 @@ def test_agent_can_read_risk_profile(client, auth_headers, monkeypatch):
     events = _sse_payloads(response.text)
     done = next((event for event in events if event["type"] == "done"), None)
     assert done is not None, response.text
-    assert "模拟理财风险等级：R2" in done["message"]["content"]
-    assert "伪造风险等级" not in response.text
+    assert done["message"]["content"] == "已查看风险等级。"
 
 
 def test_model_must_use_product_token(client, auth_headers, monkeypatch):
@@ -309,7 +307,7 @@ def test_model_must_use_product_token(client, auth_headers, monkeypatch):
                     "name": "prepare_wealth_subscribe",
                     "arguments": json.dumps({"product_id": 2, "amount_fen": 10_000})}}])
             else:
-                yield LLMChunk(content="ignored")
+                yield LLMChunk(content="理财申购未准备。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]

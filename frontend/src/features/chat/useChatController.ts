@@ -547,5 +547,16 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [token, sending, actionBlocked])
 
   function stopReceiving() { receiveController.current?.abort() }
-  return { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+
+  const upsertMessage = useCallback((message: Message) => {
+    setMessages(current => {
+      const index = current.findIndex(item => item.id === message.id)
+      if (index === -1) return [...current, message]
+      const next = [...current]
+      next[index] = { ...next[index], ...message }
+      return next
+    })
+  }, [])
+
+  return { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving, upsertMessage }
 }

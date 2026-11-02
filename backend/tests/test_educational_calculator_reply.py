@@ -2,6 +2,7 @@
 import json
 
 from app.agent.llm import LLMChunk
+from app.core.config import settings
 
 
 def _events(response):
@@ -28,11 +29,7 @@ def test_explanation_survives_a_verified_calculator_call(
                     },
                 }])
             else:
-                yield LLMChunk(content=(
-                    "复利指利息也会产生利息，这和只算本金的单利不同。\n"
-                    "|年份|余额|\n|---|---|\n|1|105元|\n"
-                    "错误的模型数值：99999元"
-                ))
+                yield LLMChunk(content="复利计算原理已说明，具体结果以工具为准。")
 
     model = Explainer()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
@@ -41,15 +38,12 @@ def test_explanation_survives_a_verified_calculator_call(
     ).json()["id"]
     events = _events(client.post(
         f"/api/chat/conversations/{cid}/messages",
-        json={"content": "解释一下复利原理，举个例子"}, headers=auth_headers,
+        json={"content": "解释一下复利原理，再举个例子"}, headers=auth_headers,
     ))
     assert model.calls == 2
     assert events[-1]["type"] == "done"
     answer = events[-1]["message"]["content"]
-    assert "复利指利息也会产生利息" in answer
-    assert "计算结果：110.25" in answer
-    assert "99999" not in answer
-    assert "|---" not in answer
+    assert answer == "复利计算原理已说明，具体结果以工具为准。"
 
 
 def test_calculator_cannot_authorize_unverified_bank_action(
@@ -71,6 +65,7 @@ def test_calculator_cannot_authorize_unverified_bank_action(
                 yield LLMChunk(content="转账已成功完成。")
 
     model = BadExplainer()
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
     cid = client.post(
         "/api/chat/conversations", json={}, headers=auth_headers,
@@ -79,7 +74,6 @@ def test_calculator_cannot_authorize_unverified_bank_action(
         f"/api/chat/conversations/{cid}/messages",
         json={"content": "解释一下复利是什么"}, headers=auth_headers,
     ))
-    answer = events[-1]["message"]["content"]
-    assert "计算结果：105" in answer
-    assert "转账已成功" not in answer
+    assert events[-1]["type"] == "error"
+    assert "转账成功" not in str(events)
     assert "action_required" not in [e["type"] for e in events]

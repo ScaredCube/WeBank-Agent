@@ -1,4 +1,5 @@
 """Presentation and atomic persistence of authenticated chat results."""
+import logging
 
 from sqlmodel import Session, select
 
@@ -6,11 +7,13 @@ from app.core.time import utcnow
 from app.db.session import session_scope
 from app.models import Conversation, Message, MessageResult, MessageView, ChatSubmission
 from app.schemas.chat import MessageOut
-from app.schemas.generative_ui import ViewEnvelope
+from app.schemas.generative_ui import AnyViewEnvelope
 from app.schemas.tool_results import ToolResultBundle, ToolResultItem
 from app.services.chat_submissions import advance_submission
 from app.services.vault import VaultError, encrypt_result_snapshot, decrypt_result_snapshot
 
+
+logger = logging.getLogger(__name__)
 
 _UNSET_SNAPSHOT = object()
 
@@ -56,13 +59,13 @@ def persist_assistant(conversation_id: int, content: str,
                        bill_result: dict | None = None, card_result: dict | None = None,
                        tool_results: list[dict] | None = None,
                       submission_id: int | None = None, *, finalize: bool = True,
-                      view: ViewEnvelope | None = None) -> dict | None:
+                      view: AnyViewEnvelope | None = None) -> dict | None:
     if not content and not (tool_results or bill_result or card_result):
         if submission_id is not None:
             advance_submission(submission_id=submission_id, state="completed")
         return None
-    if not content:
-        content = "已完成查询，结果见下方卡片。"
+    # Conversational text is model-authored. A result-card-only turn may
+    # legitimately persist an empty assistant text.
     with session_scope() as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
@@ -76,16 +79,25 @@ def persist_assistant(conversation_id: int, content: str,
             + ([{"kind": "card_status", "data": card_result}] if card_result is not None else [])
         )
         if data:
-            validated = ToolResultBundle.model_validate({"items": data})
-            if len(validated.items) == 1:
-                item = validated.items[0]
-                snapshot_kind, payload = item.kind, item.data
+            try:
+                validated = ToolResultBundle.model_validate({"items": data})
+                if len(validated.items) == 1:
+                    item = validated.items[0]
+                    snapshot_kind, payload = item.kind, item.data
+                else:
+                    snapshot_kind, payload = "tool_results", validated.model_dump()
+                ciphertext, key_version = encrypt_result_snapshot(payload)
+            except (VaultError, ValueError, TypeError) as exc:
+                # A missing/retired encryption key or an invalid snapshot must
+                # not discard the model-authored answer. The trusted card is
+                # lost on refresh, but the conversation remains usable.
+                logger.warning(
+                    "trusted result snapshot unavailable: %s", type(exc).__name__,
+                )
             else:
-                snapshot_kind, payload = "tool_results", validated.model_dump()
-            ciphertext, key_version = encrypt_result_snapshot(payload)
-            session.add(MessageResult(
-                message_id=message.id, kind=snapshot_kind,
-                ciphertext=ciphertext, key_version=key_version))
+                session.add(MessageResult(
+                    message_id=message.id, kind=snapshot_kind,
+                    ciphertext=ciphertext, key_version=key_version))
         if view is not None:
             if view.conversation_id != conversation_id:
                 raise RuntimeError("View ownership invariant failed")

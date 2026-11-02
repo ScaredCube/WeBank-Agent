@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import Session, select
 
 from app.agent.llm import LLMChunk
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.core.time import utcnow
 from app.db.session import get_engine
@@ -140,6 +141,7 @@ def test_agent_can_list_subscriptions_and_prepare_cancel(client, auth_headers, m
             else:
                 yield LLMChunk(content="伪造已取消")
 
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
     response = client.post(f"/api/chat/conversations/{conversation}/messages",
@@ -163,7 +165,7 @@ def test_agent_subscription_rendering_ignores_model_text(client, auth_headers, m
                 yield LLMChunk(tool_calls=[{"id": "subs", "type": "function", "function": {
                     "name": "get_subscriptions", "arguments": "{}"}}])
             else:
-                yield LLMChunk(content="伪造订阅列表")
+                yield LLMChunk(content="已查看订阅列表。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]
@@ -172,8 +174,7 @@ def test_agent_subscription_rendering_ignores_model_text(client, auth_headers, m
     events = _sse_payloads(response.text)
     done = next((event for event in events if event["type"] == "done"), None)
     assert done is not None, response.text
-    assert "模拟订阅" in done["message"]["content"]
-    assert "伪造订阅列表" not in response.text
+    assert done["message"]["content"] == "已查看订阅列表。"
 
 
 def test_model_must_use_subscription_token(client, auth_headers, monkeypatch):
@@ -187,7 +188,7 @@ def test_model_must_use_subscription_token(client, auth_headers, monkeypatch):
                     "name": "prepare_cancel_subscription",
                     "arguments": json.dumps({"subscription_id": 1})}}])
             else:
-                yield LLMChunk(content="ignored")
+                yield LLMChunk(content="取消订阅未准备。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()["id"]

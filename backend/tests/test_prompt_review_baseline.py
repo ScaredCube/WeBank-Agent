@@ -3,7 +3,8 @@ import json
 from pathlib import Path
 
 from app.agent.prompt_assembly import (
-    assemble_agent_prompt, assemble_guard_prompt, assemble_recovery_prompt,
+    assemble_action_reply_prompt, assemble_agent_prompt, assemble_guard_prompt,
+    assemble_reply_grounding_prompt, assemble_reply_rewrite_prompt,
 )
 from scripts.review_prompts import extract_literals, manifest_for_source, runtime_versions
 
@@ -19,9 +20,10 @@ def test_snapshot_covers_all_effective_prompt_roles_and_validated_intents():
         "生效 Prompt 版本已变化：请生成 Before/After 和 UX/安全评审后更新基线"
     )
     assert set(actual) == {
-        "agent", "guard", "recovery", "tools",
-        "reply_policy", "recovery_policy", "read_completion", "grounded_summary",
-        "compound_read_summary", "read_result_recovery", "scope_contract", "snapshot_contract",
+        "agent", "guard", "reply_grounding", "reply_rewrite", "view_review", "action_reply",
+        "tools", "compound_read_summary", "read_result_recovery",
+        "view_generation", "view_review_module", "reply_grounding_module", "action_reply_module",
+        "scope_contract", "snapshot_contract",
         "chat_request_recovery", "agent_loop", "tool_executor",
         "agent:transfer", "agent:internal_transfer", "agent:collect",
         "agent:purchase", "agent:redeem", "agent:convert",
@@ -33,7 +35,8 @@ def test_static_prompt_literals_match_reviewed_baseline():
     expected = json.loads(MANIFEST.read_text(encoding="utf-8"))["static_prompts"]
     assert manifest_for_source(text) == expected
     assert set(extract_literals(text)) == {
-        "SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "RESPONSE_RECOVERY_PROMPT",
+        "SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "REPLY_GROUNDING_PROMPT",
+        "REPLY_REWRITE_PROMPT", "VIEW_REVIEW_PROMPT", "ACTION_REPLY_PROMPT",
     }
 
 
@@ -41,15 +44,21 @@ def test_manifest_records_actual_assembly_not_a_separate_prompt_copy():
     current = json.loads(MANIFEST.read_text(encoding="utf-8"))["effective_versions"]
     assert assemble_agent_prompt().version == current["agent"]
     assert assemble_guard_prompt().version == current["guard"]
-    assert assemble_recovery_prompt().version == current["recovery"]
+    assert assemble_reply_grounding_prompt().version == current["reply_grounding"]
+    assert assemble_reply_rewrite_prompt().version == current["reply_rewrite"]
+    assert assemble_action_reply_prompt().version == current["action_reply"]
 
 
 def test_ast_extraction_does_not_evaluate_untrusted_source():
     harmless = chr(10).join((
         "SYSTEM_PROMPT = 'A'",
         "GUARD_SYSTEM_PROMPT = 'B'",
-        "RESPONSE_RECOVERY_PROMPT = 'C'",
+        "REPLY_GROUNDING_PROMPT = 'C'",
+        "REPLY_REWRITE_PROMPT = 'D'",
+        "VIEW_REVIEW_PROMPT = 'E'",
+        "ACTION_REPLY_PROMPT = 'F'",
     ))
     assert set(extract_literals(harmless)) == {
-        "SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "RESPONSE_RECOVERY_PROMPT",
+        "SYSTEM_PROMPT", "GUARD_SYSTEM_PROMPT", "REPLY_GROUNDING_PROMPT",
+        "REPLY_REWRITE_PROMPT", "VIEW_REVIEW_PROMPT", "ACTION_REPLY_PROMPT",
     }

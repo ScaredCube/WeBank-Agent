@@ -6,8 +6,8 @@
 
 ## 当前焦点
 
-- 当前阶段：2026-11-02 已完成“左侧常驻资产栏 + 中间对话 + 右侧工具抽屉”布局重构；资产页从主页一步可达，收藏/操作记录/对话列表收进右侧抽屉。此前已完成六动作资产拖拽、意图胶囊与 token 化前置提示词；后端完成内部转账、收款、持仓转换模拟链路。`T-208`、`T-407`、`T-408`、`T-UX-421` 已标记完成。
-- 下一任务：真实设备与真实后端连续验收、群组 AA 多选收款、`T-406` 会话删除/归档、生产级风控与真实强验证；`T-305`、DAG、记忆、多模态、MCP 暂不进入主线。
+- 当前阶段：2026-11-02 已完成“移除固定回复兜底 + LLM 回复复核 + GenUI v2 + 无 Key 启动失败”；所有助手文本由模型生成，最终文本经独立复核，GenUI 由 AI 生成并通过独立 `ViewReviewer`。此前已完成“左侧常驻资产栏 + 中间对话 + 右侧工具抽屉”布局重构、六动作资产拖拽、意图胶囊与 token 化前置提示词、内部转账/收款/持仓转换模拟链路。`T-208`、`T-407`、`T-408`、`T-UX-421`、`T-RUNTIME-AGENT-01`～`05` 已标记完成。
+- 下一任务：真实模型下的回复复核/GenUI 复核效果验收（`T-RUNTIME-AGENT-07`）、扩展交易流水与持仓可视化（`T-RUNTIME-AGENT-06`）、真实设备与真实后端连续验收、群组 AA 多选收款、`T-406` 会话删除/归档、生产级风控与真实强验证；`T-305`、DAG、记忆、多模态、MCP 暂不进入主线。
 - 进行中：`T-101`～`T-105`、`T-207` 等任务按各自范围维护。旧的 2026-10-31 “真实模型未联调”记录是历史验收时点，**不能代表当前 `main` 能力**。
 - 设计输入：`docs/设计细化.md` 的目标设计已部分落地；前置意图采用人工确认的“实体 ID + 服务端 token 化提示词”方案，详见 `docs/项目汇报.md`。真实银行与语音暂不考虑。
 - 原则：先打通“工具调用 → 风控判定 → 服务端确认 → 执行 → 审计”的最小闭环，再横向扩展场景
@@ -419,3 +419,19 @@
 
 - [x] **T-GUI-MAIN-01**：接收暂停的独立候选 `1244bdb`，三方合并到 `klutz-runtime`，保留金融安全编辑和资产拖拽；定位真实分类选择失败为重复组件造成的 `AMBIGUOUS_LOCATOR`，实现唯一可信分类入口。合并后真实 DeepSeek 浏览器账单→分类→续问→历史恢复 PASS，红色人脸模拟转账 E2E PASS；完整证据见 `docs/frontend/2026-11-02-generative-ui-main-integration.md`。
 - [ ] **T-GUI-MAIN-02**：仅在后续真实需求明确时扩展订阅工具事件、不同业务场景的生成视图及模型多样本统计；旧 SQLite 迁移仍须备份与审批，不得以自动合并代替迁移。
+
+## 2026-11-02 · 移除固定回复兜底与 GenUI v2
+
+- [x] **T-RUNTIME-AGENT-01 移除固定对话回复兜底**：删除 `response_policy`、`response_recovery`、`response_synthesis`、`read_completion`、`view_followup`、`financial_summary`；`AgentLoop` 不再生成固定 summary/追问/失败说明，模型基于 Tool observation 生成最终文本。验证：后端全量 453 passed。
+- [x] **T-RUNTIME-AGENT-02 回复 grounding 复核**：新增 `reply_grounding.py`、`REPLY_GROUNDING_PROMPT`、`REPLY_REWRITE_PROMPT`；不合格重写一次，仍不合格返回 error。验证：`tests/test_reply_grounding.py` 5 passed。
+- [x] **T-RUNTIME-AGENT-03 无 Key 启动失败**：删除 `MockProvider`，lifespan 校验 `LLM_API_KEY`；测试使用 fake provider。验证：后端全量通过；生产路径不再存在离线 Mock 分支。
+- [x] **T-RUNTIME-AGENT-04 GenUI v2 与 ViewReviewer**：AI 生成 `view_data` + `spec`，服务端确定性校验来源数值/引用/稳定 ID，独立 `ViewReviewer` 复核；不合格重生成，仍失败不渲染视图。v1 历史快照兼容。
+- [x] **T-RUNTIME-AGENT-05 前端 v1/v2 兼容**：`view.ts` 同时解析 v1/v2；移除固定视图失败解释句；空助手文本不渲染空气泡。验证：前端 34 文件 / 242 passed，lint 0 errors，build 通过。
+- [~] **T-RUNTIME-AGENT-06 扩展可视化来源**：当前已覆盖账单、订阅、卡状态；交易流水、余额、持仓等可信 dataset 尚未接入 v2，需在真实模型多样本验证后继续。
+- [ ] **T-RUNTIME-AGENT-07 真实模型复核效果验收**：验证回复复核、派生指标算术复核、复杂多轮 GenUI 的漏判/误拒率与延迟；不得以确定性 fake 测试替代真实供应商效果。
+
+- [x] **T-RUNTIME-AGENT-08 流式回复持久化降级**：修复“已生成回答但随后报错、刷新后回答消失、对话轮空”。可信结果快照加密不可用或校验失败时，助手文本与提交状态仍持久化；SSE 已产生文本后的异常会先保存文本并返回 `done`。验证：`tests/test_chat.py::test_streamed_reply_survives_snapshot_persistence_failure` 通过；该场景下结果卡不再跨刷新恢复，属于已知降级。
+
+- [x] **T-RUNTIME-AGENT-09 短确认复用前置意图与完成卡归属**：新增 `ConversationIntent`，用户回复“是/好的/确认”等短确认时，服务端重新校验并复用上一轮已验证意图与金额，修复“是”后转账工具提示“请先指定付款账户”；同时支持“500块，还钱”这类带口语单位和附言的结构化金额；动作准备/执行后清除待复用意图。前端完成卡改用最新消息引用定位，修复完成卡挂到旧一轮助手消息。验证：后端定向 53 passed，前端 Chat/控制器 62 passed。限制：仅支持短确认与明确的上一轮意图，不提供跨会长任务状态。
+
+- [x] **T-RUNTIME-AGENT-10 操作准备后等待结果再回复**：`action_required` 后主 Agent 停转，不生成助手文本、不创建空助手消息；弹窗进入 completed/cancelled/expired 后，前端调用 `POST /api/actions/{id}/chat-reply`，由 `ACTION_REPLY_PROMPT` 基于服务端结果生成并持久化回复。生成失败只保留完成卡，不写固定兜底。验证：转账/动作进度/多轮恢复定向 54 passed。

@@ -1,8 +1,7 @@
-"""Grounded final summary for completed and partially completed read-only goals.
+"""Conservative goal-coverage check for one unattempted read-only query.
 
-We never summarize model-authored findings as bank facts. The transaction list
-and periodic-payment detector are two different evidence sources: the latter
-does not prove duplicate subscriptions, double charges, or fraud.
+This module only suggests one remaining safe read to the model. It never
+produces user-visible text and never claims that a goal is complete.
 """
 from __future__ import annotations
 
@@ -82,86 +81,3 @@ def missing_read_goal_for_retry(
     if done not in _SUPPORTED or _valid_rows(done, result) is None:
         return None
     return (_DETECTION_TOOL if done == _TRANSACTION_TOOL else _TRANSACTION_TOOL)
-
-
-def summarize_transaction_subscription_review(
-    results: list[tuple[str, dict]], *, user_request: str,
-) -> str | None:
-    """Only describe what has been verified; call out an explicitly missing goal.
-
-    Return None for other tool combinations or ordinary single-goal requests,
-    preserving the established presentation path.
-    """
-    if not results or any(name not in _SUPPORTED for name, _ in results):
-        return None
-    requested_both = _requests_transaction_and_subscription(user_request)
-    observed = {name for name, _ in results}
-    if not requested_both and observed != _SUPPORTED:
-        return None
-
-    # Repeated/malformed responses should not create a misleading "complete"
-    # verdict. The first successful, well-formed observation is authoritative.
-    verified: dict[str, list[dict]] = {}
-    for name, result in results:
-        rows = _valid_rows(name, result)
-        if rows is not None and name not in verified:
-            verified[name] = rows
-
-    descriptions: list[str] = []
-    transactions = verified.get(_TRANSACTION_TOOL)
-    detection = verified.get(_DETECTION_TOOL)
-    if transactions is not None and detection is not None:
-        # Only server-issued Tool observations can establish query scope;
-        # never infer that the latest transaction list and the rolling
-        # detector scanned the same financial records.
-        tx_scope = next(
-            (result.get("scope") for name, result in results
-             if name == _TRANSACTION_TOOL and _valid_rows(name, result) is not None),
-            None,
-        )
-        detect_scope = next(
-            (result.get("scope") for name, result in results
-             if name == _DETECTION_TOOL and _valid_rows(name, result) is not None),
-            None,
-        )
-        if (isinstance(tx_scope, dict) and tx_scope.get("kind") == "single_account"
-                and type(tx_scope.get("max_rows")) is int
-                and 1 <= tx_scope["max_rows"] <= 50
-                and isinstance(detect_scope, dict)
-                and detect_scope.get("kind") == "all_user_accounts"
-                and detect_scope.get("lookback_days") == 186):
-            descriptions.append(
-                "查询范围说明：最近交易来自单个模拟账户的有限条记录；"
-                "疑似周期性扣费识别覆盖本人所有模拟账户近186天的支出流水。"
-                "两者并非相同的交易样本，不能直接逐笔对应。"
-            )
-        else:
-            descriptions.append(
-                "本轮无法核验两个查询的账户与时间范围是否完全一致，"
-                "不能直接把疑似订阅线索归因到本次交易列表。"
-            )
-    if transactions is not None:
-        descriptions.append(f"最近交易查询本次返回 {len(transactions)} 笔记录。")
-    elif requested_both:
-        descriptions.append("本轮尚未取得可核验的最近交易列表。")
-
-    if detection is not None:
-        if detection:
-            descriptions.append(
-                f"从近186天的支出流水中识别到 {len(detection)} 项疑似周期性扣费线索。"
-            )
-        else:
-            descriptions.append("本轮未从近186天的支出流水中识别到疑似周期性扣费线索。")
-    elif requested_both:
-        descriptions.append("本轮尚未完成可核验的周期性扣费识别。")
-
-    if not descriptions:
-        return None
-    descriptions.append(
-        "同一商户、同一金额跨月份出现，只能提示可能的订阅扣费；"
-        "不能单凭这些记录认定存在重复订阅或异常扣费。"
-        "建议对照订阅清单及扣费日期核实。"
-    )
-    if any(term in user_request for term in ("取消", "退订", "关闭订阅")):
-        descriptions.append("当前结果仅包含查询与识别，不代表已经取消任何订阅。")
-    return "".join(descriptions)

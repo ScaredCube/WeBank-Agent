@@ -13,9 +13,16 @@ from app.main import app
 
 
 class FixtureTransferModel:
+    def __init__(self):
+        self.prepared = False
+
     async def stream(self, messages, tools=None):
+        if self.prepared or tools is None:
+            yield LLMChunk(content="已准备待确认转账，请在固定弹窗中核对。")
+            return
         if not any(t["function"]["name"] == "prepare_transfer" for t in (tools or [])):
             raise RuntimeError("Fixture requires the real registered transfer Tool")
+        self.prepared = True
         user_message = next(
             m["content"] for m in reversed(messages) if m.get("role") == "user"
         )
@@ -40,6 +47,7 @@ class FixtureTransferModel:
 
 
 loop.get_llm = lambda: FixtureTransferModel()
+loop.get_guard = lambda: None
 
 
 if os.environ.get('BANK_AGENT_ACTION_E2E_FACE') == '1':

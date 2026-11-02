@@ -1,4 +1,3 @@
-import asyncio
 from secrets import token_bytes
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -39,35 +38,8 @@ class LLMProvider(Protocol):
     ) -> AsyncIterator[LLMChunk]: ...
 
 
-class MockProvider:
-    mode = "mock"
-
-    def __init__(self, model: str) -> None:
-        self.model = model
-
-    def _compose(self, messages: list[dict[str, Any]]) -> str:
-        last_user = next(
-            (message["content"] for message in reversed(messages) if message.get("role") == "user"),
-            "",
-        )
-        snippet = last_user.strip().replace("\n", " ")[:24]
-        if not snippet:
-            return "你好，我是小We。当前是演示模式，可以陪你了解银行功能和使用流程。"
-        return (
-            f"收到你说的「{snippet}」。当前是演示模式，离线 Mock 不会调用银行工具，"
-            "只能用于测试对话链路。转账、账单分析和卡片管理尚未开放。"
-        )
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[LLMChunk]:
-        text = self._compose(messages)
-        for index in range(0, len(text), 3):
-            await asyncio.sleep(0.012)
-            yield LLMChunk(content=text[index : index + 3])
-        yield LLMChunk(finish_reason="stop")
+class LLMConfigurationError(RuntimeError):
+    """Raised when the application is started without a usable LLM key."""
 
 
 class OpenAIProvider:
@@ -132,13 +104,23 @@ class OpenAIProvider:
                 )
 
 
+def validate_llm_config() -> None:
+    """Fail fast: the application has no deterministic reply fallback."""
+    if not settings.llm_api_key.strip():
+        raise LLMConfigurationError(
+            "LLM_API_KEY 未配置；本版本不提供离线 Mock 或固定回复兜底，"
+            "请配置可用的 OpenAI 兼容模型后再启动。"
+        )
+
+
 @lru_cache
 def get_llm() -> LLMProvider:
-    if not settings.llm_api_key.strip():
-        return MockProvider(model="mock")
+    validate_llm_config()
     return OpenAIProvider()
 
 
 def get_llm_info() -> dict[str, str]:
-    provider = get_llm()
-    return {"mode": provider.mode, "model": provider.model}
+    return {
+        "mode": "openai" if settings.llm_api_key.strip() else "unconfigured",
+        "model": settings.llm_model,
+    }

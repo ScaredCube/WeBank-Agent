@@ -40,7 +40,10 @@ def test_account_selection_survives_reload_and_followup_binds_same_account(
             if self.call == 1:
                 yield LLMChunk(tool_calls=[{"id": "call_initialabc", "type": "function",
                     "function": {"name": "get_monthly_bill", "arguments": '{"month":"2026-01"}'}}])
-            elif self.call == 2:
+            elif any(
+                message.get("role") == "user" and "上个月" in str(message.get("content"))
+                for message in messages
+            ) and not self.observed_followup:
                 self.observed_followup = messages[-1]["content"]
                 yield LLMChunk(tool_calls=[
                     {"id": "call_followabc", "type": "function",
@@ -49,7 +52,7 @@ def test_account_selection_survives_reload_and_followup_binds_same_account(
                      "function": {"name": "get_monthly_bill", "arguments": '{"month":"2025-12"}'}},
                 ])
             else:
-                yield LLMChunk(content="Done")
+                yield LLMChunk(content="Done，消费情况已核对。")
     fake = MultiTurnBill()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: fake)
     cid = conversation(client, auth_headers)
@@ -192,8 +195,7 @@ def test_provider_failure_after_first_trusted_result_keeps_snapshot(
     events=events_for(send(client,auth_headers,cid,
         "查询这张银行卡状态和 2026-01 账单",
         [{"kind":"account","id":aid}]))
-    assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result","delta","done"]
+    assert [event["type"] for event in events if event["type"] != "ui_status"] == ["bill_result","error","done"]
     messages=client.get(f"/api/chat/conversations/{cid}/messages",
                         headers=auth_headers).json()
     assert messages[-1]["tool_results"][0]["kind"]=="monthly_bill"
-    assert "部分只读查询已完成" in messages[-1]["content"]

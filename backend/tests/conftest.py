@@ -1,4 +1,4 @@
-﻿import os
+import os
 import base64
 import tempfile
 from pathlib import Path
@@ -9,6 +9,9 @@ if db_path.exists():
 
 os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
 os.environ["LLM_API_KEY"] = ""
+# Most regression tests use deterministic model doubles; dedicated grounding
+# tests enable the reviewer explicitly.
+os.environ["REPLY_GROUNDING_ENABLED"] = "false"
 os.environ["JWT_SECRET"] = "test-secret-with-enough-length-123456"
 os.environ["DATA_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(b"a" * 32).decode()
 os.environ["DATA_HMAC_KEY"] = base64.urlsafe_b64encode(b"b" * 32).decode()
@@ -22,8 +25,30 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel
 
+from app.agent.llm import LLMChunk
 from app.db.session import get_engine
 from app.main import app
+
+
+class TestProvider:
+    """Deterministic text-only model double; never used in production."""
+
+    mode = "test"
+    model = "test"
+
+    async def stream(self, messages, tools=None):
+        yield LLMChunk(content="已收到。")
+        yield LLMChunk(finish_reason="stop")
+
+
+@pytest.fixture(autouse=True)
+def test_llm(monkeypatch):
+    provider = TestProvider()
+    monkeypatch.setattr("app.agent.llm.validate_llm_config", lambda: None)
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: provider)
+    monkeypatch.setattr("app.agent.guard.get_llm", lambda: provider)
+    monkeypatch.setattr("app.agent.ui_composer.get_llm", lambda: provider)
+    monkeypatch.setattr("app.agent.loop.get_guard", lambda: None)
 
 
 @pytest.fixture

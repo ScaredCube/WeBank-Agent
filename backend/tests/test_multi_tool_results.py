@@ -35,7 +35,7 @@ def test_multiple_tool_results_survive_encrypted_history(client, auth_headers, m
     events = [json.loads(row[6:]) for row in resp.text.splitlines() if row.startswith("data: ")]
     assert [x["type"] for x in events if x["type"] != "ui_status"] == ["bill_result", "card_result", "delta", "done"]
     message = events[-1]["message"]
-    assert message["content"] == "银行卡状态和账单已查询，明细见下方结果卡。"
+    assert message["content"] == "两项银行数据已经核验。"
     result = message["tool_results"]
     assert [x["kind"] for x in result] == ["monthly_bill", "card_status"]
     assert result[0]["data"]["month"] == "2026-01"

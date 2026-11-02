@@ -30,7 +30,7 @@ import { CompletedActionCard } from '@/features/actions/CompletedActionCard'
 import type { CardLossRecovery } from '@/features/actions/CardLossButton'
 import { useChatController } from '@/features/chat/useChatController'
 import { useAuth } from '@/lib/use-auth'
-import { api, type BankCard, type BankDashboardData } from '@/lib/api'
+import { api, type BankCard, type BankDashboardData, type Message } from '@/lib/api'
 import { PrivacyProvider, usePrivacy } from '@/features/privacy/PrivacyProvider'
 import { DURATION, EASE_DRAWER, EASE_IN_OUT, EASE_OUT, useMotionReduced } from '@/lib/motion'
 import type { ChatIntentPayload, StreamEvent } from '@/lib/sse'
@@ -182,10 +182,12 @@ function ChatWorkspace() {
     setWorkspaceRevision((value) => value + 1)
   }, [onCardLossRecoveryChange])
 
-  const { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving } = useChatController({
+  const { renameConversation, conversations, activeId, messages, toolResultLists, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving, upsertMessage } = useChatController({
     token, actionBlocked: actionPreparing || !!pendingAction || workspaceLoading || viewInteractionBlocked, onActionRequired,
     onActionWarning: setActionWarning, onConversationChange, onConversationCreated,
   })
+  const messagesRef = useRef(messages)
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   // Keep a typed drag intent while the user edits or clears the composer.
   // Only a completed send that leaves no draft may remove it; clearing input
@@ -573,12 +575,11 @@ function ChatWorkspace() {
                 const completed = completedByMessage[message.id] ?? []
                 const view = messageView(message, activeId)
                 const invalidView = message.ui_view != null && !view
-                const fallbackStatus = uiStatusByMessage[message.id] === 'fallback'
                 const subscriptions = subscriptionSnapshots(message.subscription_results)
                 const monthlyResults = list.filter(result => result.kind === 'monthly_bill')
                 const otherResults = list.filter(result => result.kind !== 'monthly_bill')
                 const hasRawResults = monthlyResults.length > 0 || subscriptions.length > 0
-                if (!view && !invalidView && !fallbackStatus && !list.length && !completed.length && !subscriptions.length) return null
+                if (!view && !invalidView && !list.length && !completed.length && !subscriptions.length) return null
                 const origin = activeId !== null && message.id > 0
                   ? { conversationId: activeId, messageId: message.id }
                   : null
@@ -594,7 +595,6 @@ function ChatWorkspace() {
                     onOpenOriginal={() => void openView(view, origin, false)}
                   />}
                   {invalidView && <p role="status" className="text-xs text-muted">此视图暂时无法展示，原始结果仍可查看。</p>}
-                  {!view && !invalidView && fallbackStatus && <p role="status" className="text-xs text-muted">未能生成交互式分析视图，已保留可信结果。</p>}
                   {view && hasRawResults && <details className="max-w-[560px] rounded-xl border border-line bg-panel px-4 py-3">
                     <summary className="cursor-pointer text-xs font-medium text-jade-800">查看原始结果</summary>
                     <div className="mt-3 space-y-4">
@@ -660,28 +660,41 @@ function ChatWorkspace() {
         window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.chat-composer-input')?.focus())
       } : undefined}
       onResolved={(status) => {
-        if (pendingAction.action.action_type === 'card_loss' && typeof pendingAction.action.details.card_id === 'number') onCardLossRecoveryChange(pendingAction.action.details.card_id, null)
-        if (status === 'completed') {
-          const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant' && message.id > 0)
-          if (latestAssistant) {
-            setCompletedByMessage((current) => {
-              const existing = current[latestAssistant.id] ?? []
-              return {
-                ...current,
-                [latestAssistant.id]: [
-                  ...existing.filter((entry) => entry.action.id !== pendingAction.action.id),
-                  pendingAction,
-                ],
-              }
+        const resolvedAction = pendingAction
+        void (async () => {
+          let replyMessage: Message | null = null
+          if (token) {
+            try {
+              replyMessage = (await api.actionReply(token, resolvedAction.action.id)).message
+            } catch {
+              // The fixed result card remains authoritative if wording fails.
+            }
+          }
+          if (replyMessage) upsertMessage(replyMessage)
+          if (resolvedAction.action.action_type === 'card_loss' && typeof resolvedAction.action.details.card_id === 'number') onCardLossRecoveryChange(resolvedAction.action.details.card_id, null)
+          if (status === 'completed') {
+            const targetId = replyMessage?.id
+              ?? [...messagesRef.current].reverse().find((message) => message.role === 'assistant' && message.id > 0)?.id
+            if (targetId != null) {
+              setCompletedByMessage((current) => {
+                const existing = current[targetId] ?? []
+                return {
+                  ...current,
+                  [targetId]: [
+                    ...existing.filter((entry) => entry.action.id !== resolvedAction.action.id),
+                    resolvedAction,
+                  ],
+                }
+              })
+            }
+            refreshAssets()
+            window.requestAnimationFrame(() => {
+              const root = scrollRef.current
+              if (root && typeof root.scrollTo === 'function') root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
+              else if (root) root.scrollTop = root.scrollHeight
             })
           }
-          refreshAssets()
-          window.requestAnimationFrame(() => {
-            const root = scrollRef.current
-            if (root && typeof root.scrollTo === 'function') root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
-            else if (root) root.scrollTop = root.scrollHeight
-          })
-        }
+        })()
       }}
       onFinish={() => { lastSubmittedDraft.current = null; setActionOpen(false); setPendingAction(null); setEditablePendingDraft(null); refreshAssets() }} />}
   </AppShell>

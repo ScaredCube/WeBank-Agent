@@ -54,6 +54,8 @@ export function MessageBubble({
     </div>
   }
 
+  if (!streaming && !message.content) return null
+
   return <div className="group flex items-start gap-3">
     <PenguinArt pose="avatar" className="mt-0.5 size-9 shrink-0" />
     <div className="min-w-0 flex-1 pt-0.5">

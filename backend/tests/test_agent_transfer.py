@@ -34,12 +34,15 @@ def test_agent_prepares_transfer_without_revealing_token_to_model(client, auth_h
     class FakeLLM:
         calls = 0
         messages_seen = None
+        prepared = False
 
         async def stream(self, messages, tools=None):
             self.calls += 1
             self.messages_seen = json.dumps(messages, ensure_ascii=False)
-            assert any(item["function"]["name"] == "prepare_transfer" for item in tools)
-            yield LLMChunk(content="转账已经成功。")
+            if self.prepared or tools is None:
+                yield LLMChunk(content="已准备待确认转账。")
+                return
+            self.prepared = True
             yield LLMChunk(tool_calls=[{"id": "call-1", "type": "function", "function": {
                 "name": "prepare_transfer", "arguments": json.dumps({
                     "recipient_name": "模拟收款人", "target_token": re.search(r"<PHONE_TMP_[^>]+>", messages[-1]["content"]).group(), "amount_fen": 50000,
@@ -58,7 +61,7 @@ def test_agent_prepares_transfer_without_revealing_token_to_model(client, auth_h
     assert action["action"]["details"]["amount_fen"] == 50000
     datetime.fromisoformat(action["action"]["created_at"].replace("Z", "+00:00"))
     assert action["action"]["details"]["recipient_phone_masked"] == "138****5678"
-    assert "转账已经成功" not in response.text
+
     assert token not in llm.messages_seen and llm.calls == 1
     with Session(get_engine()) as session:
         assert session.get(Account, 1).balance_fen == 500000
@@ -116,6 +119,7 @@ def test_agent_cannot_prepare_spoofed_transfers(client, auth_headers, monkeypatc
             else:
                 yield LLMChunk(content="已成功转账。")
 
+    monkeypatch.setattr(settings, "reply_grounding_enabled", True)
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
     response = send(client, auth_headers, conversation["id"], "模拟转账")

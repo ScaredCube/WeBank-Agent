@@ -1,7 +1,7 @@
 # Generative UI 集成交接（草稿）
 
 日期：2026-11-02
-状态：待主线审阅；独立分支尚未推送或创建 PR。
+状态：历史交接草稿；主线后续已升级为 GenUI v2（AI 生成 `view_data` + 独立 `ViewReviewer`，兼容 v1 快照），`view_followup.py` 已删除。当前实现以 `docs/项目汇报.md` 和代码为准。
 
 ## 范围与对照基线
 

@@ -19,17 +19,20 @@ def test_verified_bill_analysis_is_synthesized_and_persisted(
     class Model:
         mode = "openai"
         turns = []
+        called = False
         async def stream(self, messages, tools=None):
             self.turns.append({"messages": messages, "tools": bool(tools)})
-            if tools:
+            if tools and not self.called:
+                self.called = True
                 yield LLMChunk(tool_calls=[{
                     "id": "call_v2_bill", "type": "function",
                     "function": {"name": "get_monthly_bill", "arguments": '{"month":"2026-01"}'},
                 }])
             else:
-                yield LLMChunk(content=json.dumps({
-                    "narrative": "本次已取得月度收支及分类数据，可以从消费分布开始分析，但不能仅凭账单判断变化的真正原因。"
-                }, ensure_ascii=False))
+                yield LLMChunk(content=(
+                    "本次已取得月度收支及分类数据，可以从消费分布开始分析，"
+                    "但不能仅凭账单判断变化的真正原因。2026-01 月度账单已展示。"
+                ))
 
     model = Model()
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: model)
@@ -41,12 +44,12 @@ def test_verified_bill_analysis_is_synthesized_and_persisted(
     ))
     assert len(model.turns) == 2
     assert model.turns[0]["tools"] is True
-    assert model.turns[1]["tools"] is False
+    assert model.turns[1]["tools"] is True
     assert model.turns[1]["messages"][0]["role"] == "system"
     assert events[-1]["type"] == "done"
     reply = events[-1]["message"]["content"]
     assert reply.startswith("本次已取得月度收支")
-    assert "2026-01 月度账单" in reply
+    assert "2026-01 月度账单已展示" in reply
     assert events[-1]["message"]["bill_result"]["month"] == "2026-01"
     saved = client.get(f"/api/chat/conversations/{cid}/messages",
                        headers=auth_headers).json()

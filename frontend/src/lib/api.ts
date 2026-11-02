@@ -404,6 +404,12 @@ export const api = {
     }, token)
   },
 
+  actionReply(token: string, id: number) {
+    return request<{ message: Message | null }>(`/actions/${id}/chat-reply`, {
+      method: 'POST',
+    }, token)
+  },
+
   executeTransfer(token: string, id: number) {
     return request<{ status: string; message: string }>(`/transfers/${id}/execute`, { method: 'POST' }, token)
   },

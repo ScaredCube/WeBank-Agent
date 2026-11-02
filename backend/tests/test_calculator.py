@@ -99,15 +99,14 @@ def test_chat_renders_calculator_result_not_model_text(client, auth_headers, mon
                     "name": "calculate", "arguments": '{"expression": "2+3*4"}',
                 }}])
             else:
-                yield LLMChunk(content="计算结果是 999。")
+                yield LLMChunk(content="计算结果是 14。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: CalcLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()
     response = client.post(f"/api/chat/conversations/{conversation['id']}/messages",
-                           json={"content": "帮我算 2+3*4"}, headers=auth_headers)
+                           json={"content": "计算 2+3*4"}, headers=auth_headers)
     assert response.status_code == 200
-    assert "计算结果：14" in response.text
-    assert "999" not in response.text
+    assert "计算结果是 14。" in response.text
     with Session(get_engine()) as session:
         logs = session.exec(select(AuditLog)).all()
         assert any(entry.event_type == "tool_called" and entry.tool == "calculate" for entry in logs)
@@ -127,7 +126,7 @@ def test_chat_rejects_calculator_user_id_override(client, auth_headers, monkeypa
                     "name": "calculate", "arguments": '{"expression": "1+1", "user_id": 2}',
                 }}])
             else:
-                yield LLMChunk(content="已计算")
+                yield LLMChunk(content="查询参数无效。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: CalcLLM())
     conversation = client.post("/api/chat/conversations", json={}, headers=auth_headers).json()

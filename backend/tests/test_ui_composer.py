@@ -1,12 +1,12 @@
 import asyncio
-from app.agent.llm import LLMChunk, MockProvider
+from app.agent.llm import LLMChunk
 from app.agent.ui_composer import UIComposer
 
 
 class Provider:
     mode = "openai"
 
-    def __init__(self, text='{"root":"root","elements":{}}', tool=False):
+    def __init__(self, text='{"view_data":{"metrics":{},"datasets":{}},"spec":{"root":"root","elements":{}}}', tool=False):
         self.text, self.tool, self.calls, self.messages = text, tool, 0, None
 
     async def stream(self, messages, tools=None):
@@ -22,21 +22,28 @@ def run(composer):
 
 def test_composer_uses_generated_catalog_once_and_no_tools():
     provider = Provider()
-    assert run(UIComposer(provider=provider)) == {"root": "root", "elements": {}}
+    assert run(UIComposer(provider=provider)) == {
+        "view_data": {"metrics": {}, "datasets": {}},
+        "spec": {"root": "root", "elements": {}},
+    }
     assert provider.calls == 1
     assert "metric_ref" in provider.messages[0]["content"]
     assert "消费结构" in provider.messages[-1]["content"]
 
 
 def test_composer_rejects_invalid_outputs_without_repair():
-    for text, tool in [('not json', False), ('[]', False), ('{"root":1,"elements":{}}', False), ('{}', True), ('x' * 65537, False), ('{"root":"r","elements":{},"state":{}}', False)]:
+    for text, tool in [
+        ('not json', False), ('[]', False),
+        ('{"view_data":1,"spec":{"root":"r","elements":{}}}', False),
+        ('{}', True), ('x' * 131073, False),
+        ('{"view_data":{},"spec":{"root":"r","elements":{},"state":{}}}', False),
+    ]:
         provider = Provider(text, tool)
         assert run(UIComposer(provider=provider)) is None
         assert provider.calls == 1
 
 
-def test_composer_mock_and_missing_catalog_fail_closed(tmp_path):
-    assert run(UIComposer(provider=MockProvider("mock"))) is None
+def test_composer_missing_catalog_fails_closed(tmp_path):
     provider = Provider()
     assert run(UIComposer(provider=provider, prompt_path=tmp_path / "missing")) is None
     assert provider.calls == 0
