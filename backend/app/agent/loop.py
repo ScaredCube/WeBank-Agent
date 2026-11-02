@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent.guard import GuardProvider, get_guard
+from app.agent.goal_completion import missing_bill_goal
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
 from app.agent.compound_read_summary import (
@@ -106,9 +107,11 @@ class AgentLoop:
                     # Allow one model-directed chance to finish an explicit,
                     # unattempted second read goal. No extra read permission,
                     # automatic Tool execution, or unlimited retry is granted.
-                    missing_goal = missing_read_goal_for_retry(
+                    missing_goal = (missing_read_goal_for_retry(
                         tool_results, user_request=original_request or "",
-                    )
+                    ) or missing_bill_goal(
+                        tool_results, user_request=original_request or "",
+                    ))
                     if (missing_goal is not None and continuation_target is None
                             and intent_action is None
                             and round_index < MAX_TOOL_ROUNDS - 1):
@@ -116,8 +119,8 @@ class AgentLoop:
                         messages.append({
                             "role": "system",
                             "content": (
-                                "服务端只读任务覆盖检查：用户明确请求最近交易查询和疑似订阅识别。"
-                                f"已有可信结果只覆盖其中一项，尚未尝试的工具为 {missing_goal}。"
+                                "服务端只读任务覆盖检查：当前可信结果未覆盖用户明确提出的全部查询目标。"
+                                f"尚未尝试的工具为 {missing_goal}。"
                                 "如有足够条件，请优先调用这个只读工具完成剩余目标。"
                                 "遵守现有权限与账户范围，不得执行写操作、不得重复已成功的查询。"
                                 "如无法查询或需要用户选择账户，请正常解释尚未完成的目标。"

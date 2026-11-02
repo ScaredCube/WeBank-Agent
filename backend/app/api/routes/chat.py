@@ -32,7 +32,7 @@ from app.services.chat_service import (
     recent_messages,
 )
 from app.risk.injection import detect_injection
-from app.risk.transfer_intent import is_transfer_request, requested_amount_fen, requested_transfer_amount_fen
+from app.risk.transfer_intent import is_transfer_request, requested_intent_amount_fen, requested_transfer_amount_fen
 from app.services.audit_service import record, request_context
 from app.services.redaction import issue_phone_tool_references
 from app.services.chat_submissions import (SubmissionConflict, fingerprint,
@@ -341,7 +341,7 @@ async def send_message(
     # Only the user's CURRENT request can authorize amount binding. A missing,
     # ambiguous or malformed amount must never be filled in by the model.
     verified_transfer_amount_fen = requested_transfer_amount_fen(payload.content)
-    intent_amount_fen = (requested_amount_fen(payload.content)
+    intent_amount_fen = (requested_intent_amount_fen(payload.content)
                          if intent_prompt is not None else None)
     intent_needs_amount = bool(intent_prompt is not None and intent_amount_fen is None)
     transfer_needs_amount = bool(
