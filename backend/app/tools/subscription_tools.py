@@ -38,7 +38,13 @@ async def get_subscriptions(session: Session, user_id: int, **arguments: object)
 async def detect_subscriptions(session: Session, user_id: int, **arguments: object) -> dict:
     try:
         SubscriptionArguments.model_validate(arguments)
-        return {"ok": True, "data": detect_candidates(session, user_id), "error": None}
+        return {
+            "ok": True, "data": detect_candidates(session, user_id), "error": None,
+            # The detector scans all accounts owned by this user over a
+            # rolling six * 31 day lookback. It does not inspect just the
+            # selected account or just the latest transaction list.
+            "scope": {"kind": "all_user_accounts", "lookback_days": 6 * 31},
+        }
     except ValidationError:
         return {"ok": False, "data": None, "error": "查询参数无效"}
 

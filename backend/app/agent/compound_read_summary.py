@@ -82,6 +82,36 @@ def summarize_transaction_subscription_review(
     descriptions: list[str] = []
     transactions = verified.get(_TRANSACTION_TOOL)
     detection = verified.get(_DETECTION_TOOL)
+    if transactions is not None and detection is not None:
+        # Only server-issued Tool observations can establish query scope;
+        # never infer that the latest transaction list and the rolling
+        # detector scanned the same financial records.
+        tx_scope = next(
+            (result.get("scope") for name, result in results
+             if name == _TRANSACTION_TOOL and _valid_rows(name, result) is not None),
+            None,
+        )
+        detect_scope = next(
+            (result.get("scope") for name, result in results
+             if name == _DETECTION_TOOL and _valid_rows(name, result) is not None),
+            None,
+        )
+        if (isinstance(tx_scope, dict) and tx_scope.get("kind") == "single_account"
+                and type(tx_scope.get("max_rows")) is int
+                and 1 <= tx_scope["max_rows"] <= 50
+                and isinstance(detect_scope, dict)
+                and detect_scope.get("kind") == "all_user_accounts"
+                and detect_scope.get("lookback_days") == 186):
+            descriptions.append(
+                "查询范围说明：最近交易来自单个模拟账户的有限条记录；"
+                "疑似周期性扣费识别覆盖本人所有模拟账户近186天的支出流水。"
+                "两者并非相同的交易样本，不能直接逐笔对应。"
+            )
+        else:
+            descriptions.append(
+                "本轮无法核验两个查询的账户与时间范围是否完全一致，"
+                "不能直接把疑似订阅线索归因到本次交易列表。"
+            )
     if transactions is not None:
         descriptions.append(f"最近交易查询本次返回 {len(transactions)} 笔记录。")
     elif requested_both:
@@ -90,10 +120,10 @@ def summarize_transaction_subscription_review(
     if detection is not None:
         if detection:
             descriptions.append(
-                f"从近六个月的支出流水中识别到 {len(detection)} 项疑似周期性扣费线索。"
+                f"从近186天的支出流水中识别到 {len(detection)} 项疑似周期性扣费线索。"
             )
         else:
-            descriptions.append("本轮未从近六个月的支出流水中识别到疑似周期性扣费线索。")
+            descriptions.append("本轮未从近186天的支出流水中识别到疑似周期性扣费线索。")
     elif requested_both:
         descriptions.append("本轮尚未完成可核验的周期性扣费识别。")
 

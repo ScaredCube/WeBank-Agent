@@ -32,6 +32,9 @@ REVIEW_PATHS = (
     "backend/app/services/intent_service.py",
     "backend/app/services/chat_turn.py",
     "backend/app/tools/register.py",
+    "backend/app/tools/account_tools.py",
+    "backend/app/tools/subscription_tools.py",
+    "backend/app/services/subscription_service.py",
     "backend/app/tools/presentation.py",
     "backend/app/risk/injection.py",
     "backend/app/api/routes/chat.py",
@@ -120,6 +123,16 @@ def runtime_versions() -> dict[str, str]:
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]
+    scope_sources = (
+        "backend/app/tools/account_tools.py",
+        "backend/app/tools/subscription_tools.py",
+        "backend/app/services/subscription_service.py",
+    )
+    scope_bytes = "\n".join(
+        (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
+        for relative in scope_sources
+    ).encode("utf-8")
+    versions["scope_contract"] = "scope_contract:" + sha256(scope_bytes).hexdigest()[:16]
     return versions
 
 

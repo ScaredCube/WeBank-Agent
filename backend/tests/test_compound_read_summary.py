@@ -47,7 +47,7 @@ def test_empty_candidates_is_not_proof_there_are_no_subscriptions():
     result = summarize_transaction_subscription_review(
         [tx([row()]), detect([])], user_request=REQUEST,
     )
-    assert "未从近六个月" in result
+    assert "未从近186天" in result
     assert "不能单凭这些记录认定" in result
     assert "没有重复订阅" not in result
 
@@ -154,6 +154,7 @@ def test_chat_compound_two_tool_result_overrides_model_forged_completion(
     reply = seen[-1]["message"]["content"]
     assert "最近交易查询" in reply
     assert "周期性扣费线索" in reply
+    assert "单个模拟账户" in reply and "本人所有模拟账户近186天" in reply
     assert "模拟交易记录" in reply or "没有查询到模拟交易记录" in reply
     assert "多扣了9999" not in reply
     assert "帮你取消了" not in reply

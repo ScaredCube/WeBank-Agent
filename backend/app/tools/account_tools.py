@@ -68,9 +68,12 @@ async def list_recent_transactions(session: Session, user_id: int, **arguments: 
     transactions = recent_transactions(session, user_id, account_id, args.limit)
     if transactions is None:
         return _result(user_id, tool, error="账户不存在")
-    return _result(user_id, tool, data=[
+    result = _result(user_id, tool, data=[
         {"reference": entry.reference, "direction": entry.direction, "amount_fen": entry.amount_fen,
          "balance_after_fen": entry.balance_after_fen, "counterparty": mask_text(entry.counterparty),
          "category": mask_text(entry.category), "note": mask_text(entry.note), "occurred_at": entry.occurred_at.isoformat()}
         for entry in transactions
     ])
+    # Server-issued scope metadata; do not expose internal account IDs/tokens.
+    result["scope"] = {"kind": "single_account", "max_rows": args.limit}
+    return result
