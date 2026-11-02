@@ -129,6 +129,13 @@ function ChatWorkspace() {
     onActionWarning: setActionWarning, onConversationChange, onConversationCreated,
   })
 
+  // Keep a structured drag intent across uncertain sends and network errors.
+  // Remove it only when the controller has finished and the draft is cleared.
+  // Clearing it on click would turn a retry into an unbound natural-language request.
+  useEffect(() => {
+    if (intentCapsule && !sending && !draft.trim()) setIntentCapsule(null)
+  }, [intentCapsule, sending, draft])
+
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
 
@@ -251,10 +258,13 @@ function ChatWorkspace() {
 
   function send() {
     if (!draft.trim()) return
+    if (intentCapsule && draft.trim() === intentCapsule.prefill.trim()) {
+      setActionWarning('拖拽已选定业务对象，请先填写实际金额；小We不会替你决定转账或交易金额。')
+      return
+    }
     const payload = intentCapsule ? describeIntent(intentCapsule) : undefined
     const text = draft
     const display = intentCapsule?.label
-    setIntentCapsule(null)
     void sendMessage(text, references, payload, display)
   }
 
