@@ -24,3 +24,22 @@
 - 外部 Generative UI `feature/klutz-gui-integration` 工作区存在大量未提交修改，本轮没有触碰其文件或变更其职责。之后合并要重点核对并行线也修改过的 `Chat.tsx`。
 
 回退路径：撤销本轮四个前端文件变更即可恢复旧行为，无数据库结构变化。
+
+## 2026-11-02 · 真正的浏览器 + Agent + 合成 SQLite 端到端验收
+
+本阶段新增 `frontend/scripts/competition_action_edit_e2e.cjs`，将隔离启动器 `backend/scripts/run_action_e2e.py` 扩展为显式 `--fixture --edit` 模式；测试模型仍经过**真实 AgentLoop、ToolExecutor、金融 Tool 和 FastAPI**，仅模型决定性的工具调用被固定为可复现的模拟输入。旧路径 `--fixture` 保持不变。
+
+**执行方式**（在隔离开发 worktree 的 `backend` 目录，且前端已安装依赖）：
+
+```powershell
+uv run python scripts/run_action_e2e.py --fixture --edit
+uv run python scripts/run_action_e2e.py --fixture
+```
+
+**真实可复现的浏览器操作**：选择演示活期账户 → 提交 1 元模拟转账 → 后端创建第一笔待确认动作 → 页面点击「修改信息」并调用服务端取消 → 恢复原始用户请求与已选账户引用 → 将金额改为 2 元后重新提交 → Agent 调用新的 `prepare_transfer` → 第二笔动作经用户确认与执行。
+
+**隔离数据库硬断言**：恰好两条不同的 `TransferRequest / PendingAction`；第一笔 100 分 `pending`（业务请求记录尚在）且对应动作 `cancelled`、无交易流水；第二笔 200 分 `completed` 且动作 `completed`；仅有一条 200 分模拟转账流水；付款余额恰好 499800 分，另一个演示账户保持 386012 分；审计包含取消、确认及执行完成。任何一项不符均 FAIL。真实资金操作为 0。
+
+**本轮实际结果**：编辑 E2E `PASS`；原单笔转账 E2E `PASS`；相关后端测试 `26 passed`。上一阶段的 React 定向测试 `65/65` 和构建通过记录仍有效，本轮未改产品前端源码。
+
+**尚未覆盖**：红色二阶段模拟验证、真实 DeepSeek 多次稳定性、跨设备待办恢复。不能由确定性 E2E 推断这些能力已经全部跑通。

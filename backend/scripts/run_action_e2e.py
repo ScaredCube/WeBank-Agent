@@ -52,6 +52,35 @@ def verify_synthetic_database(database: Path) -> dict:
             "audit_confirmed": True, "audit_completed": True}
 
 
+
+def verify_synthetic_edit_database(database: Path) -> dict:
+    """Old action must be cancelled; only the new 2-yuan transfer is executed."""
+    with closing(sqlite3.connect(database)) as db:
+        accounts = db.execute("SELECT name,balance_fen FROM account ORDER BY id").fetchall()
+        transfers = db.execute(
+            "SELECT t.status,t.amount_fen,t.transaction_id,a.status,a.risk_level "
+            "FROM transferrequest t JOIN pendingaction a ON a.id=t.action_id ORDER BY t.id"
+        ).fetchall()
+        ledger = db.execute(
+            'SELECT amount_fen FROM "transaction" WHERE category=?', ("模拟转账",)
+        ).fetchall()
+        events = [r[0] for r in db.execute("SELECT event_type FROM auditlog")]
+    assert accounts == [("演示活期账户", 499800), ("零钱账户", 386012)], (
+        "Only the edited 2-yuan action may change the synthetic account"
+    )
+    assert len(transfers) == 2, "Expected exactly two independent prepared actions"
+    first, second = transfers
+    assert first[0] == "pending" and first[1] == 100 and first[2] is None
+    assert first[3:] == ("cancelled", "yellow"), "First action was not cancelled"
+    assert second[0] == "completed" and second[1] == 200 and second[2] is not None
+    assert second[3:] == ("completed", "yellow"), "Edited action not completed"
+    assert ledger == [(200,)], "Old cancelled transfer must have no ledger entry"
+    assert "action_cancelled" in events and "action_confirmed" in events
+    assert "transfer_completed" in events
+    return {"actions": 2, "cancelled": 1, "completed": 1,
+            "only_executed_amount_fen": 200, "ledger_rows": len(ledger),
+            "original_action_not_executed": True}
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -61,10 +90,15 @@ def main() -> int:
                       help="Deterministic model + real Agent/Chrome/synthetic SQLite")
     parser.add_argument("--diagnose", action="store_true",
                         help="Live-only sanitized tool-shape trace; no argument values")
+    parser.add_argument('--edit', action='store_true',
+                        help='Exercise cancel, edit and prepare a new synthetic transfer')
     args = parser.parse_args()
+    if args.edit and not args.fixture:
+        parser.error('--edit currently requires --fixture')
+    browser_entry = (FRONTEND / 'scripts' / 'competition_action_edit_e2e.cjs') if args.edit else BROWSER
     if args.diagnose and not args.live:
         parser.error("--diagnose requires --live")
-    if not BROWSER.is_file():
+    if not browser_entry.is_file():
         raise SystemExit("Action browser entrypoint missing")
     node = shutil.which("node")
     if not node or not (FRONTEND / "node_modules" / "vite" / "bin" / "vite.js").exists():
@@ -107,7 +141,7 @@ def main() -> int:
             if model.get("mode") != expected_mode:
                 raise RuntimeError("Unexpected model mode in isolated Agent E2E")
             browser = subprocess.run(
-                [node, str(BROWSER)], cwd=FRONTEND, env=env,
+                [node, str(browser_entry)], cwd=FRONTEND, env=env,
                 capture_output=True, text=True, timeout=190,
             )
             if browser.returncode:
@@ -129,7 +163,8 @@ def main() -> int:
             screen_result = json.loads(browser.stdout.strip().splitlines()[-1])
             if screen_result.get("result") != "PASS":
                 raise AssertionError("Browser did not confirm the action")
-            verified = verify_synthetic_database(database)
+            verified = (verify_synthetic_edit_database(database) if args.edit
+                        else verify_synthetic_database(database))
             print(json.dumps({
                 "result": "PASS", "scope": "isolated_synthetic_only",
                 "model_mode": "deterministic_fixture" if args.fixture else "live_provider",

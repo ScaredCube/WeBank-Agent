@@ -20,9 +20,13 @@ class FixtureTransferModel:
         phone = re.search(r"<PHONE_TMP_[^>]+>", user_message)
         if phone is None:
             raise RuntimeError("Chat route did not provide verified temporary phone reference")
+        # A safe edit test sends a fresh message requesting 2 yuan.
+        # Amount is derived from the CURRENT user instruction, not the old
+        # action or its confirmation token.
+        amount_fen = 200 if re.search(r"转账\s*2\s*元", user_message) else 100
         arguments = {
             "recipient_name": "模拟收款人",
-            "amount_fen": 100,
+            "amount_fen": amount_fen,
             "target_token": phone.group(),
             # Deliberately omit source_token: it must come from selected account.
         }

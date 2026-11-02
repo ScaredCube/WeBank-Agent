@@ -402,4 +402,5 @@
 ## 2026-11-02 · 金融操作草稿与授权闭环
 
 - [x] **T-RUNTIME-ACTION-EDIT-01 安全修改已准备动作**：聊天来源的待确认转账支持「修改信息」→ 服务端取消旧动作 → 原文及结构化对象引用恢复 → 重新发送；取消失败时保持原动作待核查。用户编辑过程中清空输入不丢失拖拽意图。65 项定向测试通过，生产构建通过。审查：`docs/agent-action-edit-review-2026-11-02.md`。
-- [ ] **T-RUNTIME-ACTION-EDIT-02 全链路演示验证**：以独立合成银行数据库核对原动作确实为 `cancelled`、新动作拥有独立 ID 与确认凭证，余额只能随新动作成功执行改变；再覆盖红色操作、新模型重准备及返回会话历史。
+- [x] **T-RUNTIME-ACTION-EDIT-02a 黄色转账取消→重准备→新执行的真实浏览器验收**：真实 Chrome + FastAPI + Agent Runtime + 合成 SQLite；取消 100 分旧动作后重新准备并完成 200 分新动作，仅一条新流水且旧动作未执行。`uv run python scripts/run_action_e2e.py --fixture --edit` PASS，原单笔 E2E PASS，后端相关 26 tests PASS。详见 `docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b 其他风险级别与真实模型稳定性**：红色二阶段模拟验证、真实 DeepSeek 多样本取消/重新准备、跨会话状态恢复与失败后用户编辑，仍需单独验证；不能由确定性黄色转账 E2E 证明。
