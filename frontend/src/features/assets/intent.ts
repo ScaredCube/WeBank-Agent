@@ -34,7 +34,9 @@ const ACTIONS: Partial<Record<`${AssetKind}:${AssetKind}`, IntentAction>> = {
 
 const PREFILL: Record<IntentAction, string> = {
   transfer: '800 元，饭钱',
-  internal_transfer: '500 元',
+  // Dragging selects the two accounts, never the transaction amount.
+  // A fabricated preset could be sent as a GREEN transfer without review.
+  internal_transfer: '转账金额：',
   collect: '800 元',
   purchase: '5000 元',
   redeem: '5000 元',

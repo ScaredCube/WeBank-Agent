@@ -17,6 +17,13 @@ describe('资产碰撞矩阵', () => {
     expect(resolveIntent(source, target)?.action).toBe(action)
   })
 
+  it('账户拖拽不会替用户编造可直接执行的金额', () => {
+    const result = resolveIntent(account(1), account(2))
+    expect(result?.action).toBe('internal_transfer')
+    expect(result?.prefill).toBe('转账金额：')
+    expect(result?.prefill).not.toMatch(/[0-9０-９]/)
+  })
+
   it('拒绝自拖、未定义组合与禁用实体', () => {
     expect(resolveIntent(account(1), account(1))).toBeNull()
     expect(resolveIntent(contact(1), contact(2))).toBeNull()
