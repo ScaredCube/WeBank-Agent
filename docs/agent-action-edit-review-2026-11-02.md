@@ -43,3 +43,23 @@ uv run python scripts/run_action_e2e.py --fixture
 **本轮实际结果**：编辑 E2E `PASS`；原单笔转账 E2E `PASS`；相关后端测试 `26 passed`。上一阶段的 React 定向测试 `65/65` 和构建通过记录仍有效，本轮未改产品前端源码。
 
 **尚未覆盖**：红色二阶段模拟验证、真实 DeepSeek 多次稳定性、跨设备待办恢复。不能由确定性 E2E 推断这些能力已经全部跑通。
+
+## 2026-11-02 · 红色转账编辑与验证 + 并行 E2E 隔离
+
+**目标**：在主线已经支持的资金操作体系内，验收风险等级为 RED 的模拟转账能安全完成「取消 1 元准备动作 → 保留对象上下文修改为 2 元 → 重新准备 → 验证 → 执行」，并检查错误验证码不能越过安全门禁。不增加新的风控策略或真实支付能力。
+
+**变更范围**：
+- `backend/scripts/run_action_e2e.py`：新增 `--red`（只能与 `--fixture --edit` 同用）；仅在启动器创建的临时合成银行进程中配置本地小时范围以触发 RED，银行正式风险规则不变。检查两笔操作的风险都是 RED，旧动作取消、新动作验证后完成；拒绝错误验证码并在审计中有验证失败记录。
+- `frontend/scripts/competition_action_edit_e2e.cjs`：RED 下先输入错误的模拟验证码并确认 HTTP 拒绝、执行 POST 为零；随后输入正确验证码，真实浏览器验证后自动执行，最终所有路径都仅有一次执行请求；检查业务响应 completed。
+- **多线程并行运行**：新增可选 `--backend-port` / `--frontend-port`，覆盖启动器临时环境的 CORS 与 Vite Proxy，并向本 E2E 浏览器传入独立的前端地址。严格拒绝端口已占用。此次发现 8022/5222 正由其他工作区服务使用，未关闭这些进程，改在独立的 8042/5242 运行。
+
+**复现命令**（从该 worktree 的 backend 目录）：
+
+```powershell
+uv run python scripts/run_action_e2e.py --fixture --edit --red --backend-port 8042 --frontend-port 5242
+uv run python scripts/run_action_e2e.py --fixture --edit --backend-port 8042 --frontend-port 5242
+```
+
+**验证**：RED 浏览器全链路 PASS；黄色编辑链路独立回归 PASS；后端 `test_verification.py`、`test_actions.py`、`test_transfers.py` 共 29 项 PASS。数据库精确核验两笔不同准备动作、首笔取消、第二笔完成、唯一 200 分交易流水；RED 验证审计包含 started / failed / succeeded。真实资金操作 0，未改生产库、Guard、Prompt、业务执行模块，也未修改 Generative UI 协作者的工作区。
+
+**仍待验证**：红色 `password_face` 专属业务、真实 DeepSeek 多样本，以及跨设备/会话失效恢复。本轮使用固定模型 Tool 调用，不应据此宣称模型在所有自然语言输入上稳定。默认隔离端口不变，仅在显式命令行指定时改用其他端口。

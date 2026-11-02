@@ -404,3 +404,6 @@
 - [x] **T-RUNTIME-ACTION-EDIT-01 安全修改已准备动作**：聊天来源的待确认转账支持「修改信息」→ 服务端取消旧动作 → 原文及结构化对象引用恢复 → 重新发送；取消失败时保持原动作待核查。用户编辑过程中清空输入不丢失拖拽意图。65 项定向测试通过，生产构建通过。审查：`docs/agent-action-edit-review-2026-11-02.md`。
 - [x] **T-RUNTIME-ACTION-EDIT-02a 黄色转账取消→重准备→新执行的真实浏览器验收**：真实 Chrome + FastAPI + Agent Runtime + 合成 SQLite；取消 100 分旧动作后重新准备并完成 200 分新动作，仅一条新流水且旧动作未执行。`uv run python scripts/run_action_e2e.py --fixture --edit` PASS，原单笔 E2E PASS，后端相关 26 tests PASS。详见 `docs/agent-action-edit-review-2026-11-02.md`。
 - [ ] **T-RUNTIME-ACTION-EDIT-02b 其他风险级别与真实模型稳定性**：红色二阶段模拟验证、真实 DeepSeek 多样本取消/重新准备、跨会话状态恢复与失败后用户编辑，仍需单独验证；不能由确定性黄色转账 E2E 证明。
+
+- [x] **T-RUNTIME-ACTION-EDIT-02b1 红色验证码门禁和资金编辑 E2E**：使用隔离模拟银行和真实 Chrome，在夜间风险测试环境下验证旧 RED 动作取消、新 RED 动作独立准备、错误验证码拒绝且不执行、正确验证码后恰好一次执行；数据库与审计断言通过。黄色同流程回归及后端 29 项定向测试 PASS。额外提供安全可选测试端口，不干扰正在运行的 GUI 并行服务。详见 `docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b2 剩余集成验证**：补真实模型多样本、红色 password_face 以及 GUI 并行线的历史可信结果恢复集成。

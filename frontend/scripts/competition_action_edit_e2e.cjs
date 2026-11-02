@@ -1,6 +1,6 @@
 /* Isolated browser QA for a simulated bank. Credentials and tokens are never logged. */
 const {chromium}=require('../node_modules/playwright')
-const BASE='http://127.0.0.1:5222'
+const BASE=process.env.BANK_AGENT_ACTION_E2E_BASE || 'http://127.0.0.1:5222'
 function requireTrue(condition, reason){if(!condition) throw Error(reason)}
 async function login(page){
  await page.goto(BASE+'/login',{waitUntil:'domcontentloaded'})
@@ -15,6 +15,10 @@ async function run(){
  try{
   const context=await browser.newContext({viewport:{width:1365,height:850},reducedMotion:'reduce'})
   const page=await context.newPage()
+  let executedRequests=0
+  page.on('request',request=>{
+    if(request.method()==='POST'&&/\/api\/transfers\/\d+\/execute$/.test(request.url())) executedRequests++
+  })
   page.on('pageerror',e=>errors.push(e.message))
   await login(page)
   // The new home creates its conversation lazily on first message send.
@@ -51,14 +55,30 @@ async function run(){
   await page.getByRole('button',{name:'停止接收'}).waitFor({state:'hidden',timeout:90000})
   await dialog.waitFor({timeout:25000})
   requireTrue((await dialog.innerText()).includes('¥2.00'),'Edited amount missing from new action')
-  await dialog.getByRole('button',{name:'确认',exact:true}).click()
-  await dialog.getByText('已确认，操作尚未执行。').waitFor({timeout:15000})
-  const execution=page.waitForResponse(r=>r.request().method()==='POST'&&/\/api\/transfers\/\d+\/execute$/.test(r.url()))
-  await dialog.getByRole('button',{name:'执行操作'}).click()
+  const red = process.env.BANK_AGENT_ACTION_E2E_RED === '1'
+  const execution=page.waitForResponse(r=>r.request().method()==='POST'&&/\/api\/transfers\/\d+\/execute$/.test(r.url()),{timeout:20000})
+  if(red){
+    await dialog.getByRole('button',{name:'开始模拟验证'}).click()
+    // An incorrect code must fail closed without executing the prepared action.
+    await dialog.getByLabel('模拟验证码').fill('000000')
+    const badCode=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().includes('/verification/verify'),{timeout:12000})
+    await dialog.getByRole('button',{name:'验证',exact:true}).click()
+    requireTrue((await badCode).status()>=400,'Invalid demo code unexpectedly accepted')
+    await dialog.getByRole('button',{name:'验证',exact:true}).waitFor({state:'visible'})
+    requireTrue(executedRequests===0,'Transfer executed after invalid code')
+    await dialog.getByLabel('模拟验证码').fill('123456')
+    await dialog.getByRole('button',{name:'验证',exact:true}).click()
+  } else {
+    await dialog.getByRole('button',{name:'确认',exact:true}).click()
+    await dialog.getByText('已确认，操作尚未执行。').waitFor({timeout:15000})
+    await dialog.getByRole('button',{name:'执行操作'}).click()
+  }
   const completed=await execution
   requireTrue(completed.status()===200,'Execution HTTP did not succeed')
-  const firstResult=await completed.json()
+  const executionResult=await completed.json()
+  requireTrue(executionResult.status==='completed','Execution response was not completed')
   await dialog.getByText('模拟转账已完成').waitFor({timeout:25000})
+  requireTrue(executedRequests===1,'Expected exactly one execution request')
   requireTrue(errors.length===0,'Browser error')
   console.log(JSON.stringify({result:'PASS',synthetic:true,
     selected_account:true,verified_tool:true,

@@ -5,6 +5,7 @@ occupied ports, uses fresh ephemeral secrets and never touches existing bank dat
 """
 import argparse
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import shutil
@@ -53,7 +54,7 @@ def verify_synthetic_database(database: Path) -> dict:
 
 
 
-def verify_synthetic_edit_database(database: Path) -> dict:
+def verify_synthetic_edit_database(database: Path, *, risk_level: str = 'yellow') -> dict:
     """Old action must be cancelled; only the new 2-yuan transfer is executed."""
     with closing(sqlite3.connect(database)) as db:
         accounts = db.execute("SELECT name,balance_fen FROM account ORDER BY id").fetchall()
@@ -71,11 +72,15 @@ def verify_synthetic_edit_database(database: Path) -> dict:
     assert len(transfers) == 2, "Expected exactly two independent prepared actions"
     first, second = transfers
     assert first[0] == "pending" and first[1] == 100 and first[2] is None
-    assert first[3:] == ("cancelled", "yellow"), "First action was not cancelled"
+    assert first[3:] == ("cancelled", risk_level), "First action was not cancelled"
     assert second[0] == "completed" and second[1] == 200 and second[2] is not None
-    assert second[3:] == ("completed", "yellow"), "Edited action not completed"
+    assert second[3:] == ("completed", risk_level), "Edited action not completed"
     assert ledger == [(200,)], "Old cancelled transfer must have no ledger entry"
-    assert "action_cancelled" in events and "action_confirmed" in events
+    assert "action_cancelled" in events
+    assert ("verification_succeeded" if risk_level == 'red' else "action_confirmed") in events
+    if risk_level == 'red':
+        assert 'verification_started' in events, 'Red action did not start verification'
+        assert 'verification_failed' in events, 'Incorrect code was not rejected'
     assert "transfer_completed" in events
     return {"actions": 2, "cancelled": 1, "completed": 1,
             "only_executed_amount_fen": 200, "ledger_rows": len(ledger),
@@ -90,11 +95,17 @@ def main() -> int:
                       help="Deterministic model + real Agent/Chrome/synthetic SQLite")
     parser.add_argument("--diagnose", action="store_true",
                         help="Live-only sanitized tool-shape trace; no argument values")
+    parser.add_argument('--backend-port', type=int, default=BACKEND_PORT)
+    parser.add_argument('--frontend-port', type=int, default=FRONTEND_PORT)
+    parser.add_argument('--red', action='store_true',
+                        help='Test-only simulated night-time red transfer verification')
     parser.add_argument('--edit', action='store_true',
                         help='Exercise cancel, edit and prepare a new synthetic transfer')
     args = parser.parse_args()
     if args.edit and not args.fixture:
         parser.error('--edit currently requires --fixture')
+    if args.red and not (args.fixture and args.edit):
+        parser.error('--red requires --fixture --edit')
     browser_entry = (FRONTEND / 'scripts' / 'competition_action_edit_e2e.cjs') if args.edit else BROWSER
     if args.diagnose and not args.live:
         parser.error("--diagnose requires --live")
@@ -103,15 +114,27 @@ def main() -> int:
     node = shutil.which("node")
     if not node or not (FRONTEND / "node_modules" / "vite" / "bin" / "vite.js").exists():
         raise SystemExit("Frontend Node dependencies unavailable")
-    if not all(_free(port) for port in (BACKEND_PORT, FRONTEND_PORT)):
+    if any(not (1024 <= port <= 65535) for port in (args.backend_port, args.frontend_port)) or args.backend_port == args.frontend_port:
+        parser.error('isolation ports must be distinct and within 1024..65535')
+    if not all(_free(port) for port in (args.backend_port, args.frontend_port)):
         raise SystemExit("Dedicated isolated ports occupied")
     processes = []
     try:
         with TemporaryDirectory(prefix="bank-agent-action-e2e-", ignore_cleanup_errors=True) as scratch:
             database = Path(scratch) / "only-synthetic.sqlite"
             env = _create_env(database)
+            env['CORS_ORIGINS'] = f'http://127.0.0.1:{args.frontend_port}'
+            env['VITE_API_PROXY_TARGET'] = f'http://127.0.0.1:{args.backend_port}'
+            env['BANK_AGENT_ACTION_E2E_BASE'] = f'http://127.0.0.1:{args.frontend_port}'
             if args.fixture:
                 env["LLM_API_KEY"] = ""
+            if args.red:
+                # Force only the ephemeral test process into its red night window.
+                # Runs quickly; fail closed if the local hour changes midway.
+                hour = datetime.now(timezone(timedelta(hours=8))).hour
+                env['RISK_NIGHT_START_HOUR'] = str(hour)
+                env['RISK_NIGHT_END_HOUR'] = str((hour + 1) % 24)
+                env['BANK_AGENT_ACTION_E2E_RED'] = '1'
             if args.diagnose:
                 env["BANK_AGENT_ACTION_TRACE"] = str(Path(scratch) / "shape.jsonl")
             backend_entry = ("scripts.action_fixture_server:app" if args.fixture
@@ -119,22 +142,22 @@ def main() -> int:
                              else "app.main:app")
             backend = subprocess.Popen(
                 [sys.executable, "-m", "uvicorn", backend_entry,
-                 "--host", "127.0.0.1", "--port", str(BACKEND_PORT),
+                 "--host", "127.0.0.1", "--port", str(args.backend_port),
                  "--log-level", "error", "--no-access-log"],
                 cwd=BACKEND, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             processes.append(backend)
             vite = subprocess.Popen(
                 [node, str(FRONTEND / "node_modules" / "vite" / "bin" / "vite.js"),
-                 "--host", "127.0.0.1", "--port", str(FRONTEND_PORT), "--strictPort"],
+                 "--host", "127.0.0.1", "--port", str(args.frontend_port), "--strictPort"],
                 cwd=FRONTEND, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             processes.append(vite)
-            _await_http(f"http://127.0.0.1:{BACKEND_PORT}/api/health", processes=processes)
-            _await_http(f"http://127.0.0.1:{FRONTEND_PORT}/login", processes=processes)
+            _await_http(f"http://127.0.0.1:{args.backend_port}/api/health", processes=processes)
+            _await_http(f"http://127.0.0.1:{args.frontend_port}/login", processes=processes)
             import urllib.request
             with urllib.request.urlopen(
-                f"http://127.0.0.1:{BACKEND_PORT}/api/health", timeout=5
+                f"http://127.0.0.1:{args.backend_port}/api/health", timeout=5
             ) as response:
                 model = json.load(response).get("llm", {})
             expected_mode = "mock" if args.fixture else "openai"
@@ -163,7 +186,7 @@ def main() -> int:
             screen_result = json.loads(browser.stdout.strip().splitlines()[-1])
             if screen_result.get("result") != "PASS":
                 raise AssertionError("Browser did not confirm the action")
-            verified = (verify_synthetic_edit_database(database) if args.edit
+            verified = (verify_synthetic_edit_database(database, risk_level='red' if args.red else 'yellow') if args.edit
                         else verify_synthetic_database(database))
             print(json.dumps({
                 "result": "PASS", "scope": "isolated_synthetic_only",
