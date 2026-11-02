@@ -22,7 +22,7 @@ def test_snapshot_covers_all_effective_prompt_roles_and_validated_intents():
         "agent", "guard", "recovery", "tools",
         "reply_policy", "recovery_policy", "read_completion", "grounded_summary",
         "compound_read_summary", "read_result_recovery", "scope_contract", "snapshot_contract",
-        "chat_request_recovery", "agent_loop",
+        "chat_request_recovery", "agent_loop", "tool_executor",
         "agent:transfer", "agent:internal_transfer", "agent:collect",
         "agent:purchase", "agent:redeem", "agent:convert",
     }

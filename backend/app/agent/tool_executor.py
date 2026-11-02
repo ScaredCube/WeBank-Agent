@@ -100,14 +100,22 @@ class ToolExecutor:
             and (spec is None or spec.name != required_intent_tool(context.intent_action))
         )
         events: list[ToolClientEvent] = []
+        sensitive_recipient_name = False
         try:
             args = json.loads(function["arguments"])
+            if (spec is not None and spec.name == "prepare_transfer"
+                    and isinstance(args, dict)
+                    and isinstance(args.get("recipient_name"), str)):
+                sensitive_recipient_name = mask_value(args["recipient_name"]) != args["recipient_name"]
             if (not isinstance(args, dict) or "session" in args or "user_id" in args
                     or mask_value(args) != args or mask_text(call["id"]) != call["id"]):
                 raise ValueError("invalid arguments")
         except (ValueError, TypeError):
             rejection_reason = "invalid_arguments"
-            result = {"ok": False, "data": None, "error": "查询参数无效"}
+            result = {"ok": False, "data": None,
+                      "error": ("收款人姓名不能包含手机号或其他敏感号码；请只填写姓名或称呼，"
+                                "使用服务端提供的 target_token 引用传递手机号。"
+                                if sensitive_recipient_name else "查询参数无效")}
         else:
             argument_error = validate_tool_arguments(spec, args)
             if argument_error is None and intent_mismatch:
@@ -162,6 +170,14 @@ class ToolExecutor:
                     args["source_token"] = context.verified_account_token
                     args["recipient_contact_token"] = context.verified_contact_token
                     args["recipient_name"] = context.verified_recipient_name
+
+            if (argument_error is None and spec is not None
+                    and spec.name == "prepare_transfer"
+                    and context.verified_account_token is not None):
+                # The user's current explicit account selection is owned and
+                # validated by Chat. Rebind it here rather than expecting the
+                # model to copy an opaque token, including phone-recipient turns.
+                args["source_token"] = context.verified_account_token
 
             if (argument_error is None and context.context_readonly_only and spec is not None
                     and spec.execution == ToolExecutionMode.PREPARE):

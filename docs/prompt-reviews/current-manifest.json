@@ -1,5 +1,5 @@
 {
-  "source_revision": "5befdd913552f7f919a7d264f7c5a21c51221ae4",
+  "source_revision": "3a51181d41c7be88e245ebbe84ccbb07151be126",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
@@ -15,7 +15,7 @@
     "agent:purchase": "agent:293f98322a40e2ce",
     "agent:redeem": "agent:99b476628139c9cc",
     "agent:convert": "agent:67b9da4bc7f8c6ba",
-    "tools": "tools:2b40e468b5c5436a",
+    "tools": "tools:ccd9da728d8535d0",
     "reply_policy": "reply_policy:151e5a792f70e031",
     "recovery_policy": "recovery_policy:1614c9f9d00ace67",
     "read_completion": "read_completion:6e2412d31ecbbedc",
@@ -23,6 +23,7 @@
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
     "agent_loop": "agent_loop:bd9b3523b46c09a5",
+    "tool_executor": "tool_executor:7fe56c120f9de3d5",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
     "snapshot_contract": "snapshot_contract:2f643e31a1138fe5",
     "chat_request_recovery": "chat_request_recovery:372925108ceed90b"

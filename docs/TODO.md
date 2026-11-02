@@ -369,3 +369,9 @@
 
 - [x] **T-RUNTIME-UI-E2E-02a 黄色确认/红色验证/断线状态恢复（P1）**：修正红色验证后自动执行的误导文案；确认已授权、原动作有效的黄色执行在断线后可经状态 GET 人工按原编号继续，已完成则不能重复执行。Playwright Chrome 3 项、操作组件 28 项、服务端风险与幂等 44 项通过；前端生产构建成功、lint 0 错误（7 条既有警告）。完整 Before/After 与 UX 风险见 `docs/prompt-reviews/a11ff19-action-recovery-decision.md`。
 - [ ] **T-RUNTIME-UI-E2E-02b 真实模拟银行操作一体化浏览器验收（P1）**：从 Agent 准备操作到实际隔离 SQLite 的服务端确认、验证、执行、审计、刷新及跨设备恢复，核验原编号只执行一次；严格禁止正式资金操作。当前 02a 使用真实 Chrome + 模拟网络响应验证 UI，后端幂等以单独服务端测试证明，仍需一条真实端到端操作场景。
+
+## 2026-11-02 · Agent → Chrome → 合成银行实际执行联调
+
+- [x] **T-RUNTIME-UI-E2E-02b · 可复现的模拟转账工程闭环（P1）**：新增 `run_action_e2e.py --fixture`，通过确定性 Tool Call 驱动真实 Agent Runtime / FastAPI / Chrome / 隔离 SQLite。选账户、待确认、用户确认、执行成功，精确核验两账户余额、一条 1 元模拟交易和确认/完成审计。修复已选择账户但模型遗漏/伪造 `source_token` 的服务端绑定问题。完整审查见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
+- [x] **T-RUNTIME-UI-E2E-02c · 真实供应商 Tool 调用契约问题定位与修复（P0）**：脱敏日志确认 DeepSeek 把手机号混入 `recipient_name`。完善转账 Tool Schema 的姓名/临时号码引用区分，并添加不包含明文的纠错提示；隐私校验和 Guard 不变。修正后真实 DeepSeek → Agent → Chrome → 隔离 SQLite 完整 1 元模拟转账单次验收 PASS，确定性 Fixture 同样 PASS。见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02d · 真实模型多样化金融操作稳定性（P1）**：增加跨多次样本、红色验证及同编号异常恢复的真实合成数据库 E2E 覆盖；记录成功率与失败阶段，不以一次成功推断稳定性或放宽 Guard。

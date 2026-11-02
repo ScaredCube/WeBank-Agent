@@ -30,11 +30,13 @@ REVIEW_PATHS = (
     "backend/app/agent/read_result_recovery.py",
     "backend/app/agent/loop.py",
     "backend/app/agent/guard.py",
+    "backend/app/agent/tool_executor.py",
     "backend/app/services/intent_service.py",
     "backend/app/services/chat_turn.py",
     "backend/app/services/chat_messages.py",
     "backend/app/schemas/tool_results.py",
     "backend/app/tools/register.py",
+    "backend/app/tools/transfer_tools.py",
     "backend/app/tools/account_tools.py",
     "backend/app/tools/subscription_tools.py",
     "backend/app/services/subscription_service.py",
@@ -126,6 +128,7 @@ def runtime_versions() -> dict[str, str]:
         ("compound_read_summary", "backend/app/agent/compound_read_summary.py"),
         ("read_result_recovery", "backend/app/agent/read_result_recovery.py"),
         ("agent_loop", "backend/app/agent/loop.py"),
+        ("tool_executor", "backend/app/agent/tool_executor.py"),
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]
