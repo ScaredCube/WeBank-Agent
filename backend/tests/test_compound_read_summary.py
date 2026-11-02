@@ -186,7 +186,9 @@ def test_chat_partial_tool_result_does_not_claim_both_goals_completed(
         headers=auth_headers,
         json={"content": REQUEST},
     ))
-    assert model.calls == 2
+    # One bounded extra turn is now allowed to complete the missing goal.
+    # This model declines; the final answer must still disclose the gap.
+    assert model.calls == 3
     reply = seen[-1]["message"]["content"]
     assert "尚未完成可核验的周期性扣费识别" in reply
     assert "都完成了" not in reply

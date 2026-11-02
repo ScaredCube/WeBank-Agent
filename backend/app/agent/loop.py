@@ -8,7 +8,9 @@ from typing import Any
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
-from app.agent.compound_read_summary import summarize_transaction_subscription_review
+from app.agent.compound_read_summary import (
+    missing_read_goal_for_retry, summarize_transaction_subscription_review,
+)
 from app.agent.financial_summary import (
     incomplete_bill_comparison, summarize_bill_comparison,
 )
@@ -75,6 +77,7 @@ class AgentLoop:
         )
         tool_results: list[tuple[str, dict]] = []
         prior_calls: list[str] = []
+        continuation_target: str | None = None
 
         try:
             for round_index in range(MAX_TOOL_ROUNDS + 1):
@@ -86,6 +89,28 @@ class AgentLoop:
                     if chunk.tool_calls:
                         tool_calls = chunk.tool_calls
                 if not tool_calls:
+                    # Allow one model-directed chance to finish an explicit,
+                    # unattempted second read goal. No extra read permission,
+                    # automatic Tool execution, or unlimited retry is granted.
+                    missing_goal = missing_read_goal_for_retry(
+                        tool_results, user_request=original_request or "",
+                    )
+                    if (missing_goal is not None and continuation_target is None
+                            and intent_action is None
+                            and round_index < MAX_TOOL_ROUNDS - 1):
+                        continuation_target = missing_goal
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                "服务端只读任务覆盖检查：用户明确请求最近交易查询和疑似订阅识别。"
+                                f"已有可信结果只覆盖其中一项，尚未尝试的工具为 {missing_goal}。"
+                                "如有足够条件，请优先调用这个只读工具完成剩余目标。"
+                                "遵守现有权限与账户范围，不得执行写操作、不得重复已成功的查询。"
+                                "如无法查询或需要用户选择账户，请正常解释尚未完成的目标。"
+                                "不得把疑似周期扣费直接断言成重复订阅。"
+                            ),
+                        })
+                        continue
                     if tool_results:
                         # Calculator-only educational turns may retain a safe
                         # explanation. Account, payment and other bank Tool
@@ -194,6 +219,25 @@ class AgentLoop:
                        or not isinstance(call["function"].get("arguments"), str)
                        for call in tool_calls):
                     yield AgentEvent("error", {"message": "模型返回的工具调用格式无效。"})
+                    return
+                if (continuation_target is not None and (
+                        len(tool_calls) != 1
+                        or tool_calls[0]["function"]["name"] != continuation_target)):
+                    # The extra turn is authorized only to complete the single
+                    # remaining READ goal. Do not execute unrelated tools.
+                    partial = summarize_transaction_subscription_review(
+                        tool_results, user_request=original_request or "",
+                    )
+                    if partial is not None:
+                        answer = partial + "\n\n" + "\n\n".join(
+                            render_tool_result(name, result)
+                            for name, result in tool_results
+                        )
+                        yield AgentEvent("delta", {"text": answer})
+                    else:
+                        yield AgentEvent("error", {
+                            "message": "剩余查询未完成，请重试或缩小请求范围。",
+                        })
                     return
                 messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
                                  "tool_calls": mask_value(tool_calls)})

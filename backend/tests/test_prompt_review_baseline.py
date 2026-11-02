@@ -21,7 +21,7 @@ def test_snapshot_covers_all_effective_prompt_roles_and_validated_intents():
     assert set(actual) == {
         "agent", "guard", "recovery", "tools",
         "reply_policy", "recovery_policy", "read_completion", "grounded_summary",
-        "compound_read_summary", "scope_contract",
+        "compound_read_summary", "scope_contract", "agent_loop",
         "agent:transfer", "agent:internal_transfer", "agent:collect",
         "agent:purchase", "agent:redeem", "agent:convert",
     }

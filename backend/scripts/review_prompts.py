@@ -120,6 +120,7 @@ def runtime_versions() -> dict[str, str]:
         ("read_completion", "backend/app/agent/read_completion.py"),
         ("grounded_summary", "backend/app/agent/financial_summary.py"),
         ("compound_read_summary", "backend/app/agent/compound_read_summary.py"),
+        ("agent_loop", "backend/app/agent/loop.py"),
     ):
         source = (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
         versions[label] = label + ":" + sha256(source.encode("utf-8")).hexdigest()[:16]
