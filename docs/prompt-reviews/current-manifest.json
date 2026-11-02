@@ -1,5 +1,5 @@
 {
-  "source_revision": "c5110d01919bc81eeb75fe0247a63a6786d12191",
+  "source_revision": "e5e1ab1ad048403d14aacc06695dea0be7a0db22",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
@@ -24,10 +24,11 @@
     "grounded_summary": "grounded_summary:914aba9adc782878",
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
-    "agent_loop": "agent_loop:db2013b79837260c",
+    "read_goal_plan": "read_goal_plan:2f916b286bed159c",
+    "agent_loop": "agent_loop:cbd48c90a8dcdab4",
     "tool_executor": "tool_executor:57745137ae0a760d",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
-    "snapshot_contract": "snapshot_contract:df28150fd22c66a8",
+    "snapshot_contract": "snapshot_contract:beadee78807f200f",
     "chat_request_recovery": "chat_request_recovery:fa3094688f65cb35"
   }
 }

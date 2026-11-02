@@ -55,6 +55,7 @@ class ChatTurn:
     view_selection: dict | None = None
     resumed_read_version: datetime | None = None
     resumed_read_month: str | None = None
+    resumed_read_kind: str | None = None
     prior_bill_followup_summary: str | None = None
 
 
@@ -86,6 +87,7 @@ async def stream_chat_turn(
     trusted_bill: dict | None = None
     trusted_cards: dict | None = None
     trusted_results: list[dict] = []
+    verified_read_goals: set[str] = set()
     ui_results: list[dict] = []
     saved_message: dict | None = None
     action_pending = False
@@ -131,7 +133,13 @@ async def stream_chat_turn(
                 # The model/tool may already have completed a side effect.
                 # Never mark an undelivered SSE stream as completed or retry it.
                 raise asyncio.CancelledError
-            if event.type == "delta":
+            if event.type == "read_goal_coverage":
+                goals = event.data.get("goals")
+                if (isinstance(goals, list) and set(goals) == {
+                        "get_monthly_bill", "list_recent_transactions",
+                        "detect_subscriptions"}):
+                    verified_read_goals.update(goals)
+            elif event.type == "delta":
                 text = event.data["text"]
                 collected.append(text)
                 yield encode({"type": "delta", "text": text})
@@ -286,7 +294,9 @@ async def stream_chat_turn(
                 with session_scope() as task_session:
                     mark_task_completed(task_session, conversation_id=conversation_id,
                                         user_id=user_id, resumed_version=turn.resumed_read_version,
-                                        verified_months=verified_months, expected_month=expected_month)
+                                        verified_months=verified_months, expected_month=expected_month,
+                                        bundle_verified=(turn.resumed_read_kind == 'read_bundle'
+                                            and len(verified_read_goals) == 3))
             except Exception:
                 logger.warning("pending read task finalization failed")
         yield encode({"type": "done", "message": message})

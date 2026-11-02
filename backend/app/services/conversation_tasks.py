@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.models import ConversationTask
+from app.agent.read_goal_plan import build_read_goal_plan
 
 _READ_CUES = ("账单", "收支", "消费", "收入", "支出")
 _QUERY_CUES = ("查", "看", "分析", "统计", "了解", "帮我", "给我")
@@ -34,6 +35,8 @@ class ReadGoal(NamedTuple):
     @property
     def model_goal(self) -> str:
         month = self.month or "本月"
+        if self.kind == "read_bundle":
+            return f"查询所选账户{month}的月度账单、最近交易流水，并识别疑似重复订阅"
         if self.kind == "bill_analysis":
             return f"查询并分析所选账户{month}的收支与消费分类"
         return f"查询所选账户{month}的月度账单"
@@ -49,7 +52,9 @@ def classify_pending_read_goal(text: str) -> ReadGoal | None:
         return None
     match = _MONTH.search(text)
     month = f"{match.group(1)}-{int(match.group(2)):02d}" if match else None
-    kind = "bill_analysis" if any(w in text for w in ("分析", "收支", "消费分类", "趋势")) else "bill_query"
+    kind = ("read_bundle" if build_read_goal_plan(text) is not None
+            else "bill_analysis" if any(w in text for w in ("分析", "收支", "消费分类", "趋势"))
+            else "bill_query")
     return ReadGoal(kind=kind, month=month)
 
 
@@ -93,7 +98,8 @@ def remember_pending_task(session: Session, *, conversation_id: int,
 
 def mark_task_completed(session: Session, *, conversation_id: int, user_id: int,
                         resumed_version: datetime, verified_months: set[str],
-                        expected_month: str) -> bool:
+                        expected_month: str,
+                        bundle_verified: bool = False) -> bool:
     """Complete only the exact resumed read task and its matching saved bill.
 
     A concurrent/newer pending goal, unrelated lookup, or wrong-month Tool result
@@ -103,7 +109,8 @@ def mark_task_completed(session: Session, *, conversation_id: int, user_id: int,
     if (task is None or task.user_id != user_id or task.status != "needs_account"
             or task.updated_at.replace(tzinfo=timezone.utc) !=
             resumed_version.replace(tzinfo=timezone.utc)
-            or expected_month not in verified_months):
+            or expected_month not in verified_months
+            or (task.kind == "read_bundle" and not bundle_verified)):
         return False
     task.status = "completed"
     task.updated_at = utcnow()

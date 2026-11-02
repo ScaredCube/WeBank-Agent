@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agent.guard import GuardProvider, get_guard
 from app.agent.goal_completion import missing_bill_goal
+from app.agent.read_goal_plan import build_read_goal_plan
 from app.agent.bill_insights import summarize_bill_insights
 from app.agent.llm import LLMProvider, get_llm
 from app.agent.prompt_assembly import assemble_agent_prompt
@@ -98,9 +99,15 @@ class AgentLoop:
         prior_calls: list[str] = []
         continuation_target: str | None = None
         attempted_nonread = False
+        read_plan = build_read_goal_plan(original_request or "")
+        plan_nudges = 0
+        plan_progress_len = 0
+        # An explicit three-part read may need two extra bounded clarification
+        # rounds when the model stops after each completed Tool call.
+        round_limit = MAX_TOOL_ROUNDS + (2 if read_plan is not None else 0)
 
         try:
-            for round_index in range(MAX_TOOL_ROUNDS + 1):
+            for round_index in range(round_limit + 1):
                 tool_calls: list[dict[str, Any]] | None = None
                 content: list[str] = []
                 async for chunk in self.llm.stream(messages, tools=registry.definitions()):
@@ -116,11 +123,17 @@ class AgentLoop:
                         tool_results, user_request=original_request or "",
                     ) or missing_bill_goal(
                         tool_results, user_request=original_request or "",
-                    ))
-                    if (missing_goal is not None and continuation_target is None
+                    ) or (read_plan.next_unattempted(tool_results) if read_plan else None))
+                    can_nudge = (continuation_target is None or (
+                        read_plan is not None and plan_nudges < 2
+                        and len(tool_results) > plan_progress_len))
+                    if (missing_goal is not None and can_nudge
                             and intent_action is None
-                            and round_index < MAX_TOOL_ROUNDS - 1):
+                            and round_index < round_limit - 1):
                         continuation_target = missing_goal
+                        if read_plan is not None:
+                            plan_nudges += 1
+                            plan_progress_len = len(tool_results)
                         messages.append({
                             "role": "system",
                             "content": (
@@ -176,10 +189,13 @@ class AgentLoop:
                         missing_evidence = incomplete_bill_comparison(
                             tool_results, original_request or "",
                         )
+                        plan_summary = read_plan.report(tool_results) if read_plan else None
                         compound_summary = summarize_transaction_subscription_review(
                             tool_results, user_request=original_request or "",
                         )
-                        if compound_summary is not None:
+                        if plan_summary is not None:
+                            summary = plan_summary
+                        elif compound_summary is not None:
                             # The summary states coverage and evidence limits.
                             # Preserve the exact verified transaction details below.
                             summary = compound_summary + "\n\n" + "\n\n".join(
@@ -204,6 +220,11 @@ class AgentLoop:
                                 verified_results=tuple(tool_results),
                                 fallback_text=summary,
                             ))
+                        if (read_plan is not None and plan_summary is not None
+                                and len(read_plan.verified(tool_results)) == 3):
+                            yield AgentEvent("read_goal_coverage", {
+                                "goals": list(read_plan.verified(tool_results)),
+                            })
                         messages.append({"role": "assistant", "content": summary})
                         yield AgentEvent("delta", {"text": summary})
                     else:
@@ -243,7 +264,7 @@ class AgentLoop:
                         messages.append({"role": "assistant", "content": text})
                         yield AgentEvent("delta", {"text": text})
                     return
-                if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
+                if round_index == round_limit or len(tool_calls) > MAX_CALLS_PER_ROUND:
                     yield AgentEvent("error", {"message": "查询步骤过多，请简化请求后重试。"})
                     return
                 if any(not isinstance(call, dict) or not isinstance(call.get("id"), str)
@@ -259,9 +280,10 @@ class AgentLoop:
                         or tool_calls[0]["function"]["name"] != continuation_target)):
                     # The extra turn is authorized only to complete the single
                     # remaining READ goal. Do not execute unrelated tools.
-                    partial = summarize_transaction_subscription_review(
-                        tool_results, user_request=original_request or "",
-                    )
+                    partial = ((read_plan.report(tool_results) if read_plan else None)
+                               or summarize_transaction_subscription_review(
+                                   tool_results, user_request=original_request or "",
+                               ))
                     if partial is not None:
                         answer = partial + "\n\n" + "\n\n".join(
                             render_tool_result(name, result)
@@ -271,6 +293,17 @@ class AgentLoop:
                     else:
                         yield AgentEvent("error", {
                             "message": "剩余查询未完成，请重试或缩小请求范围。",
+                        })
+                    return
+                if (read_plan is not None and any(
+                        call["function"]["name"] not in read_plan.goals
+                        for call in tool_calls)):
+                    partial = read_plan.report(tool_results)
+                    if partial is not None:
+                        yield AgentEvent("delta", {"text": partial})
+                    else:
+                        yield AgentEvent("error", {
+                            "message": "当前请求仅允许执行已明确提出的只读查询。",
                         })
                     return
                 messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
@@ -301,6 +334,9 @@ class AgentLoop:
                             raise RuntimeError("Nonterminal Tool execution had no observation")
                         observation = outcome.observation
                         tool_results.append((name, observation))
+                        if (read_plan is not None and name == continuation_target
+                                and observation.get("ok") is True):
+                            continuation_target = None
                         prior_calls.append(
                             f"{name}:{'success' if observation.get('ok') else 'denied'}"
                         )
@@ -314,9 +350,10 @@ class AgentLoop:
                 if executed_count == 0:
                     # Model repeated only already verified read calls. Do not
                     # spend the remaining rounds on a no-progress loop.
-                    partial = verified_partial_read_reply(
-                        tool_results, user_request=original_request or "",
-                    )
+                    partial = ((read_plan.report(tool_results) if read_plan else None)
+                               or verified_partial_read_reply(
+                                   tool_results, user_request=original_request or "",
+                               ))
                     if partial is not None:
                         yield AgentEvent("delta", {"text": partial})
                     else:
@@ -327,9 +364,9 @@ class AgentLoop:
                 # When the requested verified read-only results are already complete,
                 # the server can finish deterministically. A further model round may
                 # otherwise produce redundant/unsafe tool calls without new value.
-                final_readonly_text = completed_readonly_summary(
+                final_readonly_text = (None if read_plan else completed_readonly_summary(
                     history, tool_results, user_request=original_request,
-                )
+                ))
                 if final_readonly_text is not None:
                     final_readonly_text = (summarize_bill_insights(
                         tool_results, original_request or "") or final_readonly_text)
@@ -345,9 +382,10 @@ class AgentLoop:
             # The provider or a later READ tool can fail after earlier tools
             # succeeded. Preserve those verified observations; never invent
             # the missing step or claim that a PREPARE operation succeeded.
-            partial = (verified_partial_read_reply(
-                tool_results, user_request=original_request or "",
-            ) if not attempted_nonread else None)
+            partial = (((read_plan.report(tool_results) if read_plan else None)
+                       or verified_partial_read_reply(
+                           tool_results, user_request=original_request or "",
+                       )) if not attempted_nonread else None)
             if partial is not None:
                 yield AgentEvent("delta", {"text": partial})
             else:

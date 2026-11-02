@@ -137,3 +137,38 @@ npx playwright test e2e/real-fastapi-disconnect.browser.cjs --workers=1
 ```
 
 The fixture is bound to 127.0.0.1 and is for controlled development tests only. This establishes correctness for the tested cancellation boundary, **not** a general exactly-once distributed transaction guarantee.
+
+## Multi-goal read-only plan (three explicit goals)
+
+This checkpoint adds a narrowly bounded, typed `ReadGoalPlan` for a user
+who **explicitly** requests monthly bills, recent transactions and suspected
+recurring-payment detection together. The Runtime compares each actual Tool
+result with the plan instead of taking a model-written "all done" as proof.
+
+- Only these three read-only tools can participate. The model still proposes
+  each call; the existing ToolExecutor revalidates account ownership and
+  risk, and the plan will not execute a different Tool during continuation.
+- A successful but incomplete result permits at most **two** extra targeted
+  model nudges. A failed Tool is not silently retried and a model refusing
+  to continue produces a grounded partial report.
+- A completed report separates monthly bill aggregates, a limited recent
+  transaction list and a broader suspected-recurring-payment scan. It never
+  equates suspected recurrence with fraud, a confirmed duplicate charge,
+  or cancellation of a subscription.
+- The existing `ConversationTask` row can now retain a canonical
+  `read_bundle` goal while an account is missing. When the user selects an
+  account and continues, the full three-part goal is restored.
+- A resumed bundle becomes `completed` only after **all three** Tool
+  outcomes are verified and the matching bill is saved. A partial bill alone
+  is insufficient. This changes no database tables.
+- Other tasks, mixed requests containing financial actions, two-goal tasks
+  and general-purpose planning keep their previous behavior. Existing bank
+  authorization and confirmation boundaries are unchanged.
+
+Tests include model premature completion, two bounded continuations,
+attempted switch to a write Tool, partial/failing Tool evidence, missing
+account then multi-goal resume, and rejection of premature task completion.
+
+**Scope boundary:** This is a deliberately small, typed implementation of
+multi-step read progress, not a generic user-directed workflow engine. Other
+read combinations and persistent per-step snapshots remain future work.

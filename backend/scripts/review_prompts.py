@@ -30,6 +30,7 @@ REVIEW_PATHS = (
     "backend/app/agent/financial_summary.py",
     "backend/app/agent/compound_read_summary.py",
     "backend/app/agent/read_result_recovery.py",
+    "backend/app/agent/read_goal_plan.py",
     "backend/app/agent/loop.py",
     "backend/app/agent/guard.py",
     "backend/app/agent/tool_executor.py",
@@ -131,6 +132,7 @@ def runtime_versions() -> dict[str, str]:
         ("grounded_summary", "backend/app/agent/financial_summary.py"),
         ("compound_read_summary", "backend/app/agent/compound_read_summary.py"),
         ("read_result_recovery", "backend/app/agent/read_result_recovery.py"),
+        ("read_goal_plan", "backend/app/agent/read_goal_plan.py"),
         ("agent_loop", "backend/app/agent/loop.py"),
         ("tool_executor", "backend/app/agent/tool_executor.py"),
     ):

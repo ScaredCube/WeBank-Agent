@@ -516,6 +516,7 @@ async def send_message(
         original_request=resumed_read_goal or prepared_context.original_request,
         resumed_read_version=resumed_read_version,
         resumed_read_month=resumed_read_month,
+        resumed_read_kind=unfinished_read.kind if resumed_read_goal and unfinished_read else None,
         prior_bill_followup_summary=prior_bill_summary,
         verified=VerifiedToolContext(
             user_id=user.id,
