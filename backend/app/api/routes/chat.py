@@ -40,6 +40,9 @@ from app.services.chat_submissions import (SubmissionConflict, fingerprint,
 from app.services.conversation_context import (allow_readonly_followup, remember_selection,
                                                previously_selected, latest_trusted_bill_month)
 from app.services.intent_service import IntentError, build_intent_prompt
+from app.services.conversation_tasks import (
+    ReadGoal, can_resume_task, classify_pending_read_goal, pending_task, remember_pending_task,
+)
 from app.services.vault import VaultError, create_account_token, create_contact_token
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(security_gate)])
@@ -262,6 +265,20 @@ async def send_message(
     display_content = payload.content
     trusted_notes: list[TrustedContextNote] = []
     injection = detect_injection(display_content)
+    # Only user-selected, presently verified accounts can resume an old read goal.
+    # The stored canonical task is neither a client instruction nor payment authority.
+    unfinished_read = pending_task(session, conversation_id=conversation_id, user_id=user.id)
+    resumed_read_goal = None
+    if (unfinished_read is not None and not injection.blocked and payload.intent is None
+            and view_snapshot is None and (selected_account is not None or selected_card is not None)
+            and can_resume_task(payload.content)):
+        resumed_read_goal = ReadGoal(unfinished_read.kind, unfinished_read.month).model_goal
+        trusted_notes.append(TrustedContextNote(
+            source="pending_read_task",
+            content=("[服务端保存的未完成只读目标：" + resumed_read_goal
+                     + "。本轮用户已补充并经服务端核验账户对象，仅允许完成只读查询；"
+                     "禁止将先前选择视为新的资金操作授权。]"),
+        ))
     view_selection = None
     if view_snapshot is not None and not injection.blocked:
         from app.services.trusted_ui_results import resolve_view_selection_context
@@ -326,6 +343,14 @@ async def send_message(
                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
             raise HTTPException(status_code=409,
                 detail="此请求已接收或结果尚未确定。请核对会话及操作记录，不要重复发起。")
+    # Remember the *canonical* missing read goal before model execution.
+    # A model/error fallback may otherwise lose it across the next turn.
+    if (not injection.blocked and payload.intent is None and view_snapshot is None
+            and not payload.references and selected_account is None and selected_card is None):
+        goal = classify_pending_read_goal(payload.content)
+        if goal is not None:
+            remember_pending_task(session, conversation_id=conversation_id,
+                                  user_id=user.id, goal=goal)
     phone_references: list[tuple[str, str]] = []
     if not injection.blocked:
         try:
@@ -462,7 +487,7 @@ async def send_message(
         conversation_id=conversation_id,
         submission_id=submission_id,
         history=history,
-        original_request=prepared_context.original_request,
+        original_request=resumed_read_goal or prepared_context.original_request,
         verified=VerifiedToolContext(
             user_id=user.id,
             verified_account_token=verified_account_token,

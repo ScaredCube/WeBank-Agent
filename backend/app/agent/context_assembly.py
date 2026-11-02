@@ -17,12 +17,12 @@ from app.risk.injection import detect_injection
 HistoryRole = Literal["user", "assistant"]
 NoteSource = Literal[
     "validated_intent", "verified_object", "temporary_phone_reference",
-    "trusted_bill_context", "readonly_selection", "trusted_view_context",
+    "trusted_bill_context", "readonly_selection", "trusted_view_context", "pending_read_task",
 ]
 _BLOCKED_TEXT = "[已拦截的可疑输入]"
 _ALLOWED_NOTE_SOURCES = frozenset((
     "validated_intent", "verified_object", "temporary_phone_reference",
-    "trusted_bill_context", "readonly_selection", "trusted_view_context",
+    "trusted_bill_context", "readonly_selection", "trusted_view_context", "pending_read_task",
 ))
 
 

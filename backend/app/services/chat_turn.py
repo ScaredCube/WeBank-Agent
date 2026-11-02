@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.agent.ui_composer import get_ui_composer
 from app.services.chat_submissions import advance_submission
+from app.db.session import session_scope
+from app.services.conversation_tasks import mark_task_completed
 from app.services.security_service import record_failure
 
 logger = logging.getLogger(__name__)
@@ -261,6 +263,13 @@ async def stream_chat_turn(
             )
             message = finish_reply("".join(collected), trusted_bill, trusted_cards,
                                    trusted_results, view=context_view)
+        if message is not None and trusted_bill is not None:
+            # Clear pending READ goal only after its verified result was saved.
+            try:
+                with session_scope() as task_session:
+                    mark_task_completed(task_session, conversation_id=conversation_id, user_id=user_id)
+            except Exception:
+                logger.warning("pending read task finalization failed")
         yield encode({"type": "done", "message": message})
     except asyncio.CancelledError:
         # The request was accepted, but the connection ended before the

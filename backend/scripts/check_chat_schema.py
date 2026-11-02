@@ -1,4 +1,4 @@
-"""Check or create the three additive Agent chat tables (SQLite).
+"""Check or create the additive Agent chat and read-task tables (SQLite).
 
 Dry-run by default. --apply requires an existing SQLite file, makes a backup
 using sqlite3.backup, then creates ONLY missing tables. Existing schema drift

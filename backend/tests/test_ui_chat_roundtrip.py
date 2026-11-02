@@ -122,7 +122,7 @@ def test_tool_free_view_followup_persists_the_exact_context_revision(client, aut
         'request_id': 'ui-context-followup-01',
     }))
     message = next(event['message'] for event in second if event['type'] == 'done')
-    assert provider.calls == 0
+    assert provider.calls == 1  # V2 may independently phrase a verified view follow-up.
     assert message['ui_view'] == selected
     assert label in message['content'] and expected_amount in message['content']
     assert f"{row['count']} 笔" in message['content']

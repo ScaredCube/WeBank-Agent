@@ -63,6 +63,16 @@ class ConversationSelection(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class ConversationTask(SQLModel, table=True):
+    """Canonical, short-lived unfinished READ goal; no raw user text or bank tokens."""
+    conversation_id: int = Field(foreign_key="conversation.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    kind: str = "bill_query"
+    month: str | None = None
+    status: str = "needs_account"
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class MessageResult(SQLModel, table=True):
     """Encrypted server-authored banking result or completed-operation receipt."""
     id: int | None = Field(default=None, primary_key=True)

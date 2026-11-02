@@ -106,7 +106,7 @@ def test_full_chat_uses_verified_bill_comparison_not_model_hallucination(
               "references": [{"kind": "account", "id": account_id}]},
     )
     events = _events(response)
-    assert model.calls == 2
+    assert model.calls == 3  # V2 adds a bounded tool-free presentation pass.
     assert events[-1]["type"] == "done"
     text = events[-1]["message"]["content"]
     assert "2025-12" in text and "2026-01" in text
@@ -144,7 +144,7 @@ def test_single_bill_no_tool_continuation_cannot_claim_spending_increase(
         json={"content": "分析为什么2026-01的消费增加",
               "references": [{"kind": "account", "id": account_id}]},
     ))
-    assert model.calls == 2
+    assert model.calls == 3  # V2 adds a bounded tool-free presentation pass.
     final = events[-1]["message"]["content"]
     assert "无法据此判断消费是否增加" in final
     assert "旅游开销" not in final

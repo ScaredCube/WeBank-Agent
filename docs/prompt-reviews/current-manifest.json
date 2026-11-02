@@ -1,5 +1,5 @@
 {
-  "source_revision": "a8f00fb9c5ab78725c4871858be54a54c2ef371e",
+  "source_revision": "31c5abae246545d6b4949d126239a150500e47b5",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
@@ -22,10 +22,10 @@
     "grounded_summary": "grounded_summary:914aba9adc782878",
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
-    "agent_loop": "agent_loop:a3eefbc744f7e69b",
+    "agent_loop": "agent_loop:181ba7569e2d2604",
     "tool_executor": "tool_executor:57745137ae0a760d",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
-    "snapshot_contract": "snapshot_contract:07a0f81d7cc55634",
+    "snapshot_contract": "snapshot_contract:0979c55f1caf7bb0",
     "chat_request_recovery": "chat_request_recovery:7f69cdc969238d95"
   }
 }

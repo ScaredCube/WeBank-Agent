@@ -7,7 +7,7 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 from sqlmodel import SQLModel
 
-CHAT_TABLES = ("conversationselection", "chatsubmission", "messageresult")
+CHAT_TABLES = ("conversationselection", "chatsubmission", "messageresult", "conversationtask")
 REQUIRED_BASE = ("user", "conversation", "account", "card", "message", "pendingaction")
 VIEW_TABLES = ("uiview", "viewrevision", "viewinteraction", "messageview")
 VIEW_REQUIRED_BASE = ("user", "conversation", "message")

@@ -24,7 +24,7 @@ def test_context_is_compiled_once_with_verified_object_and_prior_history(
         calls = []
 
         async def stream(self, messages, tools=None):
-            self.calls.append(messages)
+            self.calls.append([dict(item) for item in messages])
             yield LLMChunk(content="您好，需要什么帮助？")
 
     llm = CaptureModel()

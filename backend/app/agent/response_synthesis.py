@@ -116,6 +116,10 @@ class ResponseSynthesizer:
             return outcome.fallback_text
         if not trusted:
             return outcome.fallback_text
+        # Do not create a second external-model exposure of privacy-masked
+        # account fields or categories. The deterministic readout remains safe.
+        if "[敏感号码已隐藏]" in trusted:
+            return outcome.fallback_text
         # Never include raw arbitrary transcript or internal tokens in this
         # presentation pass. Only the current goal and authenticated observations.
         payload = {
