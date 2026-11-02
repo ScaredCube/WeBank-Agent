@@ -24,6 +24,7 @@ from app.agent.response_policy import (
     decide_no_tool_reply, tool_free_reply,
 )
 from app.agent.response_recovery import recover_no_tool_reply
+from app.agent.response_synthesis import ResponseSynthesizer, TurnOutcome
 from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
@@ -192,6 +193,11 @@ class AgentLoop:
                                  else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                                  else render_tool_result(name, result))
                                 for name, result in tool_results)
+                        summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                            user_goal=request,
+                            verified_results=tuple(tool_results),
+                            fallback_text=summary,
+                        ))
                         yield AgentEvent("delta", {"text": summary})
                     else:
                         if getattr(self.llm, "mode", None) == "mock":
@@ -314,6 +320,11 @@ class AgentLoop:
                     history, tool_results, user_request=original_request,
                 )
                 if final_readonly_text is not None:
+                    final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                        user_goal=original_request or "",
+                        verified_results=tuple(tool_results),
+                        fallback_text=final_readonly_text,
+                    ))
                     yield AgentEvent("delta", {"text": final_readonly_text})
                     return
         except Exception:
