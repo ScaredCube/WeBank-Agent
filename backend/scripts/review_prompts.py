@@ -32,6 +32,8 @@ REVIEW_PATHS = (
     "backend/app/agent/guard.py",
     "backend/app/services/intent_service.py",
     "backend/app/services/chat_turn.py",
+    "backend/app/services/chat_messages.py",
+    "backend/app/schemas/tool_results.py",
     "backend/app/tools/register.py",
     "backend/app/tools/account_tools.py",
     "backend/app/tools/subscription_tools.py",
@@ -136,6 +138,16 @@ def runtime_versions() -> dict[str, str]:
         for relative in scope_sources
     ).encode("utf-8")
     versions["scope_contract"] = "scope_contract:" + sha256(scope_bytes).hexdigest()[:16]
+    snapshot_files = (
+        "backend/app/schemas/tool_results.py",
+        "backend/app/services/chat_messages.py",
+        "backend/app/services/chat_turn.py",
+    )
+    snapshot_bytes = "\n".join(
+        (REPO / relative).read_text(encoding="utf-8").replace("\r\n", "\n")
+        for relative in snapshot_files
+    ).encode("utf-8")
+    versions["snapshot_contract"] = "snapshot_contract:" + sha256(snapshot_bytes).hexdigest()[:16]
     return versions
 
 

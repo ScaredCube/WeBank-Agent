@@ -64,7 +64,7 @@ class ConversationSelection(SQLModel, table=True):
 
 
 class MessageResult(SQLModel, table=True):
-    """Encrypted server-authored read-only banking snapshot associated with a reply."""
+    """Encrypted server-authored banking result or completed-operation receipt."""
     id: int | None = Field(default=None, primary_key=True)
     message_id: int = Field(foreign_key="message.id", unique=True, index=True)
     kind: str

@@ -196,4 +196,4 @@ def test_provider_failure_after_first_trusted_result_keeps_snapshot(
     messages=client.get(f"/api/chat/conversations/{cid}/messages",
                         headers=auth_headers).json()
     assert messages[-1]["tool_results"][0]["kind"]=="monthly_bill"
-    assert "部分查询" in messages[-1]["content"]
+    assert "部分只读查询已完成" in messages[-1]["content"]

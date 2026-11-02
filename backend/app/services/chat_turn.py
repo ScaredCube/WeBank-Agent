@@ -10,6 +10,7 @@ from app.agent.loop import AgentLoop
 from app.agent.tool_executor import VerifiedToolContext
 from app.schemas.bills import MonthlyBill
 from app.schemas.card_results import CardStatusSnapshot
+from app.schemas.tool_results import InternalTransferReceipt
 from app.services.audit_service import conversation_context, record_separately
 from app.services.chat_messages import persist_assistant
 from app.services.chat_submissions import advance_submission
@@ -113,8 +114,18 @@ async def stream_chat_turn(
                     advance_submission(submission_id=submission_id, state="failed")
                     yield encode({"type": "error", "message": "操作结果格式异常"})
                     return
+                # Executed green internal transfers must survive refresh just
+                # like trusted bill/card results. The strict receipt schema
+                # excludes pending actions and all client confirmation tokens.
+                receipt = InternalTransferReceipt.model_validate(event.data.get("data"))
+                if len(trusted_results) >= 8:
+                    advance_submission(submission_id=submission_id, state="failed")
+                    yield encode({"type": "error", "message": "本次查询结果过多，请缩小查询范围。"})
+                    return
+                saved = receipt.model_dump()
+                trusted_results.append({"kind": "internal_transfer", "data": saved})
                 yield encode({"type": "operation_result", "kind": "internal_transfer",
-                            "data": event.data.get("data") or {}})
+                              "data": saved})
             elif event.type == "card_result":
                 validated_cards = CardStatusSnapshot.model_validate(event.data["data"])
                 if selected_card_id is not None:

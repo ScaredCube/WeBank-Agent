@@ -23,7 +23,7 @@ def present_message(
         return output
     if snapshot is _UNSET_SNAPSHOT:
         snapshot = session.exec(select(MessageResult).where(MessageResult.message_id == message.id)).first()
-    if not isinstance(snapshot, MessageResult) or snapshot.kind not in ("monthly_bill", "card_status", "tool_results"):
+    if not isinstance(snapshot, MessageResult) or snapshot.kind not in ("monthly_bill", "card_status", "internal_transfer", "tool_results"):
         return output
     try:
         payload = decrypt_result_snapshot(snapshot.ciphertext, snapshot.key_version)
