@@ -105,3 +105,35 @@ This is a demo-readiness reliability improvement, not an exactly-once
 distributed transaction guarantee or a complete SSE resumption protocol. The
 client still retrieves status and persisted history rather than replaying raw
 SSE frames.
+
+## Real Chrome + FastAPI SSE transport checkpoint (verified)
+
+This closes the earlier transport-level gap beyond mocked API/browser tests.
+
+**Environment:** Windows LYJ-Laptop; independent local ports 8193 (actual FastAPI/uvicorn) and 5187 (Vite proxy); a new temporary SQLite database, ephemeral vault/JWT keys and a deterministic synthetic-only model. Real bank read Tool, authenticated HTTP routes, Server-Sent Events, result encryption/persistence and the browser's fetch/reload path run normally. No external model calls or financial write actions are used.
+
+**Observed Playwright E2E:** 1/1 passed. The test submits a monthly-bill request, waits for the real bank Tool's trusted `bill_result`, then reloads the Chrome page while the backend is deliberately awaiting its next step. It checks:
+- Request status resolves to `interrupted` rather than a false `completed` state.
+- The interrupted request's `partial_message` contains the trusted CNY monthly bill snapshot.
+- The conversation history contains exactly one saved assistant bill with the request-linked message ID.
+- Reposting the identical `request_id` receives HTTP 409.
+- The fixture Agent turn count remains exactly one; no duplicate tool processing.
+- Browser recovery UI displays the incomplete saved-result message without JS errors.
+
+**Reproduction, from two local terminals** (run only with synthetic data):
+```powershell
+# 1: from backend/
+python scripts/sse_disconnect_fixture_server.py
+
+# 2: from frontend/, with local dependencies installed
+$env:VITE_API_PROXY_TARGET = 'http://127.0.0.1:8193'
+npm run dev -- --host 127.0.0.1 --port 5187 --strictPort
+
+# 3: separate terminal, from frontend/
+$env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:5187'
+$env:PLAYWRIGHT_CHANNEL = 'chrome'
+$env:XIAOWE_REAL_FASTAPI_E2E = '1'
+npx playwright test e2e/real-fastapi-disconnect.browser.cjs --workers=1
+```
+
+The fixture is bound to 127.0.0.1 and is for controlled development tests only. This establishes correctness for the tested cancellation boundary, **not** a general exactly-once distributed transaction guarantee.
