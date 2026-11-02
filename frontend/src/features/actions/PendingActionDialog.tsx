@@ -218,8 +218,10 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
       } else if (result.status === 'pending') {
         setStage('recover_pending')
         setMessage('服务端仍显示待确认。页面不会自动重试；你可以取消此动作，或关闭后等待其过期。')
-      } else if ((wealthOrder && result.status === 'verified') ||
-                 (subscriptionCancel && result.status === 'confirmed')) {
+      } else if ((result.status === 'verified' && action.risk_level === 'red' &&
+                   (wealthOrder || wealthConversion || transfer)) ||
+                 (result.status === 'confirmed' && action.risk_level === 'yellow' &&
+                   (subscriptionCancel || transfer || internalTransfer || collection))) {
         if (Date.parse(action.expires_at) <= Date.now()) {
           setStage('unknown')
           setMessage('按本设备时间，此操作可能已过有效期。服务端尚未记录业务完成，请核对状态，不要重新发起操作。')
@@ -275,7 +277,7 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   add('备注', action.details.note)
   const privacyLabels = new Set(['金额', '操作金额', '单次扣费', '执行后余额', '该产品持仓'])
   const operationDescription = action.risk_level === 'red'
-    ? '这是模拟业务。模拟验证码仅用于演示，不是真实银行身份验证；验证通过后仍需单独执行。'
+    ? '这是模拟业务。模拟验证码仅用于演示，不是真实银行身份验证；验证通过后会继续执行，请核对结果。'
     : subscriptionCancel
       ? '这是模拟订阅取消。确认只记录你的同意，只有服务端执行成功后订阅状态才会变更。'
       : '请核对信息。确认后操作仍需单独执行。'

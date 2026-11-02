@@ -364,3 +364,8 @@
 
 - [x] **T-RUNTIME-UI-E2E-01 正常只读链路与请求异常恢复 Chrome 验收（P1）**：修复 `run_competition_e2e.py` 过时的单账户种子断言，严格核验当前两张模拟账户及固定余额；新增待确认操作/操作准备记录必须为零的安全断言。真实 DeepSeek + FastAPI/Vite + Chrome 在隔离 SQLite 下完成桌面银行卡引用、账单/卡状态结果、刷新恢复及移动端历史恢复，浏览器 JS 错误为零；真实 Chrome + 模拟 HTTP 额外通过 5 个异常重发场景（failed、processing、interrupted、action_pending、completed）。审查见 `docs/prompt-reviews/f98cbb3-browser-e2e-decision.md`。
 - [ ] **T-RUNTIME-UI-E2E-02 黄色/红色动作完整浏览器交互与跨设备一致性验收（P1）**：仅在独立合成银行数据库中验证服务端确认、风险验证、操作记录与刷新恢复；遇到网络中断/未知状态不得自动重试资金操作。验收须包含真实浏览器实际动作轨迹、后端精确一次执行断言、异常后状态核对，以及独立的安全审查；不触碰真实银行或正式业务库。
+
+## 2026-11-02 · 操作确认与真实浏览器验收（klutz-runtime）
+
+- [x] **T-RUNTIME-UI-E2E-02a 黄色确认/红色验证/断线状态恢复（P1）**：修正红色验证后自动执行的误导文案；确认已授权、原动作有效的黄色执行在断线后可经状态 GET 人工按原编号继续，已完成则不能重复执行。Playwright Chrome 3 项、操作组件 28 项、服务端风险与幂等 44 项通过；前端生产构建成功、lint 0 错误（7 条既有警告）。完整 Before/After 与 UX 风险见 `docs/prompt-reviews/a11ff19-action-recovery-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02b 真实模拟银行操作一体化浏览器验收（P1）**：从 Agent 准备操作到实际隔离 SQLite 的服务端确认、验证、执行、审计、刷新及跨设备恢复，核验原编号只执行一次；严格禁止正式资金操作。当前 02a 使用真实 Chrome + 模拟网络响应验证 UI，后端幂等以单独服务端测试证明，仍需一条真实端到端操作场景。
