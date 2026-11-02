@@ -749,3 +749,52 @@ it('拖拽转账断线后保留结构化意图与原请求身份，不把重试�
   expect(screen.getByRole('button', { name: '移除前置意图' })).toBeTruthy()
   expect(editor.value).toBe('转账金额：100 元')
 })
+
+it('修改待确认转账：取消旧动作后恢复原草稿与拖拽绑定，再次发送使用新金额', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'bankDashboard').mockResolvedValue({
+    ...dashboard(),
+    contacts: [{ contact_id: 7, name: '张三', bank_name: '某银行', masked_phone: '138****0001', status: 'active', can_transfer: true }],
+  })
+  vi.spyOn(api, 'cards').mockResolvedValue([])
+  const cancel = vi.spyOn(api, 'actionStep').mockResolvedValue({ status: 'cancelled', message: '已取消' })
+  const requests: Array<{ content: string; intent: unknown }> = []
+  vi.spyOn(sse, 'streamChat').mockImplementation(async options => {
+    requests.push({ content: options.content, intent: options.intent })
+    if (requests.length === 1) {
+      options.onEvent({
+        type: 'action_required', confirmation_token: 'synthetic-edit-token', transfer_id: 42,
+        action: {
+          id: 33, action_type: 'transfer', risk_level: 'yellow', status: 'pending',
+          expires_at: '2030-01-01T00:00:00Z',
+          details: { account_masked: '****1234', recipient_name: '张三', amount_fen: 10000, currency: 'CNY' },
+        },
+      })
+    }
+    options.onEvent({
+      type: 'done', message: { id: requests.length + 90, role: 'assistant', content: '业务信息已处理', created_at: new Date().toISOString() },
+    })
+  })
+  render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  await screen.findByText('第一段对话')
+  await user.click(screen.getByRole('button', { name: '打开资产' }))
+  await user.click(await screen.findByRole('button', { name: /测试卡/ }))
+  await user.click(screen.getByRole('button', { name: /联系人 张三/ }))
+  const editor = screen.getByRole('textbox', { name: '输入消息' }) as HTMLTextAreaElement
+  await user.type(editor, '100 元')
+  await user.click(screen.getByRole('button', { name: '发送' }))
+  await user.click(await screen.findByRole('button', { name: '修改信息' }))
+  await waitFor(() => expect(cancel).toHaveBeenCalledWith('test', 33, 'cancel', undefined))
+  await waitFor(() => expect(editor.value).toBe('转账金额：100 元'))
+  expect(screen.getByRole('button', { name: '移除前置意图' })).toBeTruthy()
+
+  await user.clear(editor)
+  await user.type(editor, '转账金额：200 元')
+  await user.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(requests).toHaveLength(2))
+  expect(requests[0].intent).toEqual(requests[1].intent)
+  expect(requests[1].intent).toEqual({
+    action: 'transfer', source: { kind: 'account', id: 1 }, target: { kind: 'contact', id: 7 },
+  })
+  expect(requests[1].content).toContain('200 元')
+})

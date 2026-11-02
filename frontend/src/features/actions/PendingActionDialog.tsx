@@ -13,9 +13,9 @@ import { serviceActionTransport, type ActionTransport } from './transport'
 type ActionEvent = Extract<StreamEvent, { type: 'action_required' }>
 type Stage = ActionStage
 
-type Props = { event: ActionEvent; onClose: () => void; onFinish?: () => void; onResolved?: (status: 'completed' | 'cancelled' | 'expired') => void; open?: boolean; hidden?: boolean; onTogglePrivacy?: () => void; supplementalDescription?: string; verificationHint?: string } & ({ token: string; transport?: never } | { token?: never; transport: ActionTransport })
+type Props = { event: ActionEvent; onClose: () => void; onFinish?: () => void; onEdit?: () => void; onResolved?: (status: 'completed' | 'cancelled' | 'expired') => void; open?: boolean; hidden?: boolean; onTogglePrivacy?: () => void; supplementalDescription?: string; verificationHint?: string } & ({ token: string; transport?: never } | { token?: never; transport: ActionTransport })
 
-export function PendingActionDialog({ event, token, transport, onClose, onFinish = onClose, onResolved, open = true, hidden = false, onTogglePrivacy, supplementalDescription = '', verificationHint = '' }: Props) {
+export function PendingActionDialog({ event, token, transport, onClose, onFinish = onClose, onEdit, onResolved, open = true, hidden = false, onTogglePrivacy, supplementalDescription = '', verificationHint = '' }: Props) {
   const [stage, setStage] = useState<Stage>('review')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -236,6 +236,18 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     })
   }
 
+  async function returnToDraft() {
+    if (!onEdit || !supported || stage !== 'review') return
+    // A prepared action is immutable. Cancel it on the server before
+    // restoring any editable draft: never edit a token-bound action in place.
+    await run(async () => {
+      const result = await service.step(action.id, 'cancel')
+      if (result.status !== 'cancelled') throw new Error('原操作取消状态无法确认')
+      onResolved?.('cancelled')
+      onEdit()
+    })
+  }
+
   async function checkStatus() {
     await run(async () => {
       const result = await service.action(action.id)
@@ -388,6 +400,7 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
       </motion.div>}
       <div className="mt-5 flex flex-wrap gap-2">
         {(stage === 'review' || stage === 'code' || stage === 'face' || stage === 'recover_pending') && <button disabled={busy} onClick={() => void cancel()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">取消操作</button>}
+        {stage === 'review' && onEdit && <button disabled={busy || !supported} onClick={() => void returnToDraft()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm text-jade-800 disabled:opacity-50">修改信息</button>}
         {stage === 'review' && <button disabled={busy || !supported || (hidden && usesMoney)} onClick={() => void start()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{action.risk_level === 'red' ? '开始模拟验证' : subscriptionCancel ? '确认取消' : '确认'}</button>}
         {stage === 'code' && <button disabled={busy || !code.trim()} onClick={() => void verify()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">验证</button>}
         {(stage === 'ready' || stage === 'recover_execute') && <button disabled={busy || (hidden && usesMoney)} onClick={() => void execute()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{stage === 'recover_execute' ? '按原动作编号重试' : executionLabel}</button>}

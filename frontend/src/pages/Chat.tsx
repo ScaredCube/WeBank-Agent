@@ -81,6 +81,10 @@ function ChatWorkspace() {
   const [cardLossRecovery, setCardLossRecovery] = useState<ReadonlyMap<number, CardLossRecovery>>(() => new Map())
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
   const [intentCapsule, setIntentCapsule] = useState<AssetIntent | null>(null)
+  // Only drafts from the active Chat submission can be edited after a
+  // prepared action is safely cancelled. Direct asset actions lack this provenance.
+  const lastSubmittedDraft = useRef<{ text: string; references: BankObjectReference[]; intent: AssetIntent | null } | null>(null)
+  const [editablePendingDraft, setEditablePendingDraft] = useState<typeof lastSubmittedDraft.current>(null)
   const [referencesByConversation, setReferencesByConversation] = useState<Record<string, BankObjectReference[]>>({})
   const [sourceNavigation, setSourceNavigation] = useState<SourceNavigation | null>(null)
   const [dashboard, setDashboard] = useState<BankDashboardData | null>(null)
@@ -100,7 +104,11 @@ function ChatWorkspace() {
     return () => media.removeEventListener?.('change', update)
   }, [])
 
-  const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => { setPendingAction(event); setActionOpen(true) }, [])
+  const onActionRequired = useCallback((event: Extract<StreamEvent, { type: 'action_required' }>) => {
+    setPendingAction(event)
+    setEditablePendingDraft(lastSubmittedDraft.current)
+    setActionOpen(true)
+  }, [])
   const onConversationChange = useCallback(() => setUtilityOpen(false), [])
   const onConversationCreated = useCallback((id: number) => {
     setReferencesByConversation(current => {
@@ -129,12 +137,20 @@ function ChatWorkspace() {
     onActionWarning: setActionWarning, onConversationChange, onConversationCreated,
   })
 
-  // Keep a structured drag intent across uncertain sends and network errors.
-  // Remove it only when the controller has finished and the draft is cleared.
-  // Clearing it on click would turn a retry into an unbound natural-language request.
+  // Keep a typed drag intent while the user edits or clears the composer.
+  // Only a completed send that leaves no draft may remove it; clearing input
+  // while editing must not silently unbind source and target entities.
+  const wasSending = useRef(false)
   useEffect(() => {
-    if (intentCapsule && !sending && !draft.trim()) setIntentCapsule(null)
-  }, [intentCapsule, sending, draft])
+    if (sending) {
+      wasSending.current = true
+      return
+    }
+    if (wasSending.current) {
+      wasSending.current = false
+      if (!draft.trim()) setIntentCapsule(null)
+    }
+  }, [sending, draft])
 
   const referenceKey = String(activeId ?? 'new')
   const references = referencesByConversation[referenceKey] ?? []
@@ -265,6 +281,7 @@ function ChatWorkspace() {
     const payload = intentCapsule ? describeIntent(intentCapsule) : undefined
     const text = draft
     const display = intentCapsule?.label
+    lastSubmittedDraft.current = { text, references: [...references], intent: intentCapsule }
     void sendMessage(text, references, payload, display)
   }
 
@@ -306,6 +323,8 @@ function ChatWorkspace() {
   </>
 
   function handleLogout() {
+    lastSubmittedDraft.current = null
+    setEditablePendingDraft(null)
     setIntentCapsule(null); setPendingAction(null); setCompletedByMessage({}); setCardLossRecovery(new Map())
     setUtilityOpen(false); setAssetsOpen(false)
     logout(); navigate('/login', { replace: true })
@@ -341,7 +360,7 @@ function ChatWorkspace() {
       onCardLossRecoveryChange={onCardLossRecoveryChange}
       onCardLossResolved={onCardLossResolved}
       onActionBusy={setActionPreparing}
-      onActionPrepared={(event) => { setPendingAction(event); setActionOpen(true) }}
+      onActionPrepared={(event) => { setEditablePendingDraft(null); setPendingAction(event); setActionOpen(true) }}
       onIntent={applyIntent} onRetry={refreshAssets} onClose={() => setAssetsOpen(false)} />
   </div>
 
@@ -435,6 +454,18 @@ function ChatWorkspace() {
 
     {pendingAction && token && <PendingActionDialog key={pendingAction.action.id} event={pendingAction} token={token} open={actionOpen} hidden={privacy.hidden} onTogglePrivacy={privacy.toggle}
       onClose={() => setActionOpen(false)}
+      onEdit={editablePendingDraft ? () => {
+        // The dialog only calls this after the old server action is cancelled.
+        // Restore both the user's text and the typed object bindings.
+        setActionOpen(false)
+        setPendingAction(null)
+        setEditablePendingDraft(null)
+        setIntentCapsule(editablePendingDraft.intent)
+        setReferencesByConversation(current => ({ ...current, [referenceKey]: editablePendingDraft.references }))
+        updateDraft(editablePendingDraft.text)
+        setActionWarning('原待确认操作已取消。请修改信息后重新发送，系统将重新核验并准备新操作。')
+        window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.chat-composer-input')?.focus())
+      } : undefined}
       onResolved={(status) => {
         if (pendingAction.action.action_type === 'card_loss' && typeof pendingAction.action.details.card_id === 'number') onCardLossRecoveryChange(pendingAction.action.details.card_id, null)
         if (status === 'completed') {
@@ -459,6 +490,6 @@ function ChatWorkspace() {
           })
         }
       }}
-      onFinish={() => { setActionOpen(false); setPendingAction(null); refreshAssets() }} />}
+      onFinish={() => { lastSubmittedDraft.current = null; setActionOpen(false); setPendingAction(null); setEditablePendingDraft(null); refreshAssets() }} />}
   </AppShell>
 }
