@@ -96,6 +96,24 @@ npm run dev
 
 开发环境下 Vite 会将 `/api` 代理到 `http://127.0.0.1:8000`，无需额外配置跨域。
 
+### Docker Compose
+
+```powershell
+# 1. 准备环境变量（生产部署必须更换 JWT_SECRET 与数据加密密钥，并设 DEBUG=false）
+Copy-Item .env.example .env
+# 2. 构建并启动
+docker compose up -d --build
+# 3. 打开 http://localhost:8080（演示账号 demo / demo123）
+docker compose ps
+docker compose logs -f backend
+docker compose down   # 停止；SQLite 数据保留在命名卷 backend-data
+```
+
+- `backend`：Python + uv，启动时自动初始化空库与演示数据，`/api/health` 健康检查；端口仅绑定 `127.0.0.1`。
+- `frontend`：Node 多阶段构建为静态产物，nginx 同源反代 `/api`（SSE 无缓冲转发）到后端。
+- SQLite 数据持久化在命名卷 `backend-data`（容器内 `/app/data/bank_agent.db`）；已有旧库升级仍须先运行 `backend/scripts/check_chat_schema.py`（见上文启动门禁）。
+- 该配置为打包交付物（T-503），当前只完成配置编写与 YAML 校验，未执行实际镜像构建验证。
+
 ### 测试
 
 ```powershell

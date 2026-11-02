@@ -1,0 +1,30 @@
+name: bank-agent
+
+services:
+  backend:
+    build: ./backend
+    image: bank-agent-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Compose forces SQLite into the named volume; .env DATABASE_URL is ignored here.
+      DATABASE_URL: sqlite:////app/data/bank_agent.db
+    volumes:
+      - backend-data:/app/data
+    ports:
+      # Backend is bound to localhost only; the public entry is the frontend proxy.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build: ./frontend
+    image: bank-agent-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+volumes:
+  backend-data:
