@@ -541,3 +541,26 @@ it('刷新后明确 failed 的请求只提示核对并清理状态标记，不�
   expect(warning).toHaveBeenCalledWith(expect.stringContaining('先核对历史与操作记录'))
   expect(sessionStorage.getItem('xiaowe:chat-inflight:v1')).toBeNull()
 })
+
+it.each([
+  {state:'failed' as const, fragment:'可信部分结果已保存到历史'},
+  {state:'interrupted' as const, fragment:'可信部分结果已保存在历史中'},
+])('刷新时 $state 有部分结果，明确告知而不重发', async ({state,fragment}) => {
+  const requestId='req-v2-partial-'+state
+  sessionStorage.setItem('xiaowe:chat-inflight:v1',JSON.stringify([
+    {conversationId:1,requestId,createdAt:Date.now()},
+  ]))
+  const partial:Message={id:101,role:'assistant',content:'已经取得部分结果',created_at:''}
+  const inspect=vi.spyOn(api,'submissionStatus').mockResolvedValue({
+    request_id:requestId,state,user_message_id:41,pending_action_id:null,
+    message:null,partial_message:partial,
+  })
+  const stream=vi.spyOn(sse,'streamChat'),warning=vi.fn()
+  renderHook(()=>useChatController({
+    token:'synthetic-token',actionBlocked:false,onActionRequired:vi.fn(),
+    onActionWarning:warning,onConversationChange:vi.fn(),
+  }))
+  await waitFor(()=>expect(inspect).toHaveBeenCalledWith('synthetic-token',1,requestId))
+  await waitFor(()=>expect(warning).toHaveBeenCalledWith(expect.stringContaining(fragment)))
+  expect(stream).not.toHaveBeenCalled()
+})

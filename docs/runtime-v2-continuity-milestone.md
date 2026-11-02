@@ -74,3 +74,34 @@ An additional server-side read-only continuation path now handles **narrow previ
 This path never sends the historical private bill data to a second model call, never reuses bank operation credentials, and does not pretend a new live Tool query happened. Questions requesting causes, comparisons, transactions or financial actions stay on the normal Agent path. Users can explicitly request a fresh query.
 
 Real DeepSeek smoke: all three turns ended in `done`; third-turn `verified_history_followup=True`. These checks use synthetic banking data and do not constitute a full general-purpose memory or planning system.
+
+## SSE request recovery: persisted partial evidence
+
+This checkpoint hardens interrupted and crashed chat turns that already received
+authenticated Tool results.
+
+- A disconnected stream that has not reached the final persistence boundary
+  now saves its partial assistant record and encrypted Tool snapshots **with the
+  original ChatSubmission ID**, then marks the request `interrupted`. It is
+  never considered a completed task and is never replayed.
+- A later unexpected runtime error after verified Tool results attempts to
+  persist the trusted partial snapshot and retains the submission state
+  `failed`. The public SSE error is generic, not the internal traceback.
+- `GET .../requests/{request_id}` returns `partial_message` only for
+  `failed` and `interrupted` submissions which have a saved assistant row.
+  The existing `message` field continues to mean an actually completed
+  submission. Prepared financial actions still require their independent
+  confirmation flow; no confirmation tokens are returned here.
+- On reload, the front end distinguishes an incomplete but saved verified
+  partial result from a failed request with no recoverable evidence. It never
+  automatically repeats tool calls.
+
+Focused synthetic fault-injection tests cover disconnect after a trusted bill,
+exception after a trusted bill, and failure before any trusted data. All paths
+keep their request status and account ownership checks. Client tests confirm
+reload warnings are specific to incomplete-but-saved results.
+
+This is a demo-readiness reliability improvement, not an exactly-once
+distributed transaction guarantee or a complete SSE resumption protocol. The
+client still retrieves status and persisted history rather than replaying raw
+SSE frames.

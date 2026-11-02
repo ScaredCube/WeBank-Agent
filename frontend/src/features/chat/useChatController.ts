@@ -82,9 +82,13 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             recoveryWarning.current('此前请求已创建待确认操作，请在操作记录中核对。不会再次执行或下发确认令牌。')
           } else if (status.state === 'failed') {
             clearPendingChatRequest(item.requestId)
-            recoveryWarning.current('此前请求已被服务端确认失败；如涉及模拟金融操作，仍需先核对历史与操作记录，再决定是否作为新请求发起。')
+            recoveryWarning.current(status.partial_message
+              ? '此前请求执行失败，但已经取得的可信部分结果已保存到历史。请核对历史和操作记录，不会自动重新执行。'
+              : '此前请求已被服务端确认失败；如涉及模拟金融操作，仍需先核对历史与操作记录，再决定是否作为新请求发起。')
           } else {
-            recoveryWarning.current('检测到尚未确认完成的历史请求，请先核对会话及操作记录，不要重复发起。')
+            recoveryWarning.current(status.state === 'interrupted' && status.partial_message
+              ? '此前请求已中断，但可信部分结果已保存在历史中；请核对未完成的步骤，不要重复发起资金操作。'
+              : '检测到尚未确认完成的历史请求，请先核对会话及操作记录，不要重复发起。')
           }
         } catch (error) {
           if (cancelled) return

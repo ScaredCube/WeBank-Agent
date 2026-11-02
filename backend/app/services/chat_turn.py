@@ -299,12 +299,38 @@ async def stream_chat_turn(
             except Exception:
                 advance_submission(submission_id=submission_id, state="interrupted")
         else:
+            # Atomic link: the partial historical reply and request identity
+            # must be stored together, while the request remains interrupted.
+            try:
+                persist_assistant(conversation_id, "".join(collected),
+                                  trusted_bill, trusted_cards, trusted_results,
+                                  submission_id=submission_id, finalize=False)
+            except Exception:
+                logger.exception("interrupted chat result persistence failed")
             advance_submission(submission_id=submission_id, state="interrupted")
-            persist_assistant(conversation_id, "".join(collected), trusted_bill, trusted_cards, trusted_results)
         raise
     except Exception:
         logger.exception("chat event stream failed")
+        partial_persisted = saved_message is not None
+        if saved_message is None and trusted_results:
+            # Preserve already authenticated Tool evidence if a later runtime,
+            # model or UI stage crashes. Do not mark the user goal complete.
+            try:
+                partial_persisted = persist_assistant(
+                    conversation_id,
+                    "".join(collected) + (
+                        "\n\n部分查询已取得可信结果，但后续步骤异常，"
+                        "请核对下方历史记录；不能据此认定其他任务完成。"
+                    ),
+                    trusted_bill, trusted_cards, trusted_results,
+                    submission_id=submission_id, finalize=False,
+                ) is not None
+            except Exception:
+                logger.exception("failed chat partial result persistence failed")
         advance_submission(submission_id=submission_id, state="failed")
-        yield encode({"type": "error", "message": "服务出现异常，请稍后再试。"})
+        yield encode({"type": "error", "message": (
+            "服务出现异常，请核对历史中已保存的部分结果。" if partial_persisted
+            else "服务出现异常，请稍后再试。"
+        )})
     finally:
         conversation_context.reset(audit_token)

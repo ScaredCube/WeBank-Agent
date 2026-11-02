@@ -58,7 +58,9 @@ def persist_assistant(conversation_id: int, content: str,
                       submission_id: int | None = None, *, finalize: bool = True,
                       view: ViewEnvelope | None = None) -> dict | None:
     if not content and not (tool_results or bill_result or card_result):
-        if submission_id is not None:
+        # A disconnected/incomplete stream uses finalize=False. An empty
+        # partial result must never mark the original request completed.
+        if submission_id is not None and finalize:
             advance_submission(submission_id=submission_id, state="completed")
         return None
     if not content:

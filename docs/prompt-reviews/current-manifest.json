@@ -1,5 +1,5 @@
 {
-  "source_revision": "d6028266df81de770e3cf1b2570a71d3563225b8",
+  "source_revision": "c5110d01919bc81eeb75fe0247a63a6786d12191",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
@@ -27,7 +27,7 @@
     "agent_loop": "agent_loop:db2013b79837260c",
     "tool_executor": "tool_executor:57745137ae0a760d",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
-    "snapshot_contract": "snapshot_contract:77cd6dd594731618",
-    "chat_request_recovery": "chat_request_recovery:7f69cdc969238d95"
+    "snapshot_contract": "snapshot_contract:df28150fd22c66a8",
+    "chat_request_recovery": "chat_request_recovery:fa3094688f65cb35"
   }
 }

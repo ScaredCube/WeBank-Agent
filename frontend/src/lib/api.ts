@@ -46,6 +46,7 @@ export interface ChatSubmissionStatus {
   user_message_id: number | null
   pending_action_id: number | null
   message: Message | null
+  partial_message?: Message | null
 }
 
 export interface BankCard {
@@ -164,6 +165,7 @@ const submissionStatusSchema = z.object({
   user_message_id: positiveId.nullable(),
   pending_action_id: positiveId.nullable(),
   message: messageSchema.nullable(),
+  partial_message: messageSchema.nullable().optional(),
 })
 const cardListSchema = z.array(z.object({ card_id: positiveId, account_id: positiveId, account_name: z.string(), masked_number: z.string(), status: z.string(), account_status: z.string() }))
 const internalTransferExecutionSchema = z.object({

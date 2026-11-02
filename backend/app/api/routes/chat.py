@@ -145,7 +145,14 @@ def read_submission_status(
             conversation_id=conversation_id,
         ),
         "message": None,
+        "partial_message": None,
     }
+    if attempt.state in {"failed", "interrupted"} and attempt.assistant_message_id is not None:
+        partial = session.get(Message, attempt.assistant_message_id)
+        if partial is not None and partial.conversation_id == conversation_id and partial.role == "assistant":
+            # Explicitly distinguish an incomplete reply from a completed turn.
+            # Never return action confirmation tokens or model-only claims of success.
+            result["partial_message"] = present_message(session, partial).model_dump(mode="json")
     if attempt.state == "completed" and attempt.assistant_message_id is not None:
         message = session.get(Message, attempt.assistant_message_id)
         if message is not None and message.conversation_id == conversation_id:
