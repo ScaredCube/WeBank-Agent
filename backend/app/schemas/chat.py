@@ -55,7 +55,16 @@ class ContactReference(BaseModel):
     id: int = Field(gt=0)
 
 
-BankReference = Annotated[AccountReference | CardReference | ContactReference, Field(discriminator="kind")]
+class HoldingReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["holding"]
+    id: int = Field(gt=0)
+
+
+BankReference = Annotated[
+    AccountReference | CardReference | ContactReference | HoldingReference,
+    Field(discriminator="kind"),
+]
 
 IntentAction = Literal[
     "transfer", "internal_transfer", "collect", "purchase", "redeem", "convert",

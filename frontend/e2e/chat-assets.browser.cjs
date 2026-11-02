@@ -1,4 +1,4 @@
-﻿const { test, expect } = require('@playwright/test')
+const { test, expect } = require('@playwright/test')
 
 const now = new Date().toISOString()
 const dashboard = {
@@ -11,6 +11,7 @@ const dashboard = {
   ],
   holdings: [
     { holding_id: 9, product_id: 1, product_name: '稳稳盈 90 天', category: '稳健理财', risk_level: 'R1', expected_rate_bps: 280, amount_fen: 100000, yesterday_earnings_fen: 80, status: 'active' },
+    { holding_id: 10, product_id: 2, product_name: '安心盈 30 天', category: '稳健理财', risk_level: 'R2', expected_rate_bps: 230, amount_fen: 90000, yesterday_earnings_fen: 50, status: 'active' },
   ],
   risk_profile: { risk_level: 'R2', score: 4, assessed_at: now },
   generated_at: now,
@@ -125,5 +126,80 @@ test('desktop: assets stay on the left and the utility drawer opens on the right
   await drawer.getByRole('button', { name: '操作记录' }).click()
   await expect(drawer.getByText('最近的操作与审计记录')).toBeVisible()
   await page.screenshot({ path: 'test-results/desktop-utility-drawer.png' })
+  await context.close()
+})
+
+test('V2 desktop: dragging an asset into composer produces a typed reference', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1360, height: 860 } })
+  const requests = []
+  await installFixture(context, requests)
+  const page = await context.newPage()
+  await page.goto('/chat')
+  await openAssets(page)
+  const source = page.locator('[data-asset-kind="account"][data-asset-id="1"]')
+  const target = page.locator('[data-object-dropzone]')
+  const from = await source.boundingBox()
+  const to = await target.boundingBox()
+  expect(from).not.toBeNull()
+  expect(to).not.toBeNull()
+  await page.mouse.move(from.x + 40, from.y + 40)
+  await page.mouse.down()
+  await page.mouse.move(to.x + 80, to.y + 30, { steps: 14 })
+  await page.mouse.up()
+  await expect(page.getByLabel('已引用的金融对象')).toContainText('账户')
+  await page.getByRole('textbox', { name: '输入消息' }).fill('请查询这个账户的余额')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0].references).toEqual([{ kind: 'account', id: 1 }])
+  await context.close()
+})
+
+test('V2 desktop: @ holding sends a server-verifiable typed holding ID', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1360, height: 860 } })
+  const requests = []
+  await installFixture(context, requests)
+  const page = await context.newPage()
+  await page.goto('/chat')
+  await openAssets(page)
+  const input = page.getByRole('textbox', { name: '输入消息' })
+  await input.fill('查看 @稳')
+  const option = page.getByRole('option').filter({ hasText: '稳稳盈 90 天' })
+  await expect(option).toBeVisible()
+  await option.click()
+  await expect(page.getByLabel('已引用的金融对象')).toContainText('理财持仓')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0].references).toEqual([{ kind: 'holding', id: 9 }])
+  expect(requests[0].content).not.toContain('用户在界面选择的参考对象')
+  await context.close()
+})
+
+test('V2 desktop: holding-to-holding drag creates a convert intent with typed amount', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1360, height: 860 } })
+  const requests = []
+  await installFixture(context, requests)
+  const page = await context.newPage()
+  await page.goto('/chat')
+  await openAssets(page)
+  const from = await page.locator('[data-asset-kind="holding"][data-asset-id="9"]').boundingBox()
+  const to = await page.locator('[data-asset-kind="holding"][data-asset-id="10"]').boundingBox()
+  expect(from).not.toBeNull()
+  expect(to).not.toBeNull()
+  await page.mouse.move(from.x + 25, from.y + 25)
+  await page.mouse.down()
+  await page.mouse.move(to.x + 30, to.y + 25, { steps: 12 })
+  await page.mouse.up()
+  await expect(page.getByRole('button', { name: '移除前置意图' })).toBeVisible()
+  const input = page.getByRole('textbox', { name: '输入消息' })
+  await expect(input).toHaveValue('转换金额：')
+  await input.fill('转换金额：1000')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0].intent).toEqual({
+    action: 'convert',
+    source: { kind: 'holding', id: 9 },
+    target: { kind: 'holding', id: 10 },
+  })
+  expect(requests[0].content).toBe('转换金额：1000')
   await context.close()
 })

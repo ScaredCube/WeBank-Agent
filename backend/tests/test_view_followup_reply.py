@@ -48,6 +48,6 @@ def test_agent_no_tool_reply_uses_verified_view_selection():
         return provider.calls, events
 
     calls, result = asyncio.run(run())
-    assert calls == 0
+    assert calls == 1  # V2 runs a separate tool-free wording pass.
     assert len(result) == 1 and result[0].type == "delta"
     assert "餐饮" in result[0].data["text"] and "123.45" in result[0].data["text"]

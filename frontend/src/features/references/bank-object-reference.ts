@@ -27,12 +27,12 @@ export function addBankReference(current: BankObjectReference[], next: BankObjec
   return [...retained, next].slice(-5)
 }
 
-/** The legacy text bridge is only for unsupported holding references.
- * Account, card and contact references are now typed and resolved server-side.
+/** All normal account/card/contact/holding references travel as typed IDs.
+ * The text preview path is retained only for synthetic fixture previews.
  */
 export function composeReferenceContext(raw: string, references: BankObjectReference[], syntheticPreview = false): string {
   const prompt = raw.trim()
-  const legacyReferences = syntheticPreview ? references : references.filter(item => item.kind === 'holding')
+  const legacyReferences = syntheticPreview ? references : []
   if (!legacyReferences.length) return prompt
   const selections = legacyReferences.map(item =>
     `${referenceKindLabel(item.kind)}：${item.label}（${item.detail}；界面标识 ${item.id}）`).join('；')
@@ -49,7 +49,7 @@ export function presentReferenceMessage(content: string) {
     const position = content.lastIndexOf(typed)
     const description = content.slice(position + typed.length, -1)
     const objects = description.split('；').filter(item =>
-      /^(账户|银行卡|联系人)：.{1,150}$/.test(item))
+      /^(账户|银行卡|联系人|理财持仓)：.{1,150}$/.test(item))
     if (objects.length) return {text:content.slice(0,position),objects}
   }
   const verified = '\n\n[已引用账户：'

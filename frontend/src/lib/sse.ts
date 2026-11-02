@@ -158,7 +158,7 @@ export async function streamChat({
         ...(viewContext ? { view_context: viewContext } : {}),
         ...(intent ? { intent } : {}),
         references: references
-          .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact')
+          .filter(ref => ref.kind === 'account' || ref.kind === 'card' || ref.kind === 'contact' || ref.kind === 'holding')
           .map(ref => ({ kind: ref.kind, id: ref.id })),
       }),
       signal,

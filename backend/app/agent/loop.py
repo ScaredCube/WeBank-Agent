@@ -24,7 +24,7 @@ from app.agent.response_policy import (
     decide_no_tool_reply, tool_free_reply,
 )
 from app.agent.response_recovery import recover_no_tool_reply
-from app.agent.response_synthesis import ResponseSynthesizer, TurnOutcome
+from app.agent.response_synthesis import ResponseSynthesizer, TurnOutcome, should_synthesize_readoutcome
 from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
@@ -71,6 +71,9 @@ class AgentLoop:
         view_reply = (render_view_followup(original_request or "", view_selection)
                       if intent_action is None else None)
         if view_reply is not None:
+            view_reply = await ResponseSynthesizer(self.llm).compose_view(
+                user_goal=original_request or "", verified_summary=view_reply,
+            )
             yield AgentEvent("delta", {"text": view_reply})
             return
         registry = create_agent_registry()
@@ -193,11 +196,12 @@ class AgentLoop:
                                  else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                                  else render_tool_result(name, result))
                                 for name, result in tool_results)
-                        summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
-                            user_goal=request,
-                            verified_results=tuple(tool_results),
-                            fallback_text=summary,
-                        ))
+                        if should_synthesize_readoutcome(request, tool_results):
+                            summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                                user_goal=request,
+                                verified_results=tuple(tool_results),
+                                fallback_text=summary,
+                            ))
                         yield AgentEvent("delta", {"text": summary})
                     else:
                         if getattr(self.llm, "mode", None) == "mock":
@@ -222,11 +226,14 @@ class AgentLoop:
                                     or verified_contact_token or has_selected_contact
                                 ),
                             )
-                            # The ordinary answer costs no second LLM call.
-                            # Only an incomplete operation clarification merits a
-                            # bounded, tool-free wording recovery on a live provider.
-                            if (decision.route == ReplyRoute.CLARIFY_ACTION
-                                    and getattr(self.llm, "mode", None) == "openai"):
+                            # Ordinary accepted chat remains single-call; missing
+                            # data, status checks, and action clarification may use
+                            # a separate bounded tool-free wording pass.
+                            if (decision.route in {
+                                    ReplyRoute.CLARIFY_ACTION,
+                                    ReplyRoute.QUERY_REQUIRED,
+                                    ReplyRoute.VERIFY_STATUS,
+                                } and getattr(self.llm, "mode", None) == "openai"):
                                 text = await recover_no_tool_reply(decision, model=self.llm)
                             else:
                                 text = decision.safe_text
@@ -320,11 +327,12 @@ class AgentLoop:
                     history, tool_results, user_request=original_request,
                 )
                 if final_readonly_text is not None:
-                    final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
-                        user_goal=original_request or "",
-                        verified_results=tuple(tool_results),
-                        fallback_text=final_readonly_text,
-                    ))
+                    if should_synthesize_readoutcome(original_request or "", tool_results):
+                        final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                            user_goal=original_request or "",
+                            verified_results=tuple(tool_results),
+                            fallback_text=final_readonly_text,
+                        ))
                     yield AgentEvent("delta", {"text": final_readonly_text})
                     return
         except Exception:

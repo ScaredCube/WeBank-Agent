@@ -17,6 +17,17 @@ from app.risk.injection import detect_injection
 from app.tools.presentation import render_tool_result
 
 # This pass is not authorised to confirm financial actions.
+_ANALYSIS_CUES = ("分析", "为什么", "原因", "对比", "比较", "变化", "趋势", "异常", "值得注意", "占比")
+
+
+def should_synthesize_readoutcome(user_goal: str, results: list[tuple[str, dict]]) -> bool:
+    """Start V2 with actual analytical requests; simple receipts stay fast."""
+    return (any(cue in user_goal for cue in _ANALYSIS_CUES)
+            and bool(results)
+            and all(name in _READ_ONLY and result.get("ok") is True
+                    for name, result in results))
+
+
 _READ_ONLY = frozenset({
     "get_account_balance", "get_monthly_bill", "get_card_status",
     "list_recent_transactions", "get_wealth_products", "get_wealth_holdings",
@@ -50,6 +61,46 @@ class ResponseSynthesizer:
     def __init__(self, model: LLMProvider, *, timeout: float = 8.0) -> None:
         self.model = model
         self.timeout = timeout
+
+    async def compose_view(self, *, user_goal: str, verified_summary: str) -> str:
+        """Verbalise a validated category selection without another bank lookup.
+
+        The deterministic aggregate remains the only source of numerical facts.
+        """
+        if not verified_summary or getattr(self.model, "mode", None) == "mock":
+            return verified_summary
+        payload = {
+            "goal": user_goal,
+            "verified_result_types": ["validated_view_category"],
+            "verified_facts": verified_summary,
+            "constraints": "Only explain what the selected aggregate supports.",
+        }
+        chunks: list[str] = []
+        try:
+            async with asyncio.timeout(self.timeout):
+                async for chunk in self.model.stream([
+                    {"role": "system", "content": _SYSTEM},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ], tools=None):
+                    if getattr(chunk, "tool_calls", None):
+                        return verified_summary
+                    part = getattr(chunk, "content", "") or ""
+                    if not isinstance(part, str):
+                        return verified_summary
+                    chunks.append(part)
+                    if sum(len(item) for item in chunks) > 1200:
+                        return verified_summary
+            decoded = json.loads("".join(chunks))
+            if not isinstance(decoded, dict) or set(decoded) != {"narrative"}:
+                return verified_summary
+            narrative = decoded["narrative"]
+            if (not isinstance(narrative, str) or not (6 <= len(narrative) <= 350)
+                    or "\n" in narrative or _UNVERIFIED_CLAIMS.search(narrative)
+                    or detect_injection(narrative).blocked):
+                return verified_summary
+            return narrative.strip() + "\n\n" + verified_summary
+        except Exception:
+            return verified_summary
 
     async def compose(self, outcome: TurnOutcome) -> str:
         """Use a separate model call for explanation; always retain trusted facts."""

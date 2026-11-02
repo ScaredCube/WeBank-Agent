@@ -14,7 +14,7 @@ from app.services.chat_messages import present_message, present_messages
 from app.api.deps import CurrentUser, SessionDep, security_gate
 from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Conversation, Account, Card, Contact, Message, ChatSubmission
+from app.models import Conversation, Account, Card, Contact, WealthHolding, WealthProduct, Message, ChatSubmission
 from app.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -190,6 +190,7 @@ async def send_message(
     selected_account = None
     selected_card = None
     selected_contact = None
+    selected_holding = None
     for ref in payload.references:
         if ref.kind == "account":
             selected_account = session.exec(select(Account).where(
@@ -210,6 +211,13 @@ async def send_message(
                 Contact.status == "active")).first()
             if selected_contact is None:
                 raise HTTPException(status_code=400, detail="所选联系人不可用，请重新选择")
+        elif ref.kind == "holding":
+            selected_holding = session.exec(select(WealthHolding, WealthProduct).join(
+                WealthProduct, WealthHolding.product_id == WealthProduct.id).where(
+                WealthHolding.id == ref.id, WealthHolding.user_id == user.id,
+                WealthHolding.status == "active")).first()
+            if selected_holding is None:
+                raise HTTPException(status_code=400, detail="所选理财持仓不可用，请重新选择")
     # Cached user selection is only a READ-ONLY continuity hint, not a mandate.
     # Re-check both identity and current status; never inherit context for
     # transfers, subscriptions or other prepare/execute operations.
@@ -379,6 +387,15 @@ async def send_message(
                     f"引用为 recipient_contact_token={contact_token}。"
                     "仅当用户明确要求模拟转账并提供金额时，才可使用 prepare_transfer；"
                     "该工具必须核对联系人引用与账户，并返回待用户确认的动作，不能直接扣款。"
+                )
+            if selected_holding is not None:
+                holding, product = selected_holding
+                visible.append(f"理财持仓：{product.name}")
+                trusted.append(
+                    "经核验的理财持仓只读引用："
+                    f"holding_id={holding.id}，product_name={json.dumps(product.name, ensure_ascii=False)}；"
+                    "如需持仓金额和收益必须调用 get_wealth_holdings。"
+                    "该只读引用不得用于准备交易，资金操作必须重新核验结构化意图。"
                 )
             if not reused_readonly_selection:
                 display_content += "\n\n[已引用对象：" + "；".join(visible) + "]"
