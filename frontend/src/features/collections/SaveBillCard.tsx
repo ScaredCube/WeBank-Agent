@@ -52,7 +52,7 @@ export function SaveBillCard({ value, hidden, userId, token, origin }: {
     <IntelligentCard value={card} hidden={hidden}/>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" disabled={status !== 'idle'} onClick={() => void save()}
-        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-medium text-jade-800 transition-colors hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700 disabled:opacity-65">
+        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-medium text-jade-800 hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700 disabled:opacity-65">
         {status === 'saved' ? <Check size={16}/> : <Bookmark size={16}/>}
         {status === 'saved' ? '已收藏' : status === 'saving' ? '保存中…' : '收藏卡片'}
       </button>

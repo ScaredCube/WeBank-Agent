@@ -1,13 +1,13 @@
 {
-  "source_revision": "3a51181d41c7be88e245ebbe84ccbb07151be126",
+  "source_revision": "730e8c8f789d968e7a3fbd7905b0421a1f1fa037",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
-    "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
+    "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
     "RESPONSE_RECOVERY_PROMPT": "b6fe66023300d62a"
   },
   "effective_versions": {
     "agent": "agent:976ac34290cb8a39",
-    "guard": "guard:3637e17f6d8f8e21",
+    "guard": "guard:03e814d7bb7ea71d",
     "recovery": "recovery:b6fe66023300d62a",
     "agent:transfer": "agent:5702dbd3ebea98b6",
     "agent:internal_transfer": "agent:5f88f97514f7cec4",
@@ -23,7 +23,7 @@
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
     "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
     "agent_loop": "agent_loop:bd9b3523b46c09a5",
-    "tool_executor": "tool_executor:7fe56c120f9de3d5",
+    "tool_executor": "tool_executor:05e347567f0af1f0",
     "scope_contract": "scope_contract:d5d1151bd5920a21",
     "snapshot_contract": "snapshot_contract:2f643e31a1138fe5",
     "chat_request_recovery": "chat_request_recovery:372925108ceed90b"

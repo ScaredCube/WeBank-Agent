@@ -25,7 +25,8 @@ def test_guard_does_not_depend_on_an_obsolete_hardcoded_readonly_tool_list():
     assert "风险等级为 green" in prompt
     assert "名称不在某份手写清单中就拒绝" in prompt
     assert "只输出一个 JSON 对象" in prompt
-    assert "准备/写操作" in prompt
+    assert "对 prepare_* 等可能创建待确认动作的工具" in prompt
+    assert "风险提升一档" in prompt
 
 
 def test_prompt_describes_new_execution_modes_without_pretending_completion():

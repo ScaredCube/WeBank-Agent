@@ -1,8 +1,11 @@
 import { useRef, useState } from 'react'
+import { ScanFace } from 'lucide-react'
+import { motion } from 'motion/react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { ApiError, type SubscriptionCancelExecution, type WealthOrderExecution } from '@/lib/api'
 import type { StreamEvent } from '@/lib/sse'
 import { formatCnyFen } from '@/lib/format'
+import { DURATION, EASE_OUT, SPRING_SOFT, useMotionReduced } from '@/lib/motion'
 import { PenguinArt } from '@/features/theme/PenguinArt'
 import { ActionJourney, type ActionStage } from './ActionJourney'
 import { serviceActionTransport, type ActionTransport } from './transport'
@@ -20,6 +23,7 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   const [wealthResult, setWealthResult] = useState<WealthOrderExecution | null>(null)
   const [subscriptionResult, setSubscriptionResult] = useState<SubscriptionCancelExecution | null>(null)
   const busyRef = useRef(false)
+  const reduced = useMotionReduced()
   const { action, confirmation_token: confirmationToken } = event
   const service = transport ?? serviceActionTransport(token!)
   const transfer = action.action_type === 'transfer'
@@ -32,6 +36,7 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   const subscriptionCancel = action.action_type === 'subscription_cancel'
   const cardLoss = action.action_type === 'card_loss'
   const usesMoney = transfer || internalTransfer || collection || wealthOrder || wealthConversion || subscriptionCancel
+  const faceRequired = action.details.verification === 'password_face'
   const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
   const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value)
   const positiveId = (value: unknown): value is number => safeInteger(value) && Number(value) > 0
@@ -52,10 +57,10 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     positiveId(event.subscription_id) && action.details.subscription_id === event.subscription_id && nonempty(action.details.merchant) &&
     validAmount && nonempty(action.details.cycle) && typeof action.details.next_charge_date === 'string' &&
     Number.isFinite(Date.parse(action.details.next_charge_date)) && action.details.status === 'active'
-  const supportedInternal = internalTransfer && action.risk_level === 'yellow' && event.transfer_id !== undefined &&
+  const supportedInternal = internalTransfer && (action.risk_level === 'yellow' || action.risk_level === 'red') && event.transfer_id !== undefined &&
     positiveId(event.transfer_id) && validAmount && nonempty(action.details.source_masked) &&
     nonempty(action.details.target_masked) && action.details.currency === 'CNY'
-  const supportedCollection = collection && action.risk_level === 'yellow' && event.collection_id !== undefined &&
+  const supportedCollection = collection && (action.risk_level === 'yellow' || action.risk_level === 'red') && event.collection_id !== undefined &&
     positiveId(event.collection_id) && validAmount && nonempty(action.details.contact_name) &&
     nonempty(action.details.account_masked) && action.details.currency === 'CNY'
   const supportedConversion = wealthConversion && action.risk_level === 'red' && event.conversion_id !== undefined &&
@@ -112,9 +117,14 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
     let verified = false
     try {
       const result = await service.step(action.id, 'verification/verify', { token: confirmationToken, code })
+      setCode('')
+      if (result.status === 'code_verified') {
+        setStage('face')
+        setMessage('验证码已通过，请完成模拟人脸识别。')
+        return
+      }
       if (result.status !== 'verified') throw new Error('验证状态无法核实')
       verified = true
-      setCode('')
       setStage('ready')
       setMessage('模拟验证通过，正在执行…')
       // Verification and execution are a single user gesture: a second
@@ -129,6 +139,35 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
         setMessage(verified
           ? '验证已通过，但执行结果暂不确定，请查询状态；不要重复发起操作。'
           : '请求结果暂不确定，请查询状态；不要重复发起操作。')
+      }
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  async function verifyFace() {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setMessage('')
+    let verified = false
+    try {
+      const result = await service.step(action.id, 'verification/face', { token: confirmationToken })
+      if (result.status !== 'verified') throw new Error('人脸验证状态无法核实')
+      verified = true
+      setStage('ready')
+      setMessage('模拟人脸识别通过，正在执行…')
+      await performExecution()
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        setMessage(err.message)
+        setStage('face')
+      } else {
+        setStage('unknown')
+        setMessage(verified
+          ? '人脸验证已通过，但执行结果暂不确定，请查询状态；不要重复发起操作。'
+          : '人脸验证结果暂不确定，请查询状态；不要重复发起操作。')
       }
     } finally {
       busyRef.current = false
@@ -288,25 +327,67 @@ export function PendingActionDialog({ event, token, transport, onClose, onFinish
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !busy) { if (stage === 'complete' || stage === 'cancelled') onFinish(); else onClose() } }}>
     <DialogContent className="bank-action-dialog p-5 sm:p-6">
       <DialogTitle>{operationTitle}</DialogTitle>
-      {stage === "complete" && <div className="flex items-center gap-4 rounded-xl bg-jade-50/60 px-3 py-2"><PenguinArt pose="celebrate" className="size-16" /><span className="text-sm font-medium text-ink">操作已完成</span></div>}
-      <DialogDescription className="mt-2">{supplementalDescription}{operationDescription}{action.risk_level === 'red' && verificationHint}</DialogDescription>
+      {stage === "complete" && <motion.div
+        className="flex items-center gap-4 rounded-xl bg-jade-50/60 px-3 py-2"
+        initial={reduced ? false : { opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }}>
+        <motion.span className="shrink-0"
+          initial={reduced ? false : { scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={reduced ? { duration: 0 } : SPRING_SOFT}>
+          <PenguinArt pose="celebrate" className="size-16" />
+        </motion.span>
+        <span className="text-sm font-medium text-ink">操作已完成</span>
+      </motion.div>}
+      <DialogDescription className="mt-2">{supplementalDescription}{operationDescription}{faceRequired ? '本次操作需要验证码并完成模拟人脸识别。' : action.risk_level === 'red' ? verificationHint : ''}</DialogDescription>
       <ActionJourney stage={stage} needsVerification={action.risk_level === 'red'} busy={busy}/>
       <h3 className="mt-5 text-[12px] font-semibold tracking-tight text-ink">操作信息</h3>
       <dl className="mt-5 divide-y divide-line rounded-xl border border-line px-4">{rows.map(([label, value]) => <div className="flex justify-between gap-4 py-3 text-sm" key={label}><dt className="text-muted">{label}</dt><dd className="text-right font-medium break-all">{privacyLabels.has(label) && hidden ? <span aria-label={`${label}已隐藏`}>••••</span> : value}</dd></div>)}</dl>
       {hidden && usesMoney && onTogglePrivacy && <button type="button" onClick={onTogglePrivacy} className="mt-3 text-sm text-jade-700 underline">查看金额</button>}
-      {wealthResult && <dl className="mt-4 divide-y divide-line rounded-xl border border-jade-200 bg-jade-50/50 px-4" aria-label="理财执行结果">
+      {wealthResult && <motion.dl
+        className="mt-4 divide-y divide-line rounded-xl border border-jade-200 bg-jade-50/50 px-4" aria-label="理财执行结果"
+        initial={reduced ? false : { opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }}>
         <div className="flex justify-between gap-4 py-3 text-sm"><dt className="text-muted">交易流水</dt><dd className="text-right font-medium">{wealthResult.transaction_id}</dd></div>
         <div className="flex justify-between gap-4 py-3 text-sm"><dt className="text-muted">执行后余额</dt><dd className="text-right font-medium">{hidden ? <span aria-label="余额已隐藏">••••</span> : formatCnyFen(wealthResult.balance_fen)}</dd></div>
         <div className="flex justify-between gap-4 py-3 text-sm"><dt className="text-muted">该产品持仓</dt><dd className="text-right font-medium">{hidden ? <span aria-label="持仓金额已隐藏">••••</span> : formatCnyFen(wealthResult.holding_fen)}</dd></div>
-      </dl>}
-      {subscriptionResult && <p className="mt-4 rounded-xl border border-jade-200 bg-jade-50/50 px-4 py-3 text-sm" role="status">服务端已确认模拟订阅 #{subscriptionResult.subscription_id} 已取消。</p>}
+      </motion.dl>}
+      {subscriptionResult && <motion.p
+        className="mt-4 rounded-xl border border-jade-200 bg-jade-50/50 px-4 py-3 text-sm" role="status"
+        initial={reduced ? false : { opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.base, ease: EASE_OUT }}>
+        服务端已确认模拟订阅 #{subscriptionResult.subscription_id} 已取消。
+      </motion.p>}
       <p className="mt-3 text-xs text-muted">有效期至 {new Date(action.expires_at).toLocaleString('zh-CN')}。关闭页面后确认凭证无法恢复。</p>
       {!supported && <p role="alert" className="mt-3 text-sm text-red-700">{missingBusinessTransport ? '当前演示没有连接此业务接口，无法继续。' : '动作信息不完整或当前不支持，请勿继续。'}</p>}
       {message && <p role="status" className="mt-3 text-sm text-ink">{message}</p>}
       {(stage === 'unknown' || stage === 'rejected') && <p className="mt-2 text-xs text-muted">移除本地记录不会取消服务端操作，也无法恢复确认凭证。</p>}
-      {stage === 'code' && <label className="mt-4 block text-sm">模拟验证码<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" className="mt-2 w-full rounded-xl border border-line bg-white px-3 py-2" /></label>}
+      {stage === 'code' && <motion.label
+        className="mt-4 block text-sm"
+        initial={reduced ? false : { opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}>
+        模拟验证码<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" className="mt-2 w-full rounded-xl border border-line bg-white px-3 py-2" />
+      </motion.label>}
+      {stage === 'face' && <motion.div
+        className="mt-4 rounded-2xl border border-jade-200 bg-jade-50/50 px-4 py-5 text-center"
+        initial={reduced ? false : { opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}>
+        <motion.span aria-hidden="true" className="mx-auto grid size-14 place-items-center rounded-full bg-panel text-jade-700 shadow-sm"
+          animate={reduced ? undefined : { scale: [1, 1.04, 1] }}
+          transition={reduced ? undefined : { duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}>
+          <ScanFace size={26} />
+        </motion.span>
+        <p className="mt-3 text-sm font-semibold text-ink">模拟人脸识别</p>
+        <p className="mt-1 text-xs leading-5 text-muted">验证码已通过。点击开始后完成模拟人脸验证，通过后将自动执行。</p>
+        <button type="button" disabled={busy} onClick={() => void verifyFace()} className="bank-action-primary mt-4 min-h-10 rounded-xl bg-jade-700 px-4 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在识别…' : '开始人脸识别'}</button>
+      </motion.div>}
       <div className="mt-5 flex flex-wrap gap-2">
-        {(stage === 'review' || stage === 'code' || stage === 'recover_pending') && <button disabled={busy} onClick={() => void cancel()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">取消操作</button>}
+        {(stage === 'review' || stage === 'code' || stage === 'face' || stage === 'recover_pending') && <button disabled={busy} onClick={() => void cancel()} className="flex-1 rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50">取消操作</button>}
         {stage === 'review' && <button disabled={busy || !supported || (hidden && usesMoney)} onClick={() => void start()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{action.risk_level === 'red' ? '开始模拟验证' : subscriptionCancel ? '确认取消' : '确认'}</button>}
         {stage === 'code' && <button disabled={busy || !code.trim()} onClick={() => void verify()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">验证</button>}
         {(stage === 'ready' || stage === 'recover_execute') && <button disabled={busy || (hidden && usesMoney)} onClick={() => void execute()} className="bank-action-primary flex-1 rounded-xl bg-jade-700 px-4 py-3 text-sm text-white disabled:opacity-50">{stage === 'recover_execute' ? '按原动作编号重试' : executionLabel}</button>}

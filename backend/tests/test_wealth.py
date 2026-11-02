@@ -43,8 +43,12 @@ def _verify(client, headers, prepared, code=None):
     action, token = prepared["action_id"], prepared["confirmation_token"]
     assert client.post(f"/api/actions/{action}/verification/start", headers=headers,
                        json={"token": token}).status_code == 200
-    return client.post(f"/api/actions/{action}/verification/verify", headers=headers,
-                       json={"token": token, "code": code or settings.demo_verification_code})
+    response = client.post(f"/api/actions/{action}/verification/verify", headers=headers,
+                           json={"token": token, "code": code or settings.demo_verification_code})
+    if response.status_code == 200 and response.json().get("status") == "code_verified":
+        response = client.post(f"/api/actions/{action}/verification/face", headers=headers,
+                               json={"token": token})
+    return response
 
 
 def test_bank_data_routes_are_separate_and_hide_tokens(client, auth_headers):

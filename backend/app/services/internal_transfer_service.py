@@ -11,7 +11,9 @@ from app.models import (
     Account, Card, DataToken, InternalTransfer, PendingAction, Transaction,
 )
 from app.risk.engine import assess_internal_transfer
-from app.services.action_service import create_pending_action, get_pending_action
+from app.services.action_service import (
+    create_pending_action, create_simulated_red_action, get_pending_action,
+)
 from app.services.audit_service import record, request_context
 from app.services.operation_service import begin_write
 from app.services.redaction import mask_text
@@ -155,7 +157,9 @@ def prepare_internal_transfer(user_id: int, *, source_token: str, target_token: 
             "amount_fen": amount_fen, "note": mask_text(note), "currency": "CNY",
             "transfer_type": "internal",
         }
-        action, token = create_pending_action(
+        create_action = (create_simulated_red_action
+                         if decision.level == RiskLevel.RED else create_pending_action)
+        action, token = create_action(
             session, user_id=user_id, action_type="internal_transfer",
             details=details, decision=decision, commit=False,
         )
@@ -164,7 +168,7 @@ def prepare_internal_transfer(user_id: int, *, source_token: str, target_token: 
         session.flush()
         record(session, user_id=user_id, action_id=action.id,
                event_type="internal_transfer_prepared", tool="internal_transfer",
-               risk_level="yellow", result="success")
+               risk_level=decision.level.value, result="success")
         session.commit()
         return {"ok": True, "transfer_id": transfer.id, "confirmation_token": token,
                 "action": get_pending_action(session, user_id=user_id, action_id=action.id)}
@@ -198,11 +202,12 @@ def execute_internal_transfer(user_id: int, transfer_id: int) -> dict:
         action = session.exec(select(PendingAction).where(
             PendingAction.id == transfer.action_id, PendingAction.user_id == user_id,
             PendingAction.action_type == "internal_transfer",
-            PendingAction.risk_level == "yellow", PendingAction.status == "confirmed",
+            PendingAction.risk_level.in_(("yellow", "red")),
+            PendingAction.status.in_(("confirmed", "verified")),
             PendingAction.expires_at > now,
         )).first()
         if action is None:
-            raise InternalTransferError("转账尚未确认或已过期")
+            raise InternalTransferError("转账尚未确认/验证或已过期")
         result = _execute(session, transfer, now)
         action.status = "completed"
         session.add(action)

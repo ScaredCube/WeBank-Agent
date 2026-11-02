@@ -52,9 +52,10 @@ def create_simulated_red_action(
             or not 1 <= expires_in_seconds <= 3600):
         raise ValueError("待验证动作参数无效")
     token = secrets.token_urlsafe(32)
+    verified_details = {**details, "verification": decision.verification or "password"}
     action = PendingAction(
         user_id=user_id, action_type=action_type,
-        details_json=json.dumps(details, ensure_ascii=False), risk_level=RiskLevel.RED.value,
+        details_json=json.dumps(verified_details, ensure_ascii=False), risk_level=RiskLevel.RED.value,
         token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
         expires_at=utcnow() + timedelta(seconds=expires_in_seconds),
     )

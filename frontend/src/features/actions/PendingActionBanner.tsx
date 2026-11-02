@@ -34,7 +34,7 @@ export function PendingActionBanner({ event, onOpen }: { event: Event; onOpen: (
         </p>}
       </div>
       <button type="button" onClick={onOpen}
-        className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-line bg-panel px-3 text-[12px] font-semibold text-jade-800 transition-colors hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700">
+        className="motion-press inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-line bg-panel px-3 text-[12px] font-semibold text-jade-800 hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700">
         查看待处理操作 <ArrowUpRight size={14} aria-hidden="true"/>
       </button>
     </div>

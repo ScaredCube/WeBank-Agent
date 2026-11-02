@@ -17,9 +17,8 @@ async function run(){
   const page=await context.newPage()
   page.on('pageerror',e=>errors.push(e.message))
   await login(page)
-  const creating=page.waitForResponse(r=>r.url().endsWith('/api/chat/conversations')&&r.request().method()==='POST')
-  await page.getByRole('button',{name:'新对话'}).first().click()
-  requireTrue((await creating).status()===201,'Conversation could not be created')
+  // The new home creates its conversation lazily on first message send.
+  // Do not click the new-chat button or wait for a premature POST.
   const input=page.getByRole('textbox',{name:'输入消息'})
   await input.fill('@')
   const suggestions=page.getByRole('listbox',{name:'选择金融对象'})

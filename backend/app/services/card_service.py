@@ -81,7 +81,7 @@ def prepare_loss(user_id: int, card_id: int | None = None, account_token: str | 
                 session.commit()
                 return existing
             account_token = account_token or create_account_token(session, user_id, account.id)
-            decision = RiskDecision(RiskLevel.RED, ("工具基础风险等级",))
+            decision = RiskDecision(RiskLevel.RED, ("工具基础风险等级",), "password_face")
             action, token = create_simulated_red_action(session, user_id=user_id, action_type="card_loss",
                 details={"card_id": card.id, "account_name": mask_text(account.name),
                          "masked_number": mask_text(account.masked_number)}, decision=decision, commit=False)

@@ -58,7 +58,7 @@ it('方向键选择不同账户及银行卡，Escape 可关闭菜单', async () 
   await user.type(input,'@')
   await screen.findByRole('listbox',{name:'选择金融对象'})
   await user.keyboard('{Escape}')
-  expect(screen.queryByRole('listbox')).toBeNull()
+  await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
 })
 
 it('普通对话没有 @ 时不触发对象目录请求', async () => {

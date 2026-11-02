@@ -2,17 +2,26 @@
 import asyncio
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlmodel import Session, select
 
 from app.agent.llm import LLMChunk
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.db.session import get_engine
 from app.models import Account, Card, Contact, TransferRequest, User
 from app.services.transfer_service import TransferError, execute_transfer
 from app.services.vault import VaultError, create_account_token, create_contact_token, resolve
 from app.tools.transfer_tools import prepare_transfer_tool
+
+
+@pytest.fixture(autouse=True)
+def daytime_policy(monkeypatch):
+    hour = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour
+    monkeypatch.setattr(settings, "risk_night_start_hour", (hour + 1) % 24)
+    monkeypatch.setattr(settings, "risk_night_end_hour", (hour + 2) % 24)
 
 
 def _entities():

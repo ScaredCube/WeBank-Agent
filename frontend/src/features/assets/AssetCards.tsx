@@ -10,12 +10,14 @@ type Common = {
   entity: IntentEntity
   selected: boolean
   dropActive: boolean
+  dragging?: boolean
+  settled?: boolean
   onSelect: () => void
   onDetails?: () => void
   onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void
 }
 
-export function AssetBankCard({ account, entity, selected, dropActive, onSelect, onDetails, onPointerDown, index }: Common & {
+export function AssetBankCard({ account, entity, selected, dropActive, dragging, settled, onSelect, onDetails, onPointerDown, index }: Common & {
   account: BankAccountOverview
   index: number
 }) {
@@ -35,13 +37,15 @@ export function AssetBankCard({ account, entity, selected, dropActive, onSelect,
     }}
     onPointerDown={onPointerDown}
     className={cn(
-      'relative flex min-h-[132px] touch-pan-y select-none flex-col justify-between overflow-hidden rounded-[20px] px-5 py-4 text-left shadow-[0_16px_30px_-22px_rgba(6,40,30,.8)] transition-[transform,box-shadow,opacity]',
+      'asset-card relative flex min-h-[132px] touch-pan-y select-none flex-col justify-between overflow-hidden rounded-[20px] px-5 py-4 text-left shadow-[0_16px_30px_-22px_rgba(6,40,30,.8)]',
+      dragging && 'asset-source-active',
+      settled && 'asset-drop-settle',
       alt ? 'text-[#2C2A1E]' : 'text-white',
       alt
         ? 'bg-[radial-gradient(130%_140%_at_90%_-20%,rgba(255,255,255,.66),transparent_55%),linear-gradient(140deg,#E4D7B9_0%,#DACCAA_55%,#CDBE99_100%)]'
         : 'bg-[radial-gradient(120%_130%_at_88%_-10%,rgba(126,190,156,.34),transparent_55%),linear-gradient(140deg,#1B4232_0%,#123026_48%,#0E241D_100%)]',
       selected && 'ring-2 ring-jade-500 ring-offset-2 ring-offset-workspace',
-      dropActive && 'ring-2 ring-emerald-400',
+      dropActive && 'asset-target-active',
       entity.disabled && 'cursor-default opacity-55 grayscale',
       !entity.disabled && 'cursor-grab active:cursor-grabbing',
     )}
@@ -71,7 +75,7 @@ export function AssetBankCard({ account, entity, selected, dropActive, onSelect,
   </article>
 }
 
-export function AssetContactCard({ contact, entity, selected, dropActive, onSelect, onPointerDown }: Common & {
+export function AssetContactCard({ contact, entity, selected, dropActive, dragging, settled, onSelect, onPointerDown }: Common & {
   contact: BankContactOverview
 }) {
   return <button
@@ -85,9 +89,11 @@ export function AssetContactCard({ contact, entity, selected, dropActive, onSele
     onClick={onSelect}
     onPointerDown={onPointerDown}
     className={cn(
-      'flex min-h-[104px] touch-pan-y select-none flex-col items-center gap-1 rounded-[18px] border border-line-2 bg-panel px-2 pb-3 pt-4 text-center transition',
+      'asset-card flex min-h-[104px] touch-pan-y select-none flex-col items-center gap-1 rounded-[18px] border border-line-2 bg-panel px-2 pb-3 pt-4 text-center',
+      dragging && 'asset-source-active',
+      settled && 'asset-drop-settle',
       selected && 'border-jade-500 bg-jade-50',
-      dropActive && 'border-emerald-400 bg-emerald-50',
+      dropActive && 'asset-target-active border-emerald-400 bg-emerald-50',
       entity.disabled ? 'cursor-default opacity-50' : 'cursor-grab hover:-translate-y-0.5 hover:shadow-md',
     )}
   >
@@ -99,7 +105,7 @@ export function AssetContactCard({ contact, entity, selected, dropActive, onSele
   </button>
 }
 
-export function AssetHoldingCard({ holding, entity, selected, dropActive, onSelect, onPointerDown }: Common & {
+export function AssetHoldingCard({ holding, entity, selected, dropActive, dragging, settled, onSelect, onPointerDown }: Common & {
   holding: WealthHoldingOverview
 }) {
   const up = holding.yesterday_earnings_fen >= 0
@@ -114,9 +120,11 @@ export function AssetHoldingCard({ holding, entity, selected, dropActive, onSele
     onClick={onSelect}
     onPointerDown={onPointerDown}
     className={cn(
-      'flex w-full touch-pan-y select-none items-center gap-3 rounded-[16px] border border-line-2 bg-panel px-4 py-3 text-left transition',
+      'asset-card flex w-full touch-pan-y select-none items-center gap-3 rounded-[16px] border border-line-2 bg-panel px-4 py-3 text-left',
+      dragging && 'asset-source-active',
+      settled && 'asset-drop-settle',
       selected && 'border-jade-500 bg-jade-50',
-      dropActive && 'border-emerald-400 bg-emerald-50',
+      dropActive && 'asset-target-active border-emerald-400 bg-emerald-50',
       entity.disabled ? 'cursor-default opacity-50' : 'cursor-grab hover:-translate-y-0.5 hover:shadow-md',
     )}
   >

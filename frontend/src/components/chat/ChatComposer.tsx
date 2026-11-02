@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { Textarea } from '@/components/ui/textarea'
+import { DURATION, EASE_OUT, useMotionReduced } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { findMention } from './mention'
 import { OBJECT_MIME, parseDroppedReference, referenceKindLabel, type BankObjectReference } from '@/features/references/bank-object-reference'
@@ -26,7 +27,7 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
   intentSlot, intentActive = false }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
-  const prefersReducedMotion = useReducedMotion()
+  const reduced = useMotionReduced()
   const [dropActive, setDropActive] = useState(false)
   const [caret, setCaret] = useState(value.length)
   const [suggestions, setSuggestions] = useState<BankObjectReference[]>([])
@@ -95,60 +96,70 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
     onReferenceDrop(ref)
     textareaRef.current?.focus()
   }
-  return <motion.form
-    layoutId={prefersReducedMotion ? undefined : 'chat-composer'}
-    transition={{ type: 'spring', stiffness: 280, damping: 32 }}
+  return <form
     className={cn('mx-auto w-full', home ? 'max-w-none' : 'max-w-[704px]')}
     onDragOver={onDragOver}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropActive(false) }}
     onDrop={onDrop}
     onSubmit={(event) => { event.preventDefault(); if (canSend) onSend() }}
   >
-    <motion.div data-object-dropzone
-      animate={dropActive && !prefersReducedMotion ? { scale: 1.008 } : { scale: 1 }}
-      transition={{ type: 'spring', stiffness: 570, damping: 34, mass: 0.6 }}
+    <div data-object-dropzone
       className={cn(
-      'relative rounded-[21px] border border-line bg-panel p-2.5 transition-[border-color,box-shadow,background-color] focus-within:border-jade-500 focus-within:ring-4 focus-within:ring-jade-500/10',
+      'relative rounded-[21px] border border-line bg-panel p-2.5 focus-within:border-jade-500 focus-within:ring-4 focus-within:ring-jade-500/10',
       home ? 'min-h-[92px] shadow-[0_14px_40px_-32px_rgba(0,48,36,.4)]' : 'min-h-[76px]',
       dropActive && 'border-jade-600 bg-jade-50 ring-4 ring-jade-500/15',
     )}>
-      {intentSlot && <div className="px-1 pb-2 pt-1">{intentSlot}</div>}
+      <AnimatePresence initial={false}>
+        {intentSlot && <motion.div key="intent-slot" className="overflow-hidden px-1 pb-2 pt-1"
+          initial={reduced ? false : { height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={reduced ? { duration: 0 } : { duration: 0.18, ease: EASE_OUT }}>
+          {intentSlot}
+        </motion.div>}
+      </AnimatePresence>
       {references.length > 0 && <div aria-label="已引用的金融对象" className="flex flex-wrap gap-2 px-2 pb-2 pt-1">
         <AnimatePresence initial={false}>
-        {references.map(ref => <motion.span key={`${ref.kind}:${ref.id}`}
-          layout={!prefersReducedMotion}
-          initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.88, y: 5 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={prefersReducedMotion ? undefined : { opacity: 0, scale: 0.88, y: -3 }}
-          transition={{ type: "spring", stiffness: 520, damping: 31 }}
-          className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-jade-200 bg-jade-50 px-2.5 py-1 text-xs text-jade-900">
-          <span className="font-semibold">{referenceKindLabel(ref.kind)}</span>
-          <span className="max-w-[140px] truncate">{ref.label}</span>
-          <button type="button" aria-label={`移除引用：${ref.label}`} onClick={() => onRemoveReference?.(ref)}
-            className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-jade-100 focus-visible:outline-2 focus-visible:outline-jade-700">
-            <X size={14} aria-hidden="true"/>
-          </button>
-        </motion.span>)}
+          {references.map(ref => <motion.span key={`${ref.kind}:${ref.id}`}
+            layout
+            initial={reduced ? false : { opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-jade-200 bg-jade-50 px-2.5 py-1 text-xs text-jade-900">
+            <span className="font-semibold">{referenceKindLabel(ref.kind)}</span>
+            <span className="max-w-[140px] truncate">{ref.label}</span>
+            <button type="button" aria-label={`移除引用：${ref.label}`} onClick={() => onRemoveReference?.(ref)}
+              className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-jade-100 focus-visible:outline-2 focus-visible:outline-jade-700">
+              <X size={14} aria-hidden="true"/>
+            </button>
+          </motion.span>)}
         </AnimatePresence>
       </div>}
-      {showing && <div role="listbox" id="bank-object-mentions"
-        aria-label="选择金融对象"
-        className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 max-h-72 overflow-auto rounded-2xl border border-line bg-panel p-1.5 shadow-[0_16px_45px_-22px_rgba(0,38,29,.4)]">
-        {suggestionsLoading && !suggestions.length ? <p className="px-3 py-3 text-xs text-muted">正在加载可引用对象…</p>
-        : suggestionsError ? <p className="px-3 py-3 text-xs text-muted">暂时无法获取对象，请稍后重试。</p>
-        : filtered.length ? filtered.map((item, index) => <button type="button" role="option"
-            aria-selected={index === activeSuggestion} key={item.kind+':'+item.id}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => insertMention(item)}
-            className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700',
-              index === activeSuggestion && 'bg-jade-50')}>
-            <span className="w-12 shrink-0 text-[11px] font-semibold text-jade-800">{referenceKindLabel(item.kind)}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-semibold text-ink">{item.label}</span>
-              <span className="block truncate text-[11px] text-muted">{item.detail}</span>
-            </span>
-          </button>) : <p className="px-3 py-3 text-xs text-muted">没有匹配的金融对象</p>}
-      </div>}
+      <AnimatePresence initial={false}>
+        {showing && <motion.div key="object-mentions" role="listbox" id="bank-object-mentions"
+          aria-label="选择金融对象"
+          className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 max-h-72 origin-bottom overflow-auto rounded-2xl border border-line bg-panel p-1.5 shadow-[0_16px_45px_-22px_rgba(0,38,29,.4)]"
+          initial={reduced ? false : { opacity: 0, scale: 0.98, y: 4 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.98, y: 4 }}
+          transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}>
+          {suggestionsLoading && !suggestions.length ? <p className="px-3 py-3 text-xs text-muted">正在加载可引用对象…</p>
+          : suggestionsError ? <p className="px-3 py-3 text-xs text-muted">暂时无法获取对象，请稍后重试。</p>
+          : filtered.length ? filtered.map((item, index) => <button type="button" role="option"
+              aria-selected={index === activeSuggestion} key={item.kind+':'+item.id}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertMention(item)}
+              className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-jade-50 focus-visible:outline-2 focus-visible:outline-jade-700',
+                index === activeSuggestion && 'bg-jade-50')}>
+              <span className="w-12 shrink-0 text-[11px] font-semibold text-jade-800">{referenceKindLabel(item.kind)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-ink">{item.label}</span>
+                <span className="block truncate text-[11px] text-muted">{item.detail}</span>
+              </span>
+            </button>) : <p className="px-3 py-3 text-xs text-muted">没有匹配的金融对象</p>}
+        </motion.div>}
+      </AnimatePresence>
       <div className="flex items-end gap-2">
         <Textarea ref={textareaRef} rows={1} value={value}
           placeholder={intentActive ? '补充金额和备注' : references.length ? '围绕所选对象，想了解什么？' : '说说你想办的事'}
@@ -184,19 +195,25 @@ export function ChatComposer({ value, onChange, onSend, disabled = false, onStop
             }
           }}
         />
-        {onStop ? <button type="button" onClick={onStop} aria-label="停止接收" title="停止接收" className="grid size-11 shrink-0 place-items-center rounded-xl bg-ink text-white focus-visible:outline-2 focus-visible:outline-jade-700">
+        {onStop ? <button type="button" onClick={onStop} aria-label="停止接收" title="停止接收" className="motion-press grid size-11 shrink-0 place-items-center rounded-xl bg-ink text-white focus-visible:outline-2 focus-visible:outline-jade-700">
           <Square size={15} fill="currentColor" />
-        </button> : <motion.button type="submit" disabled={!canSend} aria-label="发送"
-          whileHover={prefersReducedMotion || !canSend ? undefined : { scale: 1.05 }}
-          whileTap={prefersReducedMotion || !canSend ? undefined : { scale: 0.89 }}
-          transition={{ type: "spring", stiffness: 620, damping: 30, mass: 0.5 }}
-          className={cn('grid size-11 shrink-0 place-items-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700',
+        </button> : <button type="submit" disabled={!canSend} aria-label="发送"
+          className={cn('motion-press grid size-11 shrink-0 place-items-center rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-jade-700',
             canSend ? 'bg-jade-700 text-white hover:bg-jade-800' : 'bg-ink/5 text-muted/45')}>
           <ArrowUp className="size-[18px]" strokeWidth={2.3} />
-        </motion.button>}
+        </button>}
       </div>
-      {dropActive && <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center rounded-[20px] border-2 border-dashed border-jade-600 bg-panel/90 text-sm font-semibold text-jade-800">释放以引用到对话</div>}
-    </motion.div>
+      <AnimatePresence>
+        {dropActive && <motion.div aria-hidden="true"
+          className="pointer-events-none absolute inset-0 grid place-items-center rounded-[20px] border-2 border-dashed border-jade-600 bg-panel/90 text-sm font-semibold text-jade-800"
+          initial={reduced ? false : { opacity: 0, scale: 0.99 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.99 }}
+          transition={reduced ? { duration: 0 } : { duration: DURATION.press, ease: EASE_OUT }}>
+          释放以引用到对话
+        </motion.div>}
+      </AnimatePresence>
+    </div>
     {references.length > 0 && <p className="mt-1.5 px-2 text-[11px] leading-5 text-muted">对象是待核验的提问线索；发送前可移除。交易仍需单独确认。</p>}
-  </motion.form>
+  </form>
 }

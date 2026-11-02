@@ -48,8 +48,16 @@ async function installFixture(context, requests) {
 }
 
 async function openAssets(page) {
-  await page.getByRole('button', { name: '打开资产' }).click()
-  await expect(page.getByRole('region', { name: '资产' })).toBeVisible()
+  const region = page.getByRole('region', { name: '资产' })
+  const opener = page.getByRole('button', { name: '打开资产' })
+  await Promise.race([
+    region.waitFor({ state: 'visible' }).catch(() => {}),
+    opener.waitFor({ state: 'visible' }).catch(() => {}),
+  ])
+  if (!(await region.isVisible().catch(() => false))) {
+    await opener.click()
+  }
+  await expect(region).toBeVisible()
   await page.waitForTimeout(350)
 }
 
@@ -90,5 +98,32 @@ test('desktop: privacy blurs amounts and reveals on click', async ({ browser }) 
   await amount.click()
   await expect.poll(() => page.locator('[aria-label="金额已隐藏"]').count()).toBeLessThan(before)
   await page.screenshot({ path: 'test-results/desktop-assets.png' })
+  await context.close()
+})
+
+test('desktop: assets stay on the left and the utility drawer opens on the right', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 860 } })
+  await installFixture(context, [])
+  const page = await context.newPage()
+  await page.goto('/chat')
+
+  const assets = page.getByRole('region', { name: '资产' })
+  await expect(assets).toBeVisible()
+  const assetsBox = await assets.boundingBox()
+  expect(assetsBox).not.toBeNull()
+  expect(assetsBox.x).toBeLessThan(40)
+
+  await page.getByRole('button', { name: '打开导航和会话列表' }).click()
+  const drawer = page.locator('#utility-sidebar')
+  await expect(drawer).toBeVisible()
+  const drawerBox = await drawer.boundingBox()
+  expect(drawerBox).not.toBeNull()
+  expect(drawerBox.x + drawerBox.width).toBeGreaterThan(1240)
+
+  await drawer.getByRole('button', { name: '收藏' }).click()
+  await expect(drawer.getByText('我的智能卡片')).toBeVisible()
+  await drawer.getByRole('button', { name: '操作记录' }).click()
+  await expect(drawer.getByText('最近的操作与审计记录')).toBeVisible()
+  await page.screenshot({ path: 'test-results/desktop-utility-drawer.png' })
   await context.close()
 })

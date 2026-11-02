@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
+import { DURATION } from '@/lib/motion'
 import { ThemeContext, type ThemeMode, type ResolvedTheme } from './theme-context'
 
 const STORAGE_KEY = 'webank-agent-theme'
+const THEME_REVEAL_MS = DURATION.theme * 1000
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (callback: () => void) => {
+    ready: Promise<void>
+    finished: Promise<void>
+  }
+}
 
 function systemTheme(): ResolvedTheme {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
@@ -18,55 +27,38 @@ function initialMode(): ThemeMode {
   }
 }
 
-/**
- * View Transitions reveal the NEW document snapshot from the toggle's corner.
- * The old snapshot stays fixed underneath; no screenshot/canvas is needed.
- * Reduced motion and browsers without View Transitions switch immediately.
- */
+/** Theme switches use a short circular reveal when the browser supports it. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>(initialMode)
   const [system, setSystem] = useState<ResolvedTheme>(systemTheme)
-  const transitionBusy = useRef(false)
   const resolved = mode === 'system' ? system : mode
+  const transitioning = useRef(false)
   const toggle = useCallback((origin?: { x: number; y: number }) => {
-    if (transitionBusy.current) return
-    const next: ResolvedTheme = resolved === 'dark' ? 'light' : 'dark'
-    const update = () => setMode(next)
-
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (!origin || reduced || typeof document.startViewTransition !== 'function') {
-      update()
+    const next = resolved === 'dark' ? 'light' : 'dark'
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
+    const startViewTransition = (document as ViewTransitionDocument).startViewTransition
+    if (!startViewTransition || reduced || transitioning.current) {
+      setMode(next)
       return
     }
-
-    const x = Math.max(0, Math.min(window.innerWidth, origin.x))
-    const y = Math.max(0, Math.min(window.innerHeight, origin.y))
+    transitioning.current = true
+    const x = origin?.x ?? window.innerWidth
+    const y = origin?.y ?? 0
     const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y))
-    transitionBusy.current = true
-    try {
-      const transition = document.startViewTransition(() => {
-        // Theme CSS custom properties and the penguin image must both be in the NEW snapshot.
-        flushSync(update)
-      })
-      void transition.ready.then(() => {
-        document.documentElement.animate(
-          { clipPath: [
-            `circle(0px at ${x}px ${y}px)`,
-            `circle(${radius}px at ${x}px ${y}px)`,
-          ] },
-          {
-            duration: 720,
-            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            fill: 'forwards',
-            pseudoElement: '::view-transition-new(root)',
-          },
-        )
-      }).catch(() => { /* navigation/another transition may abort the animation */ })
-      void transition.finished.finally(() => { transitionBusy.current = false })
-    } catch {
-      transitionBusy.current = false
-      update()
-    }
+    const transition = startViewTransition.call(document, () => {
+      flushSync(() => setMode(next))
+    })
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        {
+          duration: THEME_REVEAL_MS,
+          easing: 'cubic-bezier(0.23, 1, 0.32, 1)',
+          pseudoElement: '::view-transition-new(root)',
+        },
+      )
+    }).catch(() => { /* the transition can be skipped by the browser */ })
+    transition.finished.finally(() => { transitioning.current = false })
   }, [resolved])
 
   useEffect(() => {

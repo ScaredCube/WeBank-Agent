@@ -4,7 +4,7 @@ import { RefreshCw, X } from 'lucide-react'
 import { api, type AuditEntry } from '@/lib/api'
 import { ActivityList } from './ActivityList'
 
-export function ActivityPane({ token, onClose }: { token: string; onClose: () => void }) {
+export function ActivityPane({ token, onClose, embedded = false }: { token: string; onClose?: () => void; embedded?: boolean }) {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -28,13 +28,18 @@ export function ActivityPane({ token, onClose }: { token: string; onClose: () =>
 
   useEffect(() => { void load() }, [load])
 
-  return <section aria-label="操作记录" className="flex h-full min-h-0 flex-col bg-workspace">
-    <header className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-4">
-      <button type="button" onClick={onClose} aria-label="返回对话" className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink"><X size={18} /></button>
-      <h2 className="flex-1 text-[17px] font-semibold tracking-tight text-ink">操作记录</h2>
-      <button type="button" onClick={() => void load()} aria-label="刷新操作记录" className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink"><RefreshCw size={17} /></button>
-    </header>
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+  return <section aria-label="操作记录" className={embedded ? 'flex min-h-0 flex-col' : 'flex h-full min-h-0 flex-col bg-workspace'}>
+    {embedded
+      ? <div className="flex shrink-0 items-center gap-2 pb-2">
+          <p className="flex-1 text-xs text-muted">最近的操作与审计记录</p>
+          <button type="button" onClick={() => void load()} aria-label="刷新操作记录" className="grid size-9 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink"><RefreshCw size={16} /></button>
+        </div>
+      : <header className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-4">
+          <button type="button" onClick={onClose} aria-label="返回对话" className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink"><X size={18} /></button>
+          <h2 className="flex-1 text-[17px] font-semibold tracking-tight text-ink">操作记录</h2>
+          <button type="button" onClick={() => void load()} aria-label="刷新操作记录" className="grid size-10 place-items-center rounded-xl text-muted hover:bg-jade-50 hover:text-ink"><RefreshCw size={17} /></button>
+        </header>}
+    <div className={embedded ? 'min-h-0 flex-1' : 'min-h-0 flex-1 overflow-y-auto px-4 py-4'}>
       {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!loading && !error && entries.length === 0 && <p className="py-8 text-sm text-muted">暂无操作记录</p>}
       <ActivityList entries={entries} />

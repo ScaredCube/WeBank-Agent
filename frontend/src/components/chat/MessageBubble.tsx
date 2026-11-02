@@ -31,7 +31,7 @@ export function MessageBubble({
   if (message.role === 'user') {
     const parsed = parseIntentMessage(message.content)
     const visible = presentReferenceMessage(parsed.text)
-    return <div className="rise-in flex justify-end">
+    return <div className="flex justify-end">
       <div className="flex max-w-[90%] flex-col items-end gap-2 sm:max-w-[82%]">
         {parsed.intent && <div aria-label={`前置意图：${parsed.intent}`}
           className="flex min-h-8 max-w-full items-center gap-2 rounded-[12px] bg-[#122019] px-3 py-1 text-[11px] leading-5 text-[#F1EDE1] shadow-[0_6px_16px_-12px_rgba(10,20,15,.6)]">
@@ -49,12 +49,12 @@ export function MessageBubble({
   }
 
   if (streaming && !message.content) {
-    return <div className="rise-in py-1">
+    return <div className="py-1">
       <AgentWorkingIndicator />
     </div>
   }
 
-  return <div className="rise-in group flex items-start gap-3">
+  return <div className="group flex items-start gap-3">
     <PenguinArt pose="avatar" className="mt-0.5 size-9 shrink-0" />
     <div className="min-w-0 flex-1 pt-0.5">
       <div className="mb-2.5 flex items-center gap-2 text-[11px] text-muted">
@@ -73,7 +73,7 @@ export function MessageBubble({
       {!streaming && message.content && <div className="mt-3 flex min-h-8 items-center justify-start gap-2">
         <button type="button" onClick={() => void copyAnswer()}
           aria-label="复制回复" title="复制回复"
-          className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted transition-colors hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted hover:bg-jade-50 hover:text-ink focus-visible:outline-2 focus-visible:outline-jade-700">
           {copyState === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
           {copyState === 'copied' ? '已复制' : '复制'}
         </button>

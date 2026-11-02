@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 from datetime import timedelta, timezone
 
 from sqlalchemy import text
@@ -36,6 +37,14 @@ def _action(session: Session, user_id: int, action_id: int, token: str) -> Pendi
     if action is None or not hmac.compare_digest(action.token_hash, digest):
         raise VerificationError("验证失败：动作无效、已处理或已过期")
     return action
+
+
+def _requires_face(action: PendingAction) -> bool:
+    try:
+        details = json.loads(action.details_json)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(details, dict) and details.get("verification") == "password_face"
 
 
 def _code_digest(action_id: int, code: str) -> str:
@@ -95,14 +104,43 @@ def _verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
             session.commit()
             return False
         now = utcnow()
+        if _requires_face(action):
+            verification.status = "code_verified"
+            action.status = "pending"
+            outcome = "code_verified"
+        else:
+            verification.status = "verified"
+            verification.verified_at = now
+            action.status = "verified"
+            outcome = "verified"
+        session.add(verification)
+        session.add(action)
+        record(session, user_id=user_id, action_id=action_id, event_type="verification_succeeded", result="success")
+        session.commit()
+        return outcome
+
+
+def _verify_face(user_id: int, action_id: int, token: str) -> None:
+    with Session(get_engine()) as session:
+        _begin(session)
+        action = _action(session, user_id, action_id, token)
+        if not _requires_face(action):
+            raise VerificationError("该操作不需要人脸验证")
+        verification = session.exec(select(VerificationSession).where(
+            VerificationSession.action_id == action_id, VerificationSession.user_id == user_id,
+            VerificationSession.status == "code_verified", VerificationSession.expires_at > utcnow(),
+        )).first()
+        if verification is None:
+            raise VerificationError("验证码尚未通过或验证已过期")
+        now = utcnow()
         verification.status = "verified"
         verification.verified_at = now
         action.status = "verified"
         session.add(verification)
         session.add(action)
-        record(session, user_id=user_id, action_id=action_id, event_type="verification_succeeded", result="success")
+        record(session, user_id=user_id, action_id=action_id,
+               event_type="verification_succeeded", result="success")
         session.commit()
-        return True
 
 
 def start_verification(user_id: int, action_id: int, token: str) -> None:
@@ -116,15 +154,26 @@ def start_verification(user_id: int, action_id: int, token: str) -> None:
         raise
 
 
-def verify_code(user_id: int, action_id: int, token: str, code: str) -> bool:
+def verify_code(user_id: int, action_id: int, token: str, code: str) -> str | bool:
     try:
-        success = _verify_code(user_id, action_id, token, code)
+        outcome = _verify_code(user_id, action_id, token, code)
     except Exception as exc:
         denied = isinstance(exc, VerificationError)
         record_separately(user_id=user_id, action_id=action_id,
                           event_type="verification_denied" if denied else "verification_error",
                           result="denied" if denied else "failed")
         raise
-    if not success:
+    if not outcome:
         record_failure(user_id)
-    return success
+    return outcome
+
+
+def verify_face(user_id: int, action_id: int, token: str) -> None:
+    try:
+        _verify_face(user_id, action_id, token)
+    except Exception as exc:
+        denied = isinstance(exc, VerificationError)
+        record_separately(user_id=user_id, action_id=action_id,
+                          event_type="verification_denied" if denied else "verification_error",
+                          result="denied" if denied else "failed")
+        raise

@@ -50,11 +50,14 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
   const [ghost, setGhost] = useState<DragGhostState | null>(null)
   const [activeTargetKey, setActiveTargetKey] = useState<string | null>(null)
   const [activeSourceKey, setActiveSourceKey] = useState<string | null>(null)
+  const [settledKey, setSettledKey] = useState<string | null>(null)
   const suppressClick = useRef(false)
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reduced = useRef(false)
 
   useEffect(() => {
     reduced.current = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    return () => { if (settleTimer.current) clearTimeout(settleTimer.current) }
   }, [])
 
   const cleanup = useCallback((cancelled: boolean) => {
@@ -79,7 +82,14 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
       suppressClick.current = true
       setTimeout(() => { suppressClick.current = false }, 0)
       if (cancelled) onCancel?.()
-      else onDrop(source, target)
+      else {
+        if (target) {
+          setSettledKey(`${target.kind}:${target.id}`)
+          if (settleTimer.current) clearTimeout(settleTimer.current)
+          settleTimer.current = setTimeout(() => setSettledKey(null), 320)
+        }
+        onDrop(source, target)
+      }
     }
   }, [onCancel, onDrop])
 
@@ -180,6 +190,8 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
     if (item.disabled) return
     if (event.pointerType === 'mouse' && event.button !== 0) return
     cleanup(true)
+    if (settleTimer.current) clearTimeout(settleTimer.current)
+    setSettledKey(null)
     suppressClick.current = false
     const current: Session = {
       item, element, pointerId: event.pointerId, pointerType: event.pointerType,
@@ -208,5 +220,5 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
     return true
   }, [])
 
-  return { ghost, activeTargetKey, activeSourceKey, start, consumeClick, reduced: reduced.current }
+  return { ghost, activeTargetKey, activeSourceKey, settledKey, start, consumeClick, reduced: reduced.current }
 }

@@ -6,7 +6,7 @@
 
 ## 当前焦点
 
-- 当前阶段：2026-11-01 已完成前端重构、响应式对话/资产双栏、六动作资产拖拽、意图胶囊与 token 化前置提示词；后端完成内部转账、收款、持仓转换模拟链路。`T-208`、`T-407`、`T-408` 已标记完成。
+- 当前阶段：2026-11-02 已完成“左侧常驻资产栏 + 中间对话 + 右侧工具抽屉”布局重构；资产页从主页一步可达，收藏/操作记录/对话列表收进右侧抽屉。此前已完成六动作资产拖拽、意图胶囊与 token 化前置提示词；后端完成内部转账、收款、持仓转换模拟链路。`T-208`、`T-407`、`T-408`、`T-UX-421` 已标记完成。
 - 下一任务：真实设备与真实后端连续验收、群组 AA 多选收款、`T-406` 会话删除/归档、生产级风控与真实强验证；`T-305`、DAG、记忆、多模态、MCP 暂不进入主线。
 - 进行中：`T-101`～`T-105`、`T-207` 等任务按各自范围维护。旧的 2026-10-31 “真实模型未联调”记录是历史验收时点，**不能代表当前 `main` 能力**。
 - 设计输入：`docs/设计细化.md` 的目标设计已部分落地；前置意图采用人工确认的“实体 ID + 服务端 token 化提示词”方案，详见 `docs/项目汇报.md`。真实银行与语音暂不考虑。
@@ -44,7 +44,7 @@
 - [x] **T-007 AgentLoop 与提示词**
   - 范围：系统提示词、历史窗口、工具注册表接入、异常兜底
   - 验收：模型不可用时返回中文错误；提示词禁止编造账户与交易结果
-  - 2026-11-01 合并 PR #4：系统提示词按“交流与上下文 / 隐私与安全 / 业务与转账 / 结果与异常 / 工具使用与数据引用”分组，补充金额单位确认、附言询问、状态与取消、查询失败/空结果、不支持业务、模拟理财和纠错规则；`response_policy` 减少对“不能帮你转账”等明确否定能力的误拦截，允许有限预算提问，并继续拦截伪造订单、未核实金额和银行事实。验证：后端完整 414 passed。
+  - 2026-11-01 合并 PR #4：系统提示词按“交流与上下文 / 隐私与安全 / 业务与转账 / 结果与异常 / 工具使用与数据引用”分组，补充金额单位确认、附言询问、状态与取消、查询失败/空结果、不支持业务、模拟理财和纠错规则；`response_policy` 减少对“不能帮你转账”等明确否定能力的误拦截，允许有限预算提问，并继续拦截伪造订单、未核实金额和银行事实。验证：后端完整 416 passed。
 
 - [x] **T-008 前端登录与对话界面**
   - 范围：双栏登录页、对话页、会话侧栏、Markdown、流式光标、自动滚动、移动端抽屉
@@ -105,7 +105,7 @@
   - 验收：不伪造成功状态；确认 / 取消 / 过期均有明确反馈；移动端可用
   - 后端交接：见 `docs/T-106前后端接口交接.md`。
   - 2026-10-31 前端已消费 `action_required`，以固定界面区分确认、模拟验证和执行；转账、挂失、理财和订阅动作已有组件/API 测试。正式 `/chat` 浏览器 API 替身用例覆盖黄色转账确认后执行。真实后端、模型和设备端联调仍待验收；不代表真实短信或真实银行操作。
-  - 2026-11-01 交互优化：红色动作模拟验证通过后自动调用执行接口，不再要求第三次点击；验证失败保留验证码输入，执行结果未知仍可查询服务端状态。完成结果卡挂到该轮助手消息，发送新消息后仍保留。前端 204 passed、build 通过、lint 0 errors。
+  - 2026-11-01 交互优化：红色动作模拟验证通过后自动调用执行接口，不再要求第三次点击；验证失败保留验证码输入，执行结果未知仍可查询服务端状态。完成结果卡挂到该轮助手消息，发送新消息后仍保留。前端 205 passed、build 通过、lint 0 errors。
 
 ## P2 安全与可靠性
 
@@ -116,10 +116,11 @@
 
 - [x] **T-202 子 Agent 调用前护栏**（优先级：中）
   - 范围：独立会话检查 Tool 调用行为（功能、理由、历史、环境因子），不传原始用户提示词
-  - 验收：可疑调用被拦截并记录；护栏故障时默认拒绝（fail-closed）；有对抗样例测试
-  - 进展：新增 `app/agent/guard.py`、独立 `GuardProvider` / `LLMGuard`；每次工具执行前审查服务端生成的行为摘要，不传用户原文、姓名、备注、手机号、卡号、令牌正文；拒绝、超时、非法输出和 Provider 异常均 fail-closed；新增 `guard_allowed` / `guard_denied` / `guard_failed` 审计及 `GUARD_TIMEOUT_SECONDS` 配置。详见 `docs/T-202护栏说明.md`。
-  - 验证：`tests/test_guard.py` 8 passed；完整后端回归 414 passed（2026-11-01，模型替身，未调用付费模型）。
-  - 2026-11-01 误拦修复：所有工具仍经过 LLM 护栏；调整 `GUARD_SYSTEM_PROMPT`，只读查询在工具/用途/风险一致且参数摘要正常时明确放行，不再因缺少用户原文或无法确认查询结果误拒；准备/写操作仍严格审查并 fail-closed。
+  - 验收：可疑调用被记录并提升一档风险，不再直接拒绝；有对抗样例测试
+  - 进展：新增 `app/agent/guard.py`、独立 `GuardProvider` / `LLMGuard`；每次工具执行前审查服务端生成的行为摘要，不传用户原文、姓名、备注、手机号、卡号、令牌正文；新增 `guard_allowed` / `guard_denied` / `guard_failed` 审计及 `GUARD_TIMEOUT_SECONDS` 配置。详见 `docs/T-202护栏说明.md`。
+  - 验证：`tests/test_guard.py` 9 passed；完整后端回归 416 passed（2026-11-01，模型替身，未调用付费模型）。
+  - 2026-11-01 误拦修复：所有工具仍经过 LLM 护栏；护栏拒绝/异常改为风险提升一档（绿→黄、黄→红、红密码→红密码+人脸），不再直接拦截；只读查询在用途/风险/参数一致时由提示词明确放行。
+  - 2026-11-01 时间与历史审查：`GUARD_SYSTEM_PROMPT` 要求结合 `local_time` 与 `previous_tools`，识别夜间高风险动作、异常目标切换、短时间连续高风险动作和重复探测；时间只用于升级风险，不直接判定欺诈。
   - 限制：离线 Mock 不启用护栏；真实模型判定质量、延迟与误拒率未验证；跨会话频率统计和用户级熔断属于 T-203。
 
 - [x] **T-203 异常熔断与限流**（优先级：中）
@@ -161,7 +162,7 @@
 - [x] **T-208 前置意图胶囊与工具绑定**（优先级：高）
   - 范围：前端提交 `ChatRequest.intent`（动作 + 来源/目标实体 ID，不传 token）；服务端校验归属、状态和碰撞矩阵；生成 token 化中文前置提示词注入模型；模型金额必须与用户原文一致，来源/目标 token 由服务端覆盖；提示词不写入历史。
   - 验收：伪造或跨用户实体引用被拒绝；模型改变来源 / 目标 / 金额时拒绝；金额无法确定时追问；聊天文本“确认”不能绕过；未定义组合不生成胶囊。
-  - 已实现：`intent_service`、`ChatRequest.intent`、六动作提示词、金额与 token 覆盖、`intent_validated` 审计、跨用户/未定义组合/金额不一致测试。验证：后端 414 passed；前端 204 passed。
+  - 已实现：`intent_service`、`ChatRequest.intent`、六动作提示词、金额与 token 覆盖、`intent_validated` 审计、跨用户/未定义组合/金额不一致测试。验证：后端 416 passed；前端 205 passed。
   - 限制：提示词包含服务端清洗后的账户/联系人显示名；该标签不是授权凭证。跨设备恢复与提示词版本兼容未实现。
 
 ## P3 业务场景扩展
@@ -250,7 +251,7 @@
 - [x] **T-408 组合动作业务链**（优先级：中）
   - 范围：内部转账、收款请求、持仓转换的模型数据、Tool、确认/验证、执行接口、审计与事务回滚。
   - 验收：内部转账 ≤1000 元绿色直接执行且写双侧流水，>1000 元黄色确认，夜间不升红；收款仅发起请求且余额不变；转换仅移动持仓金额；全部按用户隔离。
-  - 已实现：`InternalTransfer`、`CollectionRequest`、`WealthConversion` 表；`prepare_internal_transfer`、`prepare_collection`、`prepare_wealth_convert` Tool；三个执行接口；`tests/test_combo_actions.py` 3 passed，后端完整 414 passed。
+  - 已实现：`InternalTransfer`、`CollectionRequest`、`WealthConversion` 表；`prepare_internal_transfer`、`prepare_collection`、`prepare_wealth_convert` Tool；三个执行接口；`tests/test_combo_actions.py` 3 passed，后端完整 416 passed。
   - 限制：仅 SQLite 模拟业务；未经过真实银行接口、生产风控、真实设备和高并发验收。
 
 ## P5 工程化与交付
@@ -375,3 +376,25 @@
 - [x] **T-RUNTIME-UI-E2E-02b · 可复现的模拟转账工程闭环（P1）**：新增 `run_action_e2e.py --fixture`，通过确定性 Tool Call 驱动真实 Agent Runtime / FastAPI / Chrome / 隔离 SQLite。选账户、待确认、用户确认、执行成功，精确核验两账户余额、一条 1 元模拟交易和确认/完成审计。修复已选择账户但模型遗漏/伪造 `source_token` 的服务端绑定问题。完整审查见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
 - [x] **T-RUNTIME-UI-E2E-02c · 真实供应商 Tool 调用契约问题定位与修复（P0）**：脱敏日志确认 DeepSeek 把手机号混入 `recipient_name`。完善转账 Tool Schema 的姓名/临时号码引用区分，并添加不包含明文的纠错提示；隐私校验和 Guard 不变。修正后真实 DeepSeek → Agent → Chrome → 隔离 SQLite 完整 1 元模拟转账单次验收 PASS，确定性 Fixture 同样 PASS。见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
 - [ ] **T-RUNTIME-UI-E2E-02d · 真实模型多样化金融操作稳定性（P1）**：增加跨多次样本、红色验证及同编号异常恢复的真实合成数据库 E2E 覆盖；记录成功率与失败阶段，不以一次成功推断稳定性或放宽 Guard。
+
+## 2026-11-02 左侧资产栏与右侧工具抽屉
+
+- [x] **T-UX-421 左侧资产栏与右侧工具抽屉**：
+  - 范围：桌面 `≥1024px` 左侧资产栏常驻展开、可收起；手机左上角“资产”按钮一步整屏滑入；顶栏三横线移到右侧，打开含“对话 / 收藏 / 操作记录”三分段的右侧抽屉；顶栏原隐私小眼睛移除，改为“新建对话 +”，隐私入口保留在资产页；首页移除重复的账户速览；不添加手机外框。
+  - 代码：新增 `frontend/src/components/chat/UtilitySidebar.tsx`、`ConversationList.tsx`；删除 `ConversationSidebar.tsx`、`HomeAccountSummary.tsx`、`useHomeAccountOverview.ts`；`ActivityPane` 增加嵌入模式；`AppShell`、`AppHeader`、`AssetsPane`、`ChatHome`、`Chat.tsx` 接入新布局。
+  - 验收：资产在左、工具抽屉在右；手机一步打开资产并可在意图生成后回到对话；收藏与操作记录在抽屉内可切换；Escape 与焦点返回可用；无横向溢出；不改变服务端确认、风控、令牌化和拖拽碰撞矩阵。
+  - 验证：前端 32 个 Vitest 文件 / **207 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过；Playwright（Chrome，本地 5199）**3 passed**，覆盖手机资产胶囊、桌面隐私、左右布局与抽屉分段切换。未做真实设备与真实后端连续联调。
+  - 限制：抽屉和手机资产页不是完整焦点陷阱，Tab 仍可能离开浮层；收藏仍为本机未加密存储；真实设备手感与生产验收未完成。
+
+- [x] **T-UX-422 移除前端过渡与切换动画**：
+  - 范围：删除 CSS 关键帧、弹窗/面板/主题切换/悬停/弹簧/布局联动等过渡与切换动画；主题切换改为即时生效；消息定位改为即时滚动；保留加载转圈、骨架屏 pulse、思考企鹅与圆点、流式光标闪烁。
+  - 代码：`frontend/src/index.css`、`AppShell.tsx`、`pages/Chat.tsx`、`ChatComposer.tsx`、`ChatHome.tsx`、`IntentCapsule.tsx`、`ThemeProvider.tsx`、`ThemeToggle.tsx`、`MascotStage.tsx`、`MessageList.tsx` 及各组件样式类；`motion` 依赖按用户要求保留但源码已无引用。
+  - 验收：页面切换、弹窗、抽屉、资产面板、主题切换均为即时呈现；无 `transition-*`/`animate-[slide-*]`/`motion/react` 过渡用法残留；加载类动画仍在。
+  - 验证：`npm run test` 32 个文件 / **206 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过。未做真实设备与真实后端连续联调。
+
+- [x] **T-UX-423 前端关键动效回补**：
+  - 范围：在 `T-UX-422` 的静态基线上，按用户确认恢复关键交互动效：右侧工具抽屉与手机资产页进退场、确认/验证/资产详情弹窗、操作流程步骤与完成态、资产拖拽抬升/目标呼吸/回弹、意图胶囊与引用/`@` 下拉、新消息与可信结果卡入场、隐私金额揭示、主按钮按压反馈、主题缩短版圆形揭幕、登录/首页吉祥物轻微 idle。
+  - 代码：新增 `frontend/src/lib/motion.ts` 统一动效 token；修改 `index.css`、`AppShell.tsx`、`pages/Chat.tsx`、`ui/dialog.tsx`、`ActionJourney.tsx`、`PendingActionDialog.tsx`、`useAssetDrag.ts`、`DragGhost.tsx`、`AssetCards.tsx`、`AssetsPane.tsx`、`ChatComposer.tsx`、`MessageList.tsx`、`Money.tsx`、`MascotStage.tsx`、`ThemeProvider.tsx`、`ThemeToggle.tsx`、`ui/button.tsx`、`ChatHome.tsx`；同步更新 `ThemeProvider.test.tsx`、`Chat.test.tsx`、`ChatComposer.test.tsx`。
+  - 决策：弹窗外壳使用 Radix `data-state` + CSS 进退场，避免与 Radix Presence 的卸载时机冲突；抽屉/手机资产页、动作状态、消息、拖拽浮层、输入区使用 `motion/react`；主题圆形揭幕 460ms，减少动效时同步切换；不恢复鼠标跟随吉祥物、桌面栏宽度折叠动画和逐 token 动画。
+  - 验收：抽屉/Escape/焦点返回、弹窗确认与验证、拖拽六动作、胶囊发送、隐私揭示、主题切换均可用；无新增接口、SSE、风控、令牌化或业务状态变化；`prefers-reduced-motion` 下无大幅位移/呼吸/圆形揭幕。
+  - 验证：`npm run test` 32 个文件 / **207 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过（保留 >500kB chunk 警告）；Playwright（Chrome，本地 5199）**3 passed**。未做真实设备手感、真实后端连续联调或真实模型下的动效验收。

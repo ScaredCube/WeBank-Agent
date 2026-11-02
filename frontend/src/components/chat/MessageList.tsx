@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
+import { motion } from 'motion/react'
 import { MessageBubble } from '@/components/chat/MessageBubble'
 import { parseIntentMessage } from '@/features/assets/intent-message'
+import { DURATION, EASE_OUT, useMotionReduced } from '@/lib/motion'
 import type { Message } from '@/lib/api'
 
 interface MessageListProps {
@@ -21,9 +23,7 @@ type QuestionContext = { id: number; content: string } | null
 type ReturnPosition = { scrollTop: number; messageId: number; messageCount: number } | null
 
 function scrollBehavior(): ScrollBehavior {
-  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    ? 'instant'
-    : 'smooth'
+  return 'instant'
 }
 
 /**
@@ -34,8 +34,16 @@ function scrollBehavior(): ScrollBehavior {
 export function MessageList({ messages, streamingText, thinking, renderAfterMessage, scrollRoot, focusMessageId, onFocusMessageResolved, hasOlder, loadingOlder, onLoadOlder }: MessageListProps) {
   const messageRows = useRef(new Map<number, HTMLDivElement>())
   const resolvedFocusId = useRef<number | null>(null)
+  const seenMessages = useRef(new Set<number>())
+  const firstRender = useRef(true)
+  const reduced = useMotionReduced()
   const [activeQuestion, setActiveQuestion] = useState<QuestionContext>(null)
   const [returnPosition, setReturnPosition] = useState<ReturnPosition>(null)
+
+  useEffect(() => {
+    for (const message of messages) seenMessages.current.add(message.id)
+    firstRender.current = false
+  }, [messages])
 
   useEffect(() => {
     if (focusMessageId == null) {
@@ -152,18 +160,23 @@ export function MessageList({ messages, streamingText, thinking, renderAfterMess
           className="mx-auto min-h-10 rounded-full border border-line bg-panel px-4 text-xs font-medium text-jade-800 hover:bg-jade-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-jade-700">
           {loadingOlder ? '正在加载更早消息…' : '加载更早消息'}
         </button>}
-        {messages.map((message) => (
-          <div
+        {messages.map((message, index) => {
+          const isNew = !firstRender.current && !loadingOlder && !seenMessages.current.has(message.id)
+            && index >= messages.length - 2
+          return <motion.div
             key={message.id}
             ref={(element) => { if (element) messageRows.current.set(message.id, element); else messageRows.current.delete(message.id) }}
             data-message-id={message.id}
             tabIndex={-1}
+            initial={isNew && !reduced ? { opacity: 0, y: 4 } : false}
+            animate={{ opacity: 1, y: 0 }}
+            transition={reduced ? { duration: 0 } : { duration: DURATION.fast, ease: EASE_OUT }}
             className={`flex scroll-mt-24 flex-col gap-4 rounded-2xl focus:outline-none ${focusMessageId === message.id ? 'ring-2 ring-jade-400 ring-offset-4 ring-offset-panel' : ''}`}
           >
             <MessageBubble message={message} />
             {renderAfterMessage?.(message)}
-          </div>
-        ))}
+          </motion.div>
+        })}
         {(thinking || streamingText) && (
           <MessageBubble
             message={{

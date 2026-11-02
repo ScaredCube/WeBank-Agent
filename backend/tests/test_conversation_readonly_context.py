@@ -143,7 +143,7 @@ def test_cached_selection_cannot_authorize_prepare_operations(client, auth_heade
     assert not allow_readonly_followup("换个账户查询账单")
     assert allow_readonly_followup("那上个月呢？")
 
-def test_guard_unavailable_fails_closed_even_for_selected_account(client, auth_headers, monkeypatch):
+def test_guard_unavailable_does_not_block_readonly_bill(client, auth_headers, monkeypatch):
     from app.models import AuditLog, TransferRequest
 
     with Session(get_engine()) as db:
@@ -163,7 +163,7 @@ def test_guard_unavailable_fails_closed_even_for_selected_account(client, auth_h
     cid = conversation(client,auth_headers)
     events=events_for(send(client,auth_headers,cid,"查询2026-01账单",
         [{"kind":"account","id":account_id}]))
-    assert not any(item["type"]=="bill_result" for item in events)
+    assert any(item["type"]=="bill_result" for item in events)
     with Session(get_engine()) as db:
         failures=db.exec(select(AuditLog).where(AuditLog.event_type=="guard_failed")).all()
         assert failures

@@ -95,7 +95,7 @@ export function ActivityList({ entries }: { entries: AuditEntry[] }) {
         const ok = item.result === 'success'
         const Icon = kind === 'agent' ? Activity : kind === 'security' ? ShieldCheck : ok ? CheckCircle2 : XCircle
         return <li key={item.id}>
-          <details className="group overflow-hidden rounded-2xl border border-line bg-panel transition-colors hover:border-jade-300">
+          <details className="group overflow-hidden rounded-2xl border border-line bg-panel hover:border-jade-300">
             <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-4 focus-visible:outline-2 focus-visible:outline-jade-700 sm:px-5">
               <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-jade-50 text-jade-800"><Icon size={19}/></span>
               <span className="min-w-0 flex-1">
@@ -106,7 +106,7 @@ export function ActivityList({ entries }: { entries: AuditEntry[] }) {
                 <span className="inline-flex items-center gap-1"><Clock3 size={12}/><time dateTime={item.created_at}>{timeOf(item.created_at)}</time></span>
                 <span className={`rounded-full px-2 py-0.5 font-medium ${ok ? 'bg-jade-50 text-jade-800' : 'bg-slate-100 text-muted'}`}>{resultNames[item.result ?? ''] ?? '状态未知'}</span>
               </span>
-              <ArrowUpRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted transition group-open:rotate-90"/>
+              <ArrowUpRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted group-open:rotate-90"/>
             </summary>
             <dl className="grid gap-2 border-t border-line bg-canvas/50 px-5 py-4 text-xs sm:grid-cols-2">
               <div><dt className="text-muted">记录时间</dt><dd className="mt-1 text-ink">{new Date(item.created_at).toLocaleString('zh-CN')}</dd></div>

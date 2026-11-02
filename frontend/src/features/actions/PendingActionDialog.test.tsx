@@ -363,3 +363,32 @@ describe('待确认动作', () => {
     expect(screen.getByText(/验证通过后会继续执行，请核对结果/)).toBeTruthy()
     expect(screen.queryByText(/验证通过后仍需单独执行/)).toBeNull()
   })
+
+  it('密码加人脸：验证码通过后仍需人脸识别，完成后自动执行', async () => {
+    const user = userEvent.setup()
+    const faceEvent = {
+      ...wealthSubscribe,
+      action: {
+        ...wealthSubscribe.action,
+        details: { ...wealthSubscribe.action.details, verification: 'password_face' },
+      },
+    }
+    const step = vi.spyOn(api, 'actionStep')
+      .mockResolvedValueOnce({ status: 'pending', message: '验证已开始' })
+      .mockResolvedValueOnce({ status: 'code_verified', message: '验证码通过' })
+      .mockResolvedValueOnce({ status: 'verified', message: '人脸通过' })
+    const execute = vi.spyOn(api, 'executeWealthOrder').mockResolvedValue({
+      order_id: 21, order_type: 'subscribe', status: 'completed', transaction_id: 58,
+      balance_fen: 50_000, holding_fen: 50_000, message: '模拟理财操作已完成。',
+    })
+    render(<PendingActionDialog event={faceEvent} token="auth" onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: '开始模拟验证' }))
+    await user.type(screen.getByLabelText('模拟验证码'), '123456')
+    await user.click(screen.getByRole('button', { name: '验证' }))
+    expect(await screen.findByText('模拟人脸识别')).toBeTruthy()
+    expect(execute).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '开始人脸识别' }))
+    expect(await screen.findByText('模拟理财操作已完成。')).toBeTruthy()
+    expect(execute).toHaveBeenCalledWith('auth', 21)
+    expect(step).toHaveBeenNthCalledWith(3, 'auth', 8, 'verification/face', { token: 'wealth-token' })
+  })

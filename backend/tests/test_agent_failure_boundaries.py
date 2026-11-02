@@ -1,14 +1,24 @@
 """Failure-boundary tests. Offline deterministic model; no real LLM or bank network."""
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlmodel import Session, select
 
 from app.agent.llm import LLMChunk
+from app.core.config import settings
 from app.db.session import get_engine
 from app.models import Account, ChatSubmission, Contact, Message, PendingAction, TransferRequest, User
 from app.schemas.chat import ChatRequest, AccountReference, ContactReference
 from app.api.routes.chat import send_message
+
+
+@pytest.fixture(autouse=True)
+def daytime_policy(monkeypatch):
+    hour = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).hour
+    monkeypatch.setattr(settings, "risk_night_start_hour", (hour + 1) % 24)
+    monkeypatch.setattr(settings, "risk_night_end_hour", (hour + 2) % 24)
 
 
 def _events(response):
@@ -138,7 +148,7 @@ def test_model_timeout_is_a_failed_not_retriable_submitted_request(
         assert not db.exec(select(TransferRequest)).all()
 
 
-def test_guard_timeout_blocks_transfer_and_keeps_balance(
+def test_guard_timeout_escalates_transfer_and_keeps_balance(
     client, auth_headers, monkeypatch,
 ):
     class TransferModel:
@@ -166,10 +176,11 @@ def test_guard_timeout_blocks_transfer_and_keeps_balance(
     events = _events(client.post(_endpoint(cid), headers=auth_headers, json={
         "content": "给模拟收款人转账1元", "request_id": request_id,
     }))
-    assert not any(entry["type"] == "action_required" for entry in events)
-    assert "安全检查暂不可用" in events[-1]["message"]["content"]
+    action = next(entry for entry in events if entry["type"] == "action_required")
+    assert action["action"]["risk_level"] == "red"
+    assert action["action"]["details"]["verification"] == "password"
     assert "transferred the money" not in str(events)
     with Session(get_engine()) as db:
-        assert not db.exec(select(PendingAction)).all()
-        assert not db.exec(select(TransferRequest)).all()
+        assert db.exec(select(PendingAction)).one()
+        assert db.exec(select(TransferRequest)).one().status == "pending"
         assert db.exec(select(Account)).first().balance_fen == opening_balance
