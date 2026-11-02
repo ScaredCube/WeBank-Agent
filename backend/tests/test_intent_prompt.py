@@ -25,7 +25,7 @@ def test_drag_intent_is_rendered_as_tokenized_prompt(client, auth_headers, monke
 
     class FakeLLM:
         async def stream(self, messages, tools=None):
-            seen["messages"] = messages
+            seen["messages"] = list(messages)
             yield LLMChunk(content="请补充金额。")
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())

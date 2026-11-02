@@ -315,3 +315,33 @@ def test_flower_reply_reaches_chat_history_without_model_or_bank_side_effects(
     with Session(get_engine()) as db:
         assert not db.exec(select(TransferRequest)).all()
         assert db.exec(select(Account)).one().balance_fen == 500000
+
+
+def test_fixed_reply_is_persisted_and_visible_to_next_model_turn(client, auth_headers, monkeypatch):
+    class FixedProvider:
+        mode = "openai"
+        async def stream(self, messages, tools=None):
+            yield LLMChunk(content="I already transferred the money")
+            yield LLMChunk(finish_reason="stop")
+
+    class CaptureProvider:
+        mode = "openai"
+        seen = []
+        async def stream(self, messages, tools=None):
+            self.seen = messages
+            yield LLMChunk(content="好的。")
+            yield LLMChunk(finish_reason="stop")
+
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: FixedProvider())
+    conversation, received = _chat(client, auth_headers, "给张三转账800元")
+    fixed = received[-1]["message"]["content"]
+    assert fixed and "I already transferred" not in fixed
+    history = client.get(f"/api/chat/conversations/{conversation}/messages",
+                         headers=auth_headers).json()
+    assert history[-1]["role"] == "assistant" and history[-1]["content"] == fixed
+
+    capture = CaptureProvider()
+    monkeypatch.setattr("app.agent.loop.get_llm", lambda: capture)
+    _chat(client, auth_headers, "那继续", conversation=conversation)
+    assert any(item.get("role") == "assistant" and item.get("content") == fixed
+               for item in capture.seen)

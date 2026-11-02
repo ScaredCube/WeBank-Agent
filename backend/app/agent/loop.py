@@ -108,6 +108,9 @@ class AgentLoop:
                                  else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                                  else render_tool_result(name, result))
                                 for name, result in tool_results)
+                        # Keep the deterministic summary in this turn's context
+                        # as well as the persisted assistant message.
+                        messages.append({"role": "assistant", "content": summary})
                         yield AgentEvent("delta", {"text": summary})
                     else:
                         if getattr(self.llm, "mode", None) == "mock":
@@ -130,6 +133,9 @@ class AgentLoop:
                                     or verified_contact_token or has_selected_contact
                                 ),
                             )
+                        # The fixed reply is a real assistant turn: keep it in the
+                        # local context; chat.py also persists it for later turns.
+                        messages.append({"role": "assistant", "content": text})
                         yield AgentEvent("delta", {"text": text})
                     return
                 if round_index == MAX_TOOL_ROUNDS or len(tool_calls) > MAX_CALLS_PER_ROUND:
