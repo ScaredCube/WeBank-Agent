@@ -17,6 +17,19 @@ describe('资产碰撞矩阵', () => {
     expect(resolveIntent(source, target)?.action).toBe(action)
   })
 
+  it.each([
+    [account(1), account(2), '转账金额：'],
+    [account(1), contact(1), '转账金额：'],
+    [contact(1), account(1), '收款金额：'],
+    [account(1), holding(1), '申购金额：'],
+    [holding(1), account(1), '赎回金额：'],
+    [holding(1), holding(2), '转换金额：'],
+  ])('所有拖拽只填写业务对象，不代替用户填写金额：%s → %s', (source, target, prefill) => {
+    const result = resolveIntent(source, target)
+    expect(result?.prefill).toBe(prefill)
+    expect(result?.prefill).not.toMatch(/[0-9０-９]/)
+  })
+
   it('拒绝自拖、未定义组合与禁用实体', () => {
     expect(resolveIntent(account(1), account(1))).toBeNull()
     expect(resolveIntent(contact(1), contact(2))).toBeNull()

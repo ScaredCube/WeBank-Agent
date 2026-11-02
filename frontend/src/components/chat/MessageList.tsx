@@ -9,6 +9,7 @@ import type { Message } from '@/lib/api'
 interface MessageListProps {
   messages: Message[]
   streamingText: string
+  streamStatus?: string | null
   thinking: boolean
   renderAfterMessage?: (message: Message) => ReactNode
   scrollRoot?: RefObject<HTMLDivElement | null>
@@ -31,7 +32,7 @@ function scrollBehavior(): ScrollBehavior {
  * permanently taking space away from the chat. Uses the existing scroll root
  * and message IDs; no new routing or global state.
  */
-export function MessageList({ messages, streamingText, thinking, renderAfterMessage, scrollRoot, focusMessageId, onFocusMessageResolved, hasOlder, loadingOlder, onLoadOlder }: MessageListProps) {
+export function MessageList({ messages, streamingText, streamStatus, thinking, renderAfterMessage, scrollRoot, focusMessageId, onFocusMessageResolved, hasOlder, loadingOlder, onLoadOlder }: MessageListProps) {
   const messageRows = useRef(new Map<number, HTMLDivElement>())
   const resolvedFocusId = useRef<number | null>(null)
   const seenMessages = useRef(new Set<number>())
@@ -177,7 +178,7 @@ export function MessageList({ messages, streamingText, thinking, renderAfterMess
             {renderAfterMessage?.(message)}
           </motion.div>
         })}
-        {(thinking || streamingText) && (
+        {(thinking || streamingText) && <>
           <MessageBubble
             message={{
               id: -1,
@@ -187,7 +188,8 @@ export function MessageList({ messages, streamingText, thinking, renderAfterMess
             }}
             streaming
           />
-        )}
+          {streamStatus && <p role="status" className="ml-1 -mt-5 text-xs text-muted">{streamStatus}</p>}
+        </>}
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ from typing import Literal, Annotated
 from pydantic import model_validator
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.schemas.generative_ui import ViewContext
 
 
 class ConversationCreate(BaseModel):
@@ -33,6 +34,7 @@ class MessageOut(BaseModel):
     bill_result: dict | None = None
     card_result: dict | None = None
     tool_results: list[dict] | None = None
+    ui_view: dict | None = None
 
 
 class AccountReference(BaseModel):
@@ -53,7 +55,16 @@ class ContactReference(BaseModel):
     id: int = Field(gt=0)
 
 
-BankReference = Annotated[AccountReference | CardReference | ContactReference, Field(discriminator="kind")]
+class HoldingReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["holding"]
+    id: int = Field(gt=0)
+
+
+BankReference = Annotated[
+    AccountReference | CardReference | ContactReference | HoldingReference,
+    Field(discriminator="kind"),
+]
 
 IntentAction = Literal[
     "transfer", "internal_transfer", "collect", "purchase", "redeem", "convert",
@@ -86,6 +97,7 @@ class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     references: list[BankReference] = Field(default_factory=list, max_length=3)
     intent: ChatIntent | None = None
+    view_context: ViewContext | None = None
     # Required for retriable clients; optional for backwards-compatible legacy calls.
     request_id: str | None = Field(default=None, min_length=8, max_length=64,
                                    pattern=r"^[A-Za-z0-9_-]+$")

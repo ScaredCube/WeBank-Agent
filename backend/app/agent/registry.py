@@ -9,6 +9,12 @@ class RiskLevel(str, Enum):
     RED = "red"
 
 
+class ToolExecutionMode(str, Enum):
+    """Distinguishes ordinary session-based Tools from bank action preparation."""
+    STANDARD = "standard"
+    PREPARE = "prepare"
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -16,6 +22,7 @@ class ToolSpec:
     parameters: dict[str, Any]
     risk: RiskLevel
     handler: Callable[..., Awaitable[Any]] | None = None
+    execution: ToolExecutionMode = ToolExecutionMode.STANDARD
 
     def to_openai_schema(self) -> dict[str, Any]:
         return {

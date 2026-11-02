@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api, type Conversation, type Health, type Message } from '@/lib/api'
+import { ApiError, api, type ChatViewContext, type Conversation, type Health, type Message } from '@/lib/api'
 import { streamChat, type ChatIntentPayload, type StreamEvent } from '@/lib/sse'
 import { useConversationScroll } from './useConversationScroll'
 import { savePendingChatRequest, clearPendingChatRequest, readPendingChatRequests } from './pending-request'
@@ -38,6 +38,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   const [sending, setSending] = useState(false)
   const [receiving, setReceiving] = useState(false)
   const [streamingText, setStreamingText] = useState('')
+  const [streamingUiStatus, setStreamingUiStatus] = useState<'composing' | 'fallback' | null>(null)
+  const [streamingUiView, setStreamingUiView] = useState<unknown>(null)
+  const [uiStatusByMessage, setUiStatusByMessage] = useState<Record<number, 'fallback'>>({})
   const [loadingMessages, setLoadingMessages] = useState(true)
   const [hasOlder, setHasOlder] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -77,6 +80,9 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           } else if (status.state === 'action_pending') {
             clearPendingChatRequest(item.requestId)
             recoveryWarning.current('此前请求已创建待确认操作，请在操作记录中核对。不会再次执行或下发确认令牌。')
+          } else if (status.state === 'failed') {
+            clearPendingChatRequest(item.requestId)
+            recoveryWarning.current('此前请求已被服务端确认失败；如涉及模拟金融操作，仍需先核对历史与操作记录，再决定是否作为新请求发起。')
           } else {
             recoveryWarning.current('检测到尚未确认完成的历史请求，请先核对会话及操作记录，不要重复发起。')
           }
@@ -228,7 +234,7 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
 
   const sendMessage = useCallback(
     async (raw: string, references: BankObjectReference[] = [], intent?: ChatIntentPayload,
-           intentDisplay?: string) => {
+           intentDisplay?: string, viewContext?: ChatViewContext) => {
       const content = composeReferenceContext(raw, references)
       if (!content || sendingRef.current || sending || creatingRef.current || loadingMessages || historyUnavailable || actionBlocked || !token) return
 
@@ -237,6 +243,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
       resetScroll()
       setError(null)
       setStreamingText('')
+      setStreamingUiStatus(null)
+      setStreamingUiView(null)
 
       let conversationId = activeId
       let receivedText = ''
@@ -263,6 +271,52 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           onConversationCreated?.(conversation.id)
         }
 
+        // An identical retry may be a second financial operation. Before
+        // issuing another POST, reconcile the existing server request ID.
+        // A terminal "failed" state still does NOT prove no write happened.
+        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id]), intent ?? null, viewContext ?? null])
+        const earlier = pendingRequest.current?.signature === signature ? pendingRequest.current : null
+        if (earlier) {
+          try {
+            const status = await api.submissionStatus(token, conversationId, earlier.requestId)
+            if (!isCurrent()) return
+            if (status.state === 'failed') {
+              pendingRequest.current = null
+              clearPendingChatRequest(earlier.requestId)
+              const warning = status.user_message_id === null && status.pending_action_id === null
+                ? '服务端已确认上次请求失败，未进入消息处理。已准备好新请求；请再次点击发送。'
+                : '服务端已确认上次请求失败，但无法据此排除已经发生的模拟操作。请先核对会话及操作记录；确认仍需继续后，再次点击发送会创建全新请求。'
+              setError('上次请求已结束，尚未重新发送。')
+              onActionWarning(warning)
+              return
+            }
+            if (status.state === 'completed') {
+              pendingRequest.current = null
+              clearPendingChatRequest(earlier.requestId)
+              savedReply = status.message
+              setDraft(current => current === raw ? '' : current)
+              setError(null)
+              onActionWarning('上次请求已完成，现已核对历史结果；不会再次调用 Agent。')
+              return
+            }
+            if (status.state === 'action_pending') {
+              pendingRequest.current = null
+              clearPendingChatRequest(earlier.requestId)
+              onActionWarning('待确认操作已经存在，请在操作记录中核对；不会重新生成或下发确认令牌。')
+              setError(null)
+              return
+            }
+            setError('此前请求状态尚未确定，请核对历史与操作记录。')
+            onActionWarning('此前请求仍在处理中或已中断，不能安全重复执行。请核对会话及操作记录。')
+            return
+          } catch {
+            if (!isCurrent()) return
+            setError('无法核对之前的请求状态，请稍后重试状态核对。')
+            onActionWarning('请求状态查询失败，已阻止再次发送，避免重复金融操作。')
+            return
+          }
+        }
+
         const optimistic: Message = {
           id: -Date.now(),
           role: 'user',
@@ -276,13 +330,15 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
         if (raw === draft) setDraft((current) => current.startsWith(raw) ? current.slice(raw.length) : current)
         drafts.current.delete(conversationId)
 
-        const signature = JSON.stringify([conversationId, content, references.map(ref => [ref.kind, ref.id]), intent ?? null])
         const requestId = pendingRequest.current?.signature === signature
           ? pendingRequest.current.requestId : crypto.randomUUID()
         pendingRequest.current = { signature, requestId }
         savePendingChatRequest({conversationId, requestId, createdAt: Date.now()})
         submittedRequestId = requestId
         let receivedDone = false
+        let pendingUiStatus: 'composing' | 'fallback' | null = null
+        let pendingUiView: unknown = null
+        const pendingSubscriptionResults: Array<{ kind: 'subscriptions' | 'subscription_candidates'; data: unknown }> = []
 
         const controller = new AbortController()
         receiveController.current = controller
@@ -293,11 +349,21 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           content,
           references,
           intent,
+          viewContext,
           requestId,
           signal: controller.signal,
           onEvent: (event) => {
             if (!isCurrent()) return
-            if (event.type === 'bill_result') {
+            if (event.type === 'ui_status') {
+              pendingUiStatus = event.status
+              setStreamingUiStatus(event.status)
+            } else if (event.type === 'ui_view') {
+              pendingUiView = event.view
+              setStreamingUiView(event.view)
+            } else if (event.type === 'subscription_result') {
+              if (pendingSubscriptionResults.length < 4)
+                pendingSubscriptionResults.push({ kind: event.kind, data: event.data })
+            } else if (event.type === 'bill_result') {
               if (billResultCard(event.data) && pendingToolResults.length < 8)
                 pendingToolResults.push({kind:'monthly_bill',data:event.data})
             } else if (event.type === 'card_result') {
@@ -321,10 +387,20 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
             } else if (event.type === 'done') {
               receivedDone = true
               if (!event.message) return
-              savedReply = event.message
+              const completedMessage: Message = {
+                ...event.message,
+                ...(event.message.ui_view == null && pendingUiView != null ? { ui_view: pendingUiView } : {}),
+                ...(event.message.subscription_results == null && pendingSubscriptionResults.length
+                  ? { subscription_results: pendingSubscriptionResults }
+                  : {}),
+              }
+              savedReply = completedMessage
               const validated = toolResultListSchema.safeParse(pendingToolResults)
-              if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[event.message!.id]:validated.data}))
-              setMessages((prev) => [...prev, event.message as Message])
+              if (validated.success && validated.data.length) setToolResultLists(current => ({...current,[completedMessage.id]:validated.data}))
+              if (pendingUiStatus === 'fallback') setUiStatusByMessage(current => ({ ...current, [completedMessage.id]: 'fallback' }))
+              setStreamingUiStatus(null)
+              setStreamingUiView(null)
+              setMessages((prev) => [...prev, completedMessage])
             }
           },
         })
@@ -376,6 +452,8 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
           receiveController.current = null
           setReceiving(false)
           setStreamingText('')
+          setStreamingUiStatus(null)
+          setStreamingUiView(null)
         }
         if (isCurrent() && conversationId && !sessionExpired) {
           try {
@@ -469,5 +547,5 @@ export function useChatController({ token, actionBlocked, onActionRequired, onAc
   }, [token, sending, actionBlocked])
 
   function stopReceiving() { receiveController.current?.abort() }
-  return { renameConversation, conversations, activeId, messages, toolResultLists, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
+  return { renameConversation, conversations, activeId, messages, toolResultLists, uiStatusByMessage, streamingUiStatus, streamingUiView, draft, sending, receiving, streamingText, loadingMessages, loadingOlder, hasOlder, loadOlder, historyUnavailable, creatingConversation, error, health, healthUnavailable, scrollRef, hasNewContent, onScroll, jumpToLatest, openConversation, createConversation, sendMessage, updateDraft, stopReceiving }
 }

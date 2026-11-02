@@ -335,6 +335,35 @@ describe('待确认动作', () => {
   })
 })
 
+  it('黄色转账执行断线，查询 confirmed 后仅手动重试同一笔转账', async () => {
+    const user = userEvent.setup()
+    const step = vi.spyOn(api, 'actionStep').mockResolvedValue({status:'confirmed', message:'已确认'})
+    const execute = vi.spyOn(api, 'executeTransfer')
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValueOnce({status:'completed', message:'模拟转账已完成'})
+    const check = vi.spyOn(api, 'action').mockResolvedValue({status:'confirmed'})
+    render(<PendingActionDialog event={action} token="auth" onClose={() => {}} />)
+    await user.click(screen.getByRole('button', {name:'确认'}))
+    expect(step).toHaveBeenCalledTimes(1)
+    expect(execute).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', {name:'执行操作'}))
+    expect(await screen.findByText(/请求结果暂不确定/)).toBeTruthy()
+    expect(execute).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', {name:'查询服务端状态'}))
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', {name:'按原动作编号重试'}))
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(execute).toHaveBeenLastCalledWith('auth', 42)
+    expect(await screen.findByText('模拟转账已完成')).toBeTruthy()
+  })
+
+  it('红色操作明确告知验证码通过后自动执行', () => {
+    render(<PendingActionDialog event={wealthSubscribe} token="auth" onClose={() => {}} />)
+    expect(screen.getByText(/验证通过后会继续执行，请核对结果/)).toBeTruthy()
+    expect(screen.queryByText(/验证通过后仍需单独执行/)).toBeNull()
+  })
+
   it('密码加人脸：验证码通过后仍需人脸识别，完成后自动执行', async () => {
     const user = userEvent.setup()
     const faceEvent = {
@@ -362,4 +391,31 @@ describe('待确认动作', () => {
     expect(await screen.findByText('模拟理财操作已完成。')).toBeTruthy()
     expect(execute).toHaveBeenCalledWith('auth', 21)
     expect(step).toHaveBeenNthCalledWith(3, 'auth', 8, 'verification/face', { token: 'wealth-token' })
+  })
+
+  it('修改待确认操作前先在服务端取消，不执行旧交易', async () => {
+    const user = userEvent.setup()
+    const step = vi.spyOn(api, 'actionStep').mockResolvedValue({ status: 'cancelled', message: '已取消' })
+    const execute = vi.spyOn(api, 'executeTransfer')
+    const onEdit = vi.fn()
+    const onResolved = vi.fn()
+    render(<PendingActionDialog event={action} token="auth" onClose={() => {}} onEdit={onEdit} onResolved={onResolved} />)
+    expect(screen.getByText('¥12.50')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '修改信息' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '修改信息' }))
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(1))
+    expect(step).toHaveBeenCalledWith('auth', action.action.id, 'cancel', undefined)
+    expect(onResolved).toHaveBeenCalledWith('cancelled')
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('取消失败时不允许进入编辑草稿，原确认动作仍需核查', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'actionStep').mockRejectedValue(new ApiError('取消失败', 409))
+    const onEdit = vi.fn()
+    render(<PendingActionDialog event={action} token="auth" onClose={() => {}} onEdit={onEdit} />)
+    await user.click(screen.getByRole('button', { name: '修改信息' }))
+    expect(await screen.findByText('取消失败')).toBeTruthy()
+    expect(onEdit).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '查询服务端状态' })).toBeTruthy()
   })

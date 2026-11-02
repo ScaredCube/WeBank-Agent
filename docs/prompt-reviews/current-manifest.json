@@ -1,0 +1,31 @@
+{
+  "source_revision": "a8f00fb9c5ab78725c4871858be54a54c2ef371e",
+  "static_prompts": {
+    "SYSTEM_PROMPT": "976ac34290cb8a39",
+    "GUARD_SYSTEM_PROMPT": "03e814d7bb7ea71d",
+    "RESPONSE_RECOVERY_PROMPT": "b6fe66023300d62a"
+  },
+  "effective_versions": {
+    "agent": "agent:976ac34290cb8a39",
+    "guard": "guard:03e814d7bb7ea71d",
+    "recovery": "recovery:b6fe66023300d62a",
+    "agent:transfer": "agent:5702dbd3ebea98b6",
+    "agent:internal_transfer": "agent:5f88f97514f7cec4",
+    "agent:collect": "agent:cb004ee5d68762a7",
+    "agent:purchase": "agent:293f98322a40e2ce",
+    "agent:redeem": "agent:99b476628139c9cc",
+    "agent:convert": "agent:67b9da4bc7f8c6ba",
+    "tools": "tools:ccd9da728d8535d0",
+    "reply_policy": "reply_policy:151e5a792f70e031",
+    "recovery_policy": "recovery_policy:1614c9f9d00ace67",
+    "read_completion": "read_completion:6d839f7daa46db59",
+    "grounded_summary": "grounded_summary:914aba9adc782878",
+    "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
+    "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
+    "agent_loop": "agent_loop:a3eefbc744f7e69b",
+    "tool_executor": "tool_executor:57745137ae0a760d",
+    "scope_contract": "scope_contract:d5d1151bd5920a21",
+    "snapshot_contract": "snapshot_contract:07a0f81d7cc55634",
+    "chat_request_recovery": "chat_request_recovery:7f69cdc969238d95"
+  }
+}

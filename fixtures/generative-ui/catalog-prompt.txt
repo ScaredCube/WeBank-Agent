@@ -1,0 +1,161 @@
+Generate a read-only XiaoWe UI as ONE JSON object: {"root":"id","elements":{"id":{"type":"ComponentName","props":{},"children":[]}}}.
+Only Stack, Grid and Section can contain children. Use a connected tree, at most 40 nodes and depth 6.
+Component props schemas generated from the frontend Catalog:
+{
+  "Stack": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "Grid": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "Section": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title_key": {
+        "type": "string",
+        "enum": [
+          "overview",
+          "categories",
+          "comparison",
+          "subscriptions",
+          "candidates",
+          "anomalies"
+        ]
+      }
+    },
+    "required": [
+      "title_key"
+    ],
+    "additionalProperties": false
+  },
+  "Metric": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "metric_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "metric_ref"
+    ],
+    "additionalProperties": false
+  },
+  "MetricComparison": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "CategoryBarChart": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "ComparisonTable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "RecordList": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "SelectableList": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "Filter": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "Selector": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dataset_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_ref"
+    ],
+    "additionalProperties": false
+  },
+  "ActionLink": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": [
+          "open_workspace",
+          "view_source",
+          "follow_up"
+        ]
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "additionalProperties": false
+  }
+}
+Use only issued metric_ref/dataset_ref. Do not output JSONL, patches, state, expressions, events, code, sample data or financial values.

@@ -63,11 +63,16 @@ def detect_candidates(session: Session, user_id: int, months: int = 6) -> list[d
         Account.user_id == user_id, Transaction.direction == "expense",
         Transaction.occurred_at >= cutoff,
         ~Transaction.category.in_(["模拟转账", "理财申购", "理财赎回"]))).all()
-    grouped: dict[tuple[str, int], list[datetime]] = {}
+    # Periodicity must be proven within ONE account. Grouping only by
+    # merchant + amount can create false candidates by combining payments
+    # from different accounts on different months.
+    grouped: dict[tuple[int, str, int], list[datetime]] = {}
     for entry in rows:
-        grouped.setdefault((entry.counterparty, entry.amount_fen), []).append(entry.occurred_at)
+        grouped.setdefault(
+            (entry.account_id, entry.counterparty, entry.amount_fen), [],
+        ).append(entry.occurred_at)
     candidates = []
-    for (merchant, amount_fen), times in grouped.items():
+    for (_, merchant, amount_fen), times in grouped.items():
         times.sort()
         months_seen = {(item.year, item.month) for item in times}
         if len(times) < 2 or len(months_seen) < 2:

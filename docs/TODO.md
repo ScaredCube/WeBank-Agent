@@ -353,6 +353,35 @@
 
 - [x] **T-UX-420 用户输入展示与工具令牌边界调整**：移除聊天入站脱敏与历史金额脱敏，用户输入按原文展示、保存并送模型；工具结果继续使用脱敏字段，结构化引用继续使用 `DataToken`，用户本轮手机号额外生成 `phone_input` 工具句柄；修复余额历史回读被 `*,***.**` 打码的问题。验证：定向 120 项通过；完整后端回归 **393 passed（251.07s）**。详见 `docs/项目汇报.md` 对应章节。
 
+
+## 2026-11-02 Runtime 真实供应商验收
+
+- [x] T-RUNTIME-LIVE-01 真实模型与可信计算说明保留：Tokendance/DeepSeek API 连通；使用隔离 SQLite 验证金融读工具与多工具链路。修正仅在一般金融教学 + 全部 calculate 成功时丢弃模型解释的问题；数字仍由确定性 Tool 渲染。新增定向测试，15 项通过。未开放新的银行执行权限。
+- [~] T-RUNTIME-LIVE-02 真实 Agent 复合任务与回复质量：待改进账单原因分析中的重复查询、复合结果的解释能力及模拟操作准备的一致性。验收：真实模型按业务目标完整调用 Tool，最终回答基于可信结果且不重复/遗漏步骤。
+- [ ] T-RUNTIME-LIVE-03 部署配置核验：当前 backend/.env 两项 DATA 加密/HMAC Key 为空，可信快照不能持久化；JWT_SECRET 长度低于推荐值。需在确认旧库和密钥兼容性后安全配置，并验证写入、恢复、重启。不得把真实密钥写入 Git。
+
+## 2026-11-02 Prompt 与身份行为优化
+
+- [x] **T-RUNTIME-PROMPT-01 小We 身份和工具描述同步**：明确小We与「We在你身边」的角色气质，避免反复自我介绍；转账可选附言不再阻塞准备；更新业务能力与 Guard 只读判断依据；通过 99 项定向测试，以及两次真实模型身份/转账准备验证。
+- [~] **T-RUNTIME-PROMPT-02 自然语言与可信结果融合**：重点修复复杂账单分析中的重复 Tool、只输出固定结果卡、必要澄清和 Recovery 成本；验收须包含真实模型工具轨迹与可信结果对比。
+- [ ] **T-RUNTIME-PROMPT-03 演示环境安全配置与网页验收**：独立工作区 DATA 加密密钥仍需配置并核对历史库兼容；JWT 强度需提升，再对 Web 完整交互做实际验收。
+
+## 2026-11-02 · klutz-runtime 真实浏览器 QA
+
+- [x] **T-RUNTIME-UI-E2E-01 正常只读链路与请求异常恢复 Chrome 验收（P1）**：修复 `run_competition_e2e.py` 过时的单账户种子断言，严格核验当前两张模拟账户及固定余额；新增待确认操作/操作准备记录必须为零的安全断言。真实 DeepSeek + FastAPI/Vite + Chrome 在隔离 SQLite 下完成桌面银行卡引用、账单/卡状态结果、刷新恢复及移动端历史恢复，浏览器 JS 错误为零；真实 Chrome + 模拟 HTTP 额外通过 5 个异常重发场景（failed、processing、interrupted、action_pending、completed）。审查见 `docs/prompt-reviews/f98cbb3-browser-e2e-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02 黄色/红色动作完整浏览器交互与跨设备一致性验收（P1）**：仅在独立合成银行数据库中验证服务端确认、风险验证、操作记录与刷新恢复；遇到网络中断/未知状态不得自动重试资金操作。验收须包含真实浏览器实际动作轨迹、后端精确一次执行断言、异常后状态核对，以及独立的安全审查；不触碰真实银行或正式业务库。
+
+## 2026-11-02 · 操作确认与真实浏览器验收（klutz-runtime）
+
+- [x] **T-RUNTIME-UI-E2E-02a 黄色确认/红色验证/断线状态恢复（P1）**：修正红色验证后自动执行的误导文案；确认已授权、原动作有效的黄色执行在断线后可经状态 GET 人工按原编号继续，已完成则不能重复执行。Playwright Chrome 3 项、操作组件 28 项、服务端风险与幂等 44 项通过；前端生产构建成功、lint 0 错误（7 条既有警告）。完整 Before/After 与 UX 风险见 `docs/prompt-reviews/a11ff19-action-recovery-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02b 真实模拟银行操作一体化浏览器验收（P1）**：从 Agent 准备操作到实际隔离 SQLite 的服务端确认、验证、执行、审计、刷新及跨设备恢复，核验原编号只执行一次；严格禁止正式资金操作。当前 02a 使用真实 Chrome + 模拟网络响应验证 UI，后端幂等以单独服务端测试证明，仍需一条真实端到端操作场景。
+
+## 2026-11-02 · Agent → Chrome → 合成银行实际执行联调
+
+- [x] **T-RUNTIME-UI-E2E-02b · 可复现的模拟转账工程闭环（P1）**：新增 `run_action_e2e.py --fixture`，通过确定性 Tool Call 驱动真实 Agent Runtime / FastAPI / Chrome / 隔离 SQLite。选账户、待确认、用户确认、执行成功，精确核验两账户余额、一条 1 元模拟交易和确认/完成审计。修复已选择账户但模型遗漏/伪造 `source_token` 的服务端绑定问题。完整审查见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
+- [x] **T-RUNTIME-UI-E2E-02c · 真实供应商 Tool 调用契约问题定位与修复（P0）**：脱敏日志确认 DeepSeek 把手机号混入 `recipient_name`。完善转账 Tool Schema 的姓名/临时号码引用区分，并添加不包含明文的纠错提示；隐私校验和 Guard 不变。修正后真实 DeepSeek → Agent → Chrome → 隔离 SQLite 完整 1 元模拟转账单次验收 PASS，确定性 Fixture 同样 PASS。见 `docs/prompt-reviews/3a51181-source-bind-and-action-e2e-decision.md`。
+- [ ] **T-RUNTIME-UI-E2E-02d · 真实模型多样化金融操作稳定性（P1）**：增加跨多次样本、红色验证及同编号异常恢复的真实合成数据库 E2E 覆盖；记录成功率与失败阶段，不以一次成功推断稳定性或放宽 Guard。
+
 ## 2026-11-02 左侧资产栏与右侧工具抽屉
 
 - [x] **T-UX-421 左侧资产栏与右侧工具抽屉**：
@@ -374,3 +403,19 @@
   - 决策：弹窗外壳使用 Radix `data-state` + CSS 进退场，避免与 Radix Presence 的卸载时机冲突；抽屉/手机资产页、动作状态、消息、拖拽浮层、输入区使用 `motion/react`；主题圆形揭幕 460ms，减少动效时同步切换；不恢复鼠标跟随吉祥物、桌面栏宽度折叠动画和逐 token 动画。
   - 验收：抽屉/Escape/焦点返回、弹窗确认与验证、拖拽六动作、胶囊发送、隐私揭示、主题切换均可用；无新增接口、SSE、风控、令牌化或业务状态变化；`prefers-reduced-motion` 下无大幅位移/呼吸/圆形揭幕。
   - 验证：`npm run test` 32 个文件 / **207 passed**；`npm run lint` 0 errors（7 条既有 warning）；`npm run build` 通过（保留 >500kB chunk 警告）；Playwright（Chrome，本地 5199）**3 passed**。未做真实设备手感、真实后端连续联调或真实模型下的动效验收。
+
+## 2026-11-02 · 金融操作草稿与授权闭环
+
+- [x] **T-RUNTIME-ACTION-EDIT-01 安全修改已准备动作**：聊天来源的待确认转账支持「修改信息」→ 服务端取消旧动作 → 原文及结构化对象引用恢复 → 重新发送；取消失败时保持原动作待核查。用户编辑过程中清空输入不丢失拖拽意图。65 项定向测试通过，生产构建通过。审查：`docs/agent-action-edit-review-2026-11-02.md`。
+- [x] **T-RUNTIME-ACTION-EDIT-02a 黄色转账取消→重准备→新执行的真实浏览器验收**：真实 Chrome + FastAPI + Agent Runtime + 合成 SQLite；取消 100 分旧动作后重新准备并完成 200 分新动作，仅一条新流水且旧动作未执行。`uv run python scripts/run_action_e2e.py --fixture --edit` PASS，原单笔 E2E PASS，后端相关 26 tests PASS。详见 `docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b 其他风险级别与真实模型稳定性**：红色二阶段模拟验证、真实 DeepSeek 多样本取消/重新准备、跨会话状态恢复与失败后用户编辑，仍需单独验证；不能由确定性黄色转账 E2E 证明。
+
+- [x] **T-RUNTIME-ACTION-EDIT-02b1 红色验证码门禁和资金编辑 E2E**：使用隔离模拟银行和真实 Chrome，在夜间风险测试环境下验证旧 RED 动作取消、新 RED 动作独立准备、错误验证码拒绝且不执行、正确验证码后恰好一次执行；数据库与审计断言通过。黄色同流程回归及后端 29 项定向测试 PASS。额外提供安全可选测试端口，不干扰正在运行的 GUI 并行服务。详见 `docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b2 剩余集成验证**：补真实模型多样本、红色 password_face 以及 GUI 并行线的历史可信结果恢复集成。
+- [x] **T-RUNTIME-ACTION-EDIT-02b2a password_face 双阶段验证闭环**：隔离 Chrome + Agent Runtime + 风控 ContextVar + SQLite，旧 1 元动作取消、新 2 元动作独立准备，错误验证码不执行、正确验证码后不执行、模拟人脸通过后仅执行一次；Guard/验证审计与数据库核对 PASS。黄/红原路径回归 PASS，后端相关 24 项 PASS。详细证据：`docs/agent-action-edit-review-2026-11-02.md`。
+- [ ] **T-RUNTIME-ACTION-EDIT-02b2b 真实模型与 Generative UI 集成**：真实 DeepSeek 多样本、不同业务 Tool 使用、GUI 并行线的可信结果与历史状态恢复，须在并行成果稳定后统一验收。
+
+## 2026-11-02 · Generative UI 正式整合
+
+- [x] **T-GUI-MAIN-01**：接收暂停的独立候选 `1244bdb`，三方合并到 `klutz-runtime`，保留金融安全编辑和资产拖拽；定位真实分类选择失败为重复组件造成的 `AMBIGUOUS_LOCATOR`，实现唯一可信分类入口。合并后真实 DeepSeek 浏览器账单→分类→续问→历史恢复 PASS，红色人脸模拟转账 E2E PASS；完整证据见 `docs/frontend/2026-11-02-generative-ui-main-integration.md`。
+- [ ] **T-GUI-MAIN-02**：仅在后续真实需求明确时扩展订阅工具事件、不同业务场景的生成视图及模型多样本统计；旧 SQLite 迁移仍须备份与审批，不得以自动合并代替迁移。

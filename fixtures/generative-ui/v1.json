@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "view_id": "fixture-view",
+  "revision": 1,
+  "conversation_id": 1,
+  "result_refs": ["fixture-bill"],
+  "observed_at": "2026-11-01T08:00:00Z",
+  "spec": {
+    "root": "root",
+    "elements": {
+      "root": {"type": "Stack", "props": {}, "children": ["total", "categories"]},
+      "total": {"type": "Metric", "props": {"metric_ref": "fixture-bill:consumption_fen"}},
+      "categories": {"type": "CategoryBarChart", "props": {"dataset_ref": "fixture-bill:categories"}}
+    }
+  },
+  "interaction_state": {"selected_category": null, "selected_ids": [], "sort": "default", "filter": "all"},
+  "allowed_actions": ["select_category", "set_sort", "clear_filters"],
+  "trusted_data": {
+    "metrics": {
+      "fixture-bill:consumption_fen": {"label": "消费", "value": 10000, "format": "currency", "period": "2026-10"}
+    },
+    "datasets": {
+      "fixture-bill:categories": {
+        "kind": "categories", "title": "消费分类",
+        "columns": [{"key": "label", "label": "分类", "format": "text"}, {"key": "amount_fen", "label": "消费金额", "format": "currency"}],
+        "rows": [{"id": "餐饮", "label": "餐饮", "amount_fen": 6000}, {"id": "交通", "label": "交通", "amount_fen": 4000}]
+      }
+    }
+  }
+}

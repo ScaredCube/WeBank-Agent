@@ -1,55 +1,37 @@
+"""Bounded model/tool loop. Financial Tool execution belongs to ToolExecutor."""
 import json
-import logging
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agent.guard import GuardProvider, GuardVerdict, build_guard_call, get_guard
+from app.agent.guard import GuardProvider, get_guard
+from app.agent.goal_completion import missing_bill_goal
 from app.agent.llm import LLMProvider, get_llm
-from app.agent.prompts import SYSTEM_PROMPT
-from app.agent.financial_summary import summarize_bill_comparison
+from app.agent.prompt_assembly import assemble_agent_prompt
+from app.agent.compound_read_summary import (
+    missing_read_goal_for_retry, summarize_transaction_subscription_review,
+)
+from app.agent.financial_summary import (
+    incomplete_bill_comparison, summarize_bill_comparison,
+)
 from app.agent.read_completion import completed_readonly_summary
-from app.agent.response_policy import tool_free_reply
-from app.schemas.card_results import from_card_tool_result
-from app.agent.registry import RiskLevel
-from app.db.session import session_scope
-from app.risk.engine import assess_tool, begin_guard_escalation, end_guard_escalation
-from app.risk.injection import validate_tool_arguments
+from app.agent.read_result_recovery import (
+    CACHEABLE_READ_TOOLS, read_cache_key, verified_partial_read_reply,
+)
+from app.agent.response_policy import (
+    NoToolScope, ReplyRoute, classify_no_tool_request,
+    decide_no_tool_reply, tool_free_reply,
+)
+from app.agent.response_recovery import recover_no_tool_reply
+from app.agent.response_synthesis import ResponseSynthesizer, TurnOutcome, should_synthesize_readoutcome
+from app.agent.tool_executor import ToolExecutor, VerifiedToolContext
 from app.tools.register import create_agent_registry
 from app.tools.presentation import render_tool_result
-from app.services.audit_service import TOOLS, record, record_separately
 from app.services.redaction import mask_text, mask_value
-from app.services.security_service import record_failure
 
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 5
-_PREPARE_TOOLS = {
-    "prepare_transfer": RiskLevel.YELLOW,
-    "prepare_card_loss": RiskLevel.RED,
-    "prepare_wealth_subscribe": RiskLevel.RED,
-    "prepare_wealth_redeem": RiskLevel.RED,
-    "prepare_cancel_subscription": RiskLevel.YELLOW,
-    "prepare_internal_transfer": RiskLevel.YELLOW,
-    "prepare_collection": RiskLevel.YELLOW,
-    "prepare_wealth_convert": RiskLevel.RED,
-}
-_INTENT_TOOLS = {
-    "transfer": "prepare_transfer",
-    "internal_transfer": "prepare_internal_transfer",
-    "collect": "prepare_collection",
-    "purchase": "prepare_wealth_subscribe",
-    "redeem": "prepare_wealth_redeem",
-    "convert": "prepare_wealth_convert",
-}
-_INTENT_TOKEN_ARGS = {
-    "transfer": ("source_token", "recipient_contact_token"),
-    "internal_transfer": ("source_token", "target_token"),
-    "collect": ("contact_token", "account_token"),
-    "purchase": ("account_token", "product_token"),
-    "redeem": ("product_token", "account_token"),
-    "convert": ("source_token", "target_token"),
-}
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,18 +55,48 @@ class AgentLoop:
                      context_readonly_only: bool = False,
                      intent_action: str | None = None,
                      intent_tokens: tuple[str, str] | None = None,
-                     intent_amount_fen: int | None = None) -> AsyncIterator[AgentEvent]:
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+                     intent_amount_fen: int | None = None,
+                     original_request: str | None = None,
+                     conversation_id: int | None = None,
+                     view_selection: dict[str, Any] | None = None) -> AsyncIterator[AgentEvent]:
+        # One canonical system-prompt assembly. Intent is already verified
+        # upstream; the ToolExecutor remains the authority on business actions.
+        messages: list[dict[str, Any]] = assemble_agent_prompt(
+            verified_intent_action=intent_action,
+        ).model_messages()
         messages.extend(history)
-        if intent_action in _INTENT_TOOLS:
-            messages.insert(1, {"role": "system", "content": (
-                "本轮用户消息开头包含服务端已校验的【前置意图】，其中令牌和金额均已绑定。"
-                f"必须调用 {_INTENT_TOOLS[intent_action]} 处理本轮请求；"
-                "不得要求用户重新选择账户、联系人，不得改用其他工具，也不得自行改写来源、目标或金额。"
-            )})
+        # A selected view contains a server-verified aggregate that can answer
+        # a narrow follow-up without another bank query or model-authored facts.
+        from app.agent.view_followup import render_view_followup
+        view_reply = (render_view_followup(original_request or "", view_selection)
+                      if intent_action is None else None)
+        if view_reply is not None:
+            view_reply = await ResponseSynthesizer(self.llm).compose_view(
+                user_goal=original_request or "", verified_summary=view_reply,
+            )
+            yield AgentEvent("delta", {"text": view_reply})
+            return
         registry = create_agent_registry()
+        executor = ToolExecutor(registry, self.guard)
+        trusted = VerifiedToolContext(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            verified_account_token=verified_account_token,
+            verified_card_id=verified_card_id,
+            verified_contact_token=verified_contact_token,
+            verified_recipient_name=verified_recipient_name,
+            verified_transfer_amount_fen=verified_transfer_amount_fen,
+            has_selected_contact=has_selected_contact,
+            context_readonly_only=context_readonly_only,
+            intent_action=intent_action,
+            intent_tokens=intent_tokens,
+            intent_amount_fen=intent_amount_fen,
+        )
         tool_results: list[tuple[str, dict]] = []
+        read_cache: dict[tuple[str, str], dict] = {}
         prior_calls: list[str] = []
+        continuation_target: str | None = None
+        attempted_nonread = False
 
         try:
             for round_index in range(MAX_TOOL_ROUNDS + 1):
@@ -96,20 +108,100 @@ class AgentLoop:
                     if chunk.tool_calls:
                         tool_calls = chunk.tool_calls
                 if not tool_calls:
+                    # Allow one model-directed chance to finish an explicit,
+                    # unattempted second read goal. No extra read permission,
+                    # automatic Tool execution, or unlimited retry is granted.
+                    missing_goal = (missing_read_goal_for_retry(
+                        tool_results, user_request=original_request or "",
+                    ) or missing_bill_goal(
+                        tool_results, user_request=original_request or "",
+                    ))
+                    if (missing_goal is not None and continuation_target is None
+                            and intent_action is None
+                            and round_index < MAX_TOOL_ROUNDS - 1):
+                        continuation_target = missing_goal
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                "服务端只读任务覆盖检查：当前可信结果未覆盖用户明确提出的全部查询目标。"
+                                f"尚未尝试的工具为 {missing_goal}。"
+                                "如有足够条件，请优先调用这个只读工具完成剩余目标。"
+                                "遵守现有权限与账户范围，不得执行写操作、不得重复已成功的查询。"
+                                "如无法查询或需要用户选择账户，请正常解释尚未完成的目标。"
+                                "不得把疑似周期扣费直接断言成重复订阅。"
+                            ),
+                        })
+                        continue
                     if tool_results:
+                        # Calculator-only educational turns may retain a safe
+                        # explanation. Account, payment and other bank Tool
+                        # results continue to use deterministic presentation.
+                        request = original_request or ""
+                        candidate = "".join(content).strip()
+                        general_education = (
+                            classify_no_tool_request(request) == NoToolScope.EDUCATIONAL
+                            and not any(cue in request for cue in (
+                                "我的", "本人", "这笔", "这张", "该账户", "我的账户",
+                                "本月", "上个月", "刚才", "刚刚", "上次", "之前",
+                            ))
+                        )
+                        if (general_education and candidate
+                                and all(name == "calculate" and result.get("ok")
+                                        for name, result in tool_results)):
+                            # The model may explain a concept, but it cannot
+                            # certify newly authored numerical conclusions.
+                            # Render every calculation from the Tool instead.
+                            explanation = "\n".join(
+                                line for line in candidate.splitlines()
+                                if not any(ch.isdigit() for ch in line)
+                                and not re.search(r"[￥¥]|[零一二两三四五六七八九十百千万亿]+(?:元|块|分)", line)
+                                and not line.lstrip().startswith(("计算结果", "|"))
+                                and not (line.lstrip().startswith("#") and any(
+                                    cue in line for cue in ("算一遍", "表格", "代入数字")
+                                ))
+                            ).strip()
+                            checked = tool_free_reply(explanation, user_request=request)
+                            if explanation and checked == explanation:
+                                verified_calculations = "\n".join(
+                                    render_tool_result(name, result)
+                                    for name, result in tool_results
+                                )
+                                yield AgentEvent("delta", {
+                                    "text": explanation + "\n\n" + verified_calculations,
+                                })
+                                return
                         fully_supported = all(name in {"get_monthly_bill", "get_card_status"} and result.get("ok")
                                               for name, result in tool_results)
-                        if fully_supported and len(tool_results) > 1:
+                        missing_evidence = incomplete_bill_comparison(
+                            tool_results, original_request or "",
+                        )
+                        compound_summary = summarize_transaction_subscription_review(
+                            tool_results, user_request=original_request or "",
+                        )
+                        if compound_summary is not None:
+                            # The summary states coverage and evidence limits.
+                            # Preserve the exact verified transaction details below.
+                            summary = compound_summary + "\n\n" + "\n\n".join(
+                                render_tool_result(name, result)
+                                for name, result in tool_results
+                            )
+                        elif fully_supported and len(tool_results) > 1:
                             summary = (summarize_bill_comparison(tool_results)
                                        or f"已完成 {len(tool_results)} 项查询，结果见下方。")
+                        elif missing_evidence is not None:
+                            summary = missing_evidence
                         else:
                             summary = "\n\n".join(
                                 ("账单已查询，明细见下方结果卡。" if name == "get_monthly_bill" and result.get("ok")
                                  else "卡片状态已查询，详见下方卡片。" if name == "get_card_status" and result.get("ok")
                                  else render_tool_result(name, result))
                                 for name, result in tool_results)
-                        # Keep the deterministic summary in this turn's context
-                        # as well as the persisted assistant message.
+                        if should_synthesize_readoutcome(request, tool_results):
+                            summary = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                                user_goal=request,
+                                verified_results=tuple(tool_results),
+                                fallback_text=summary,
+                            ))
                         messages.append({"role": "assistant", "content": summary})
                         yield AgentEvent("delta", {"text": summary})
                     else:
@@ -126,15 +218,26 @@ class AgentLoop:
                                 (str(item.get("content") or "") for item in reversed(history)
                                  if item.get("role") == "user"), ""
                             )
-                            text = tool_free_reply(
-                                "".join(content), user_request=latest_request,
+                            decision = decide_no_tool_reply(
+                                "".join(content),
+                                user_request=(original_request if original_request is not None
+                                              else latest_request),
                                 financial_context=bool(
                                     verified_account_token or verified_card_id
                                     or verified_contact_token or has_selected_contact
                                 ),
                             )
-                        # The fixed reply is a real assistant turn: keep it in the
-                        # local context; chat.py also persists it for later turns.
+                            # Ordinary accepted chat remains single-call; missing
+                            # data, status checks, and action clarification may use
+                            # a separate bounded tool-free wording pass.
+                            if (decision.route in {
+                                    ReplyRoute.CLARIFY_ACTION,
+                                    ReplyRoute.QUERY_REQUIRED,
+                                    ReplyRoute.VERIFY_STATUS,
+                                } and getattr(self.llm, "mode", None) == "openai"):
+                                text = await recover_no_tool_reply(decision, model=self.llm)
+                            else:
+                                text = decision.safe_text
                         messages.append({"role": "assistant", "content": text})
                         yield AgentEvent("delta", {"text": text})
                     return
@@ -149,197 +252,100 @@ class AgentLoop:
                        for call in tool_calls):
                     yield AgentEvent("error", {"message": "模型返回的工具调用格式无效。"})
                     return
+                if (continuation_target is not None and (
+                        len(tool_calls) != 1
+                        or tool_calls[0]["function"]["name"] != continuation_target)):
+                    # The extra turn is authorized only to complete the single
+                    # remaining READ goal. Do not execute unrelated tools.
+                    partial = summarize_transaction_subscription_review(
+                        tool_results, user_request=original_request or "",
+                    )
+                    if partial is not None:
+                        answer = partial + "\n\n" + "\n\n".join(
+                            render_tool_result(name, result)
+                            for name, result in tool_results
+                        )
+                        yield AgentEvent("delta", {"text": answer})
+                    else:
+                        yield AgentEvent("error", {
+                            "message": "剩余查询未完成，请重试或缩小请求范围。",
+                        })
+                    return
                 messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
                                  "tool_calls": mask_value(tool_calls)})
+                executed_count = 0
                 for call in tool_calls:
-                    function = call["function"]
-                    spec = registry.get(function["name"])
-                    audit_tool = spec.name if spec is not None and spec.name in TOOLS else None
-                    record_separately(user_id=user_id, event_type="tool_called", tool=audit_tool, result="success")
-                    rejection_reason = None
-                    intent_mismatch = (
-                        intent_action is not None
-                        and (spec is None or spec.name != _INTENT_TOOLS.get(intent_action))
-                    )
-                    try:
-                        args = json.loads(function["arguments"])
-                        if (not isinstance(args, dict) or "session" in args or "user_id" in args
-                                or mask_value(args) != args or mask_text(call["id"]) != call["id"]):
-                            raise ValueError("invalid arguments")
-                    except (ValueError, TypeError):
-                        rejection_reason = "invalid_arguments"
-                        result = {"ok": False, "data": None, "error": "查询参数无效"}
+                    name = call["function"]["name"]
+                    cache_key = (read_cache_key(name, call["function"]["arguments"])
+                                 if not attempted_nonread else None)
+                    if cache_key is not None and cache_key in read_cache:
+                        # Satisfy the model tool_call_id without re-executing or
+                        # duplicating SSE cards, audits or trusted result rows.
+                        observation = read_cache[cache_key]
                     else:
-                        argument_error = validate_tool_arguments(spec, args)
-                        if argument_error is None and intent_mismatch:
-                            argument_error = "模型选择的工具与前置意图不一致，请重新发起"
-                            rejection_reason = "invalid_arguments"
-                        if (argument_error is None and intent_action is not None
-                                and intent_tokens is not None):
-                            token_args = _INTENT_TOKEN_ARGS.get(intent_action)
-                            if token_args is None or len(intent_tokens) != 2:
-                                argument_error = "前置意图引用无效"
-                                rejection_reason = "invalid_arguments"
-                            elif (type(args.get("amount_fen")) is not int
-                                  or intent_amount_fen is None
-                                  or args["amount_fen"] != intent_amount_fen):
-                                argument_error = "模型金额与用户原文不一致，已拒绝"
-                                rejection_reason = "invalid_arguments"
-                            else:
-                                # The server, not the model, binds source and target.
-                                args[token_args[0]] = intent_tokens[0]
-                                args[token_args[1]] = intent_tokens[1]
-                                args["amount_fen"] = intent_amount_fen
-                                if intent_action == "transfer":
-                                    args.pop("target_token", None)
-                        # Account binding comes ONLY from the authenticated route's
-                        # ownership check. The model chooses the read-only tool and month,
-                        # but cannot forge, truncate or swap the selected account token.
-                        # Invalid tool fields still fail the existing whitelist check.
-                        if (argument_error is None and verified_account_token is not None
-                                and spec is not None and spec.name == "get_monthly_bill"):
-                            args["account_token"] = verified_account_token
-                        if (argument_error is None and verified_account_token is not None
-                                and verified_card_id is not None and spec is not None
-                                and spec.name == "get_card_status"):
-                            # Both fields come from the authenticated card-to-account join.
-                            # Never trust an unverified model-supplied card ID or token.
-                            args["account_token"] = verified_account_token
-                            args["card_id"] = verified_card_id
-                        if argument_error is None and spec is not None and spec.name == "prepare_transfer" and has_selected_contact:
-                            if (verified_account_token is None or verified_contact_token is None
-                                    or verified_recipient_name is None or verified_transfer_amount_fen is None):
-                                argument_error = "请明确填写本次转账金额并核对所选账户和联系人"
-                            elif (type(args.get("amount_fen")) is not int
-                                    or args["amount_fen"] != verified_transfer_amount_fen):
-                                argument_error = "模型金额与用户请求不一致，请核对后重新提交"
-                            else:
-                                # Model chooses the operation, but neither the amount
-                                # nor the payer/payee identity can be silently changed.
-                                args.pop("target_token", None)
-                                args["source_token"] = verified_account_token
-                                args["recipient_contact_token"] = verified_contact_token
-                                args["recipient_name"] = verified_recipient_name
-                        if (argument_error is None and context_readonly_only
-                                and spec is not None and spec.name in _PREPARE_TOOLS):
-                            argument_error = "请在本轮明确选择金融对象后再准备操作"
-                        guard_elevated = False
-                        if (argument_error is None and spec is not None and spec.handler is not None
-                                and self.guard is not None):
-                            try:
-                                verdict = await self.guard.review(
-                                    build_guard_call(spec, args, prior_calls)
-                                )
-                            except Exception:
-                                verdict = GuardVerdict(False, "unavailable")
-                            if verdict.allowed:
-                                record_separately(user_id=user_id, event_type="guard_allowed",
-                                                  tool=audit_tool, result="success")
-                            else:
-                                failed = verdict.reason in {"unavailable", "invalid_response"}
-                                record_separately(
-                                    user_id=user_id,
-                                    event_type="guard_failed" if failed else "guard_denied",
-                                    tool=audit_tool,
-                                    result="failed" if failed else "denied",
-                                    reason_code="guard_unavailable" if failed else "guard_rejected",
-                                )
-                                # A guard flag now raises the fixed-code risk one
-                                # notch instead of refusing the user's request.
-                                guard_elevated = True
-                        if argument_error is not None:
-                            result = {"ok": False, "data": None, "error": argument_error}
-                            rejection_reason = "invalid_arguments"
-                        elif spec is None or spec.handler is None:
-                            result = {"ok": False, "data": None, "error": "工具不可用"}
-                        elif _PREPARE_TOOLS.get(spec.name) == spec.risk:
-                            elevation = begin_guard_escalation(guard_elevated)
-                            try:
-                                prepared = await spec.handler(user_id=user_id, **args)
-                            finally:
-                                end_guard_escalation(elevation)
-                            if prepared.get("ok") and prepared.get("executed"):
-                                data = prepared.get("result") or {}
-                                record_separately(
-                                    user_id=user_id, event_type="tool_result", tool=spec.name,
-                                    transfer_id=prepared.get("transfer_id"), result="success",
-                                )
-                                yield AgentEvent("operation_result", {
-                                    "kind": prepared.get("result_kind"), "data": data,
-                                })
-                                result = {"ok": True, "data": data, "error": None}
-                            elif prepared.get("ok"):
-                                prepared_action = prepared.get("action")
-                                action_id = (prepared_action.get("id")
-                                             if isinstance(prepared_action, dict) else None)
-                                record_separately(user_id=user_id, event_type="tool_result", tool=spec.name,
-                                                  action_id=action_id, transfer_id=prepared.get("transfer_id"),
-                                                  result="success")
-                                payload = {"action": mask_value(prepared_action)}
-                                if "transfer_id" in prepared:
-                                    payload["transfer_id"] = prepared["transfer_id"]
-                                if "order_id" in prepared:
-                                    payload["order_id"] = prepared["order_id"]
-                                if "subscription_id" in prepared:
-                                    payload["subscription_id"] = prepared["subscription_id"]
-                                if "collection_id" in prepared:
-                                    payload["collection_id"] = prepared["collection_id"]
-                                if "conversion_id" in prepared:
-                                    payload["conversion_id"] = prepared["conversion_id"]
-                                # Never put the confirmation token into model messages or logs.
-                                payload["confirmation_token"] = prepared["confirmation_token"]
-                                yield AgentEvent("action_required", payload)
-                                return
-                            else:
-                                result = {"ok": False, "data": None, "error": prepared["error"]}
-                        else:
-                            decision = assess_tool(spec)
-                            logger.info("risk_decision tool=%s user_id=%s level=%s reasons=%s",
-                                        spec.name, user_id, decision.level.value, decision.reasons)
-                            if decision.level != RiskLevel.GREEN:
-                                record_separately(user_id=user_id, event_type="risk_assessed", tool=audit_tool,
-                                                  risk_level=decision.level.value, reasons=decision.reasons, result="denied")
-                                result = {"ok": False, "data": None, "error": "操作需要进一步验证"}
-                            else:
-                                try:
-                                    with session_scope() as session:
-                                        result = await spec.handler(session=session, user_id=user_id, **args)
-                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
-                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
-                                        if result.get("ok"):
-                                            record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
-                                                   result="success")
-                                        session.commit()
-                                except Exception:
-                                    with session_scope() as session:
-                                        record(session, user_id=user_id, event_type="risk_assessed", tool=audit_tool,
-                                               risk_level=decision.level.value, reasons=decision.reasons, result="success")
-                                        record(session, user_id=user_id, event_type="tool_result", tool=audit_tool,
-                                               result="failed", reason_code="internal_error")
-                                        session.commit()
-                                    raise
-                    if not result.get("ok"):
-                        record_separately(user_id=user_id, event_type="tool_result", tool=audit_tool,
-                                          result="denied", reason_code=rejection_reason)
-                    result = mask_value(result)
-                    # Trusted, user-scoped data produced by the existing GREEN tool,
-                    # not a chart or financial claim authored by the language model.
-                    if spec is not None and spec.name == "get_monthly_bill" and result.get("ok") and isinstance(result.get("data"), dict):
-                        yield AgentEvent("bill_result", {"data": result["data"]})
-                    if spec is not None and spec.name == "get_card_status" and result.get("ok"):
-                        safe_snapshot = from_card_tool_result(result.get("data"))
-                        yield AgentEvent("card_result", {"data": safe_snapshot.model_dump()})
-                    messages.append({"role": "tool", "tool_call_id": mask_text(call["id"]),
-                                     "content": json.dumps(result, ensure_ascii=False)})
-                    tool_results.append((function["name"], result))
-                    prior_calls.append(f"{function['name']}:{'success' if result.get('ok') else 'denied'}")
+                        if name not in CACHEABLE_READ_TOOLS:
+                            attempted_nonread = True
+                            # A write or dynamic Tool may change state. Never
+                            # serve earlier read snapshots after it is attempted.
+                            read_cache.clear()
+                        outcome = await executor.execute(call, trusted, prior_calls)
+                        executed_count += 1
+                        for event in outcome.events:
+                            yield AgentEvent(event.type, event.data)
+                        if outcome.stop_reason:
+                            return
+                        # Approval tokens travel only in client events.
+                        if outcome.observation is None:
+                            raise RuntimeError("Nonterminal Tool execution had no observation")
+                        observation = outcome.observation
+                        tool_results.append((name, observation))
+                        prior_calls.append(
+                            f"{name}:{'success' if observation.get('ok') else 'denied'}"
+                        )
+                        if cache_key is not None and observation.get("ok") is True:
+                            read_cache[cache_key] = observation
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": mask_text(call["id"]),
+                        "content": json.dumps(observation, ensure_ascii=False),
+                    })
+                if executed_count == 0:
+                    # Model repeated only already verified read calls. Do not
+                    # spend the remaining rounds on a no-progress loop.
+                    partial = verified_partial_read_reply(
+                        tool_results, user_request=original_request or "",
+                    )
+                    if partial is not None:
+                        yield AgentEvent("delta", {"text": partial})
+                    else:
+                        yield AgentEvent("error", {
+                            "message": "查询没有取得新的可信结果，请简化请求后重试。",
+                        })
+                    return
                 # When the requested verified read-only results are already complete,
                 # the server can finish deterministically. A further model round may
                 # otherwise produce redundant/unsafe tool calls without new value.
-                final_readonly_text = completed_readonly_summary(history, tool_results)
+                final_readonly_text = completed_readonly_summary(
+                    history, tool_results, user_request=original_request,
+                )
                 if final_readonly_text is not None:
+                    if should_synthesize_readoutcome(original_request or "", tool_results):
+                        final_readonly_text = await ResponseSynthesizer(self.llm).compose(TurnOutcome(
+                            user_goal=original_request or "",
+                            verified_results=tuple(tool_results),
+                            fallback_text=final_readonly_text,
+                        ))
                     yield AgentEvent("delta", {"text": final_readonly_text})
                     return
         except Exception:
-            yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
+            # The provider or a later READ tool can fail after earlier tools
+            # succeeded. Preserve those verified observations; never invent
+            # the missing step or claim that a PREPARE operation succeeded.
+            partial = (verified_partial_read_reply(
+                tool_results, user_request=original_request or "",
+            ) if not attempted_nonread else None)
+            if partial is not None:
+                yield AgentEvent("delta", {"text": partial})
+            else:
+                yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
             return

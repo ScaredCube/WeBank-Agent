@@ -25,7 +25,8 @@ import urllib.request
 REPO = Path(__file__).resolve().parents[2]
 BACKEND = REPO / "backend"
 FRONTEND = REPO / "frontend"
-BROWSER = FRONTEND / "scripts" / "competition_e2e.cjs"
+BROWSER_SCRIPTS = FRONTEND / "scripts"
+DEFAULT_BROWSER_ENTRYPOINT = "scripts/competition_e2e.cjs"
 BACKEND_PORT = 8022
 FRONTEND_PORT = 5222
 
@@ -71,26 +72,61 @@ def _create_env(database: Path) -> dict[str, str]:
     return env
 
 
-def _database_summary(path: Path) -> dict:
+def _database_snapshot(path: Path) -> dict:
     # Run only on the newly created synthetic DB; never includes real bank data.
     import sqlite3
     if not path.is_file():
         raise AssertionError("Synthetic database disappeared")
     with closing(sqlite3.connect(path)) as db:
-        account_rows = db.execute("SELECT balance_fen FROM account ORDER BY id").fetchall()
+        account_rows = db.execute(
+            "SELECT name,masked_number,balance_fen FROM account ORDER BY id"
+        ).fetchall()
         transfers = db.execute("SELECT status,amount_fen,transaction_id FROM transferrequest").fetchall()
+        pending_actions = db.execute("SELECT id FROM pendingaction").fetchall()
+        preparations = db.execute("SELECT id FROM operationpreparation").fetchall()
         ledger = db.execute(
             "SELECT amount_fen FROM \"transaction\" WHERE category='模拟转账'"
         ).fetchall()
         submission_states = db.execute(
             "SELECT state, COUNT(*) FROM chatsubmission GROUP BY state ORDER BY state"
         ).fetchall()
-    if len(account_rows) != 1 or account_rows[0][0] != 500000:
-        raise AssertionError("Read-only browser test must never alter synthetic balance")
-    if transfers or ledger:
-        raise AssertionError("Read-only browser test unexpectedly created a transfer")
+    return {
+        "account_rows": account_rows,
+        "transfers": transfers,
+        "ledger": ledger,
+        "pending_actions": pending_actions,
+        "preparations": preparations,
+        "submission_states": submission_states,
+    }
+
+
+def _database_summary(path: Path, baseline: dict | None = None) -> dict:
+    state = _database_snapshot(path)
+    account_rows = state["account_rows"]
+    transfers = state["transfers"]
+    ledger = state["ledger"]
+    pending_actions = state["pending_actions"]
+    preparations = state["preparations"]
+    submission_states = state["submission_states"]
+    # The current demo seed creates TWO accounts. Verify each exact identity
+    # and opening balance rather than silently accepting any state drift.
+    expected_accounts = [
+        ("演示活期账户", "**** 0001", 500000),
+        ("零钱账户", "**** 0002", 386012),
+    ]
+    if account_rows != expected_accounts:
+        raise AssertionError("Read-only browser test altered synthetic account state")
+    if baseline is not None and account_rows != baseline["account_rows"]:
+        raise AssertionError("Read-only browser test changed synthetic account balances")
+    if baseline is not None and transfers != baseline["transfers"]:
+        raise AssertionError("Read-only browser test changed synthetic transfer status")
+    if transfers or ledger or pending_actions or preparations:
+        raise AssertionError("Read-only browser test unexpectedly created an operation")
     return {"synthetic_balance_unchanged": True, "transfer_rows": len(transfers),
-            "ledger_rows": len(ledger), "submission_states": dict(submission_states)}
+            "transfer_status_unchanged": baseline is None or transfers == baseline["transfers"],
+            "ledger_rows": len(ledger), "pending_action_rows": len(pending_actions),
+            "preparation_rows": len(preparations),
+            "submission_states": dict(submission_states)}
 
 
 def main() -> int:
@@ -99,13 +135,22 @@ def main() -> int:
                         help="Explicit opt-in: query configured LLM with synthetic read-only banking")
     parser.add_argument("--evidence-dir", type=Path,
                         help="Optional local QA output directory outside Git")
+    parser.add_argument("--browser-entrypoint", default=DEFAULT_BROWSER_ENTRYPOINT,
+                        help="Browser script relative to frontend/; must be under frontend/scripts/ (default: %(default)s)")
     args = parser.parse_args()
     if not args.live:
         parser.error("This workflow calls the provider; specify --live explicitly")
+    entrypoint = Path(args.browser_entrypoint)
+    browser = (FRONTEND / entrypoint).resolve()
+    browser_scripts = BROWSER_SCRIPTS.resolve()
+    if entrypoint.is_absolute() or not browser.is_relative_to(browser_scripts) or browser.suffix.lower() != ".cjs":
+        parser.error("--browser-entrypoint must name a .cjs file under frontend/scripts/")
+    if not browser.is_file():
+        raise SystemExit("Browser test entrypoint is missing")
     if not all(_free(port) for port in (BACKEND_PORT, FRONTEND_PORT)):
         raise SystemExit("Refusing to touch already occupied isolation ports")
     node = shutil.which("node")
-    if not node or not BROWSER.exists():
+    if not node:
         raise SystemExit("Node or the browser test entrypoint is missing")
     if not (FRONTEND / "node_modules" / "vite" / "bin" / "vite.js").exists():
         raise SystemExit("Frontend dependencies are missing")
@@ -138,20 +183,33 @@ def main() -> int:
             processes.append(vite)
             _await_http(f"http://127.0.0.1:{BACKEND_PORT}/api/health", processes=processes)
             _await_http(f"http://127.0.0.1:{FRONTEND_PORT}/login", processes=processes)
+            baseline = _database_snapshot(db)
             with urllib.request.urlopen(f"http://127.0.0.1:{BACKEND_PORT}/api/health",
                                          timeout=5) as health_response:
                 model_info = json.load(health_response).get("llm", {})
             if model_info.get("mode") != "openai":
                 raise RuntimeError("The isolated service is not using the real model")
-            run = subprocess.run(
-                [node, str(BROWSER), str(evidence or Path(scratch))],
-                cwd=FRONTEND, env=env, capture_output=True, text=True, timeout=200,
-            )
+            try:
+                run = subprocess.run(
+                    [node, str(browser), str(evidence or Path(scratch))],
+                    cwd=FRONTEND, env=env, capture_output=True, text=True, timeout=420,
+                )
+            except subprocess.TimeoutExpired as exc:
+                captured = []
+                for output in (exc.stdout, exc.stderr):
+                    if isinstance(output, bytes):
+                        output = output.decode("utf-8", errors="replace")
+                    if isinstance(output, str):
+                        captured.extend(output.splitlines())
+                stages = [line.removeprefix("E2E_STAGE ") for line in captured
+                          if line.startswith("E2E_STAGE ")]
+                stage = stages[-1] if stages else "unknown"
+                raise TimeoutError("Browser integration timed out at stage " + stage) from None
             if run.returncode != 0:
                 raise RuntimeError("Browser integration failed: " + run.stderr[-1700:]
                                    + " " + run.stdout[-1500:])
             browser = json.loads(run.stdout.strip().splitlines()[-1])
-            data = _database_summary(db)
+            data = _database_summary(db, baseline)
             result = {"result": "PASS", "scope": "isolated_synthetic_bank",
                       "model": model_info.get("model"), "browser": browser,
                       "database": data, "real_funds_moved": False}

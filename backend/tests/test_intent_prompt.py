@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from app.agent.llm import LLMChunk
 from app.db.session import get_engine
-from app.models import Account, Card, Contact
+from app.models import Account, Card, Contact, MessageResult
 
 
 def _ids():
@@ -272,13 +272,50 @@ def test_green_internal_transfer_summary_is_not_tool_unavailable(client, auth_he
 
     monkeypatch.setattr("app.agent.loop.get_llm", lambda: FakeLLM())
     conversation_id = _conversation(client, auth_headers)
-    response = client.post(f"/api/chat/conversations/{conversation_id}/messages",
-                           headers=auth_headers, json={
+    request_payload = {
         "content": "500 元",
+        "request_id": "req-green-receipt-durable-001",
         "intent": {"action": "internal_transfer",
                    "source": {"kind": "account", "id": source_id},
                    "target": {"kind": "account", "id": target_id}},
-    })
+    }
+    url = f"/api/chat/conversations/{conversation_id}/messages"
+    response = client.post(url, headers=auth_headers, json=request_payload)
     assert response.status_code == 200
     assert "工具不可用" not in response.text
     assert "内部转账已完成" in response.text
+
+    # The actual executed receipt must survive SSE completion, history reload
+    # and a repeated GET; the card must come from the server, not model prose.
+    history_url = f"/api/chat/conversations/{conversation_id}/messages"
+    history = client.get(history_url, headers=auth_headers).json()
+    receipts = [entry for item in history if item["role"] == "assistant"
+                for entry in (item.get("tool_results") or [])
+                if entry["kind"] == "internal_transfer"]
+    assert len(receipts) == 1
+    result = receipts[0]["data"]
+    assert result["status"] == "completed"
+    assert result["amount_fen"] == 50_000
+    assert result["source_name"] and result["target_name"]
+    assert result["transaction_id"] > 0
+    assert '"type": "operation_result"' in response.text
+    assert len(client.get(history_url, headers=auth_headers).json()) == len(history)
+    with Session(get_engine()) as session:
+        assert session.get(Account, source_id).balance_fen == 450_000
+        assert session.get(Account, target_id).balance_fen == 250_000
+        snapshot = session.exec(select(MessageResult)).one()
+        assert snapshot.kind == "internal_transfer"
+        assert "第二账户" not in snapshot.ciphertext
+
+    # Same request identity is idempotent and replays ONLY the saved reply.
+    # No duplicate operation_result, action token, or second transfer occurs.
+    replay = client.post(url, headers=auth_headers, json=request_payload)
+    assert replay.status_code == 200
+    assert '"type": "operation_result"' not in replay.text
+    assert '"type": "action_required"' not in replay.text
+    assert '"type": "done"' in replay.text
+    replay_history = client.get(history_url, headers=auth_headers).json()
+    assert replay_history == history
+    with Session(get_engine()) as session:
+        assert session.get(Account, source_id).balance_fen == 450_000
+        assert session.get(Account, target_id).balance_fen == 250_000

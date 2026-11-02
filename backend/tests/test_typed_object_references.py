@@ -92,7 +92,6 @@ def test_reference_ownership_inactive_duplicate_and_conflicting_card_account(cli
         [{"kind":"card","id":card_id}, {"kind":"card","id":card_id}],
         [{"kind":"contact","id":contact_id}, {"kind":"contact","id":contact_id}],
         [{"kind":"contact","id":0}],
-        [{"kind":"holding","id":1}],
         [{"kind":"account","id":account_id},{"kind":"card","id":card_id},
          {"kind":"contact","id":contact_id},{"kind":"contact","id":contact_id}],
     ]:

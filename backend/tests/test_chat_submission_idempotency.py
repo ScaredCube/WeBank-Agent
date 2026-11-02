@@ -11,6 +11,32 @@ from app.models import Account, ChatSubmission, Contact, TransferRequest, User
 from app.services.chat_submissions import claim_submission, fingerprint
 
 
+def test_request_fingerprint_distinguishes_view_revisions():
+    from app.schemas.generative_ui import ViewContext
+
+    first = ViewContext(view_id="view_example_123", revision=1)
+    second = ViewContext(view_id="view_example_123", revision=2)
+    assert fingerprint("继续分析", [], view_context=first) != fingerprint(
+        "继续分析", [], view_context=second
+    )
+    assert fingerprint("继续分析", []) != fingerprint("继续分析", [], view_context=first)
+
+
+def test_chat_request_accepts_only_view_identity_and_revision():
+    import pytest
+    from pydantic import ValidationError
+    from app.schemas.chat import ChatRequest
+
+    request = ChatRequest.model_validate({"content": "继续分析", "view_context": {
+        "view_id": "view_example_123", "revision": 2,
+    }})
+    assert request.view_context.revision == 2
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate({"content": "继续分析", "view_context": {
+            "view_id": "view_example_123", "revision": 2, "amount": 100,
+        }})
+
+
 def events(response):
     assert response.status_code == 200
     return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
@@ -24,6 +50,53 @@ def cid(client, headers):
 
 def url(cid):
     return f"/api/chat/conversations/{cid}/messages"
+
+
+def test_unknown_view_context_is_rejected_before_message_or_agent(client, auth_headers):
+    conversation_id = cid(client, auth_headers)
+    response = client.post(url(conversation_id), headers=auth_headers, json={
+        "content": "继续分析", "request_id": "unknown-view-123",
+        "view_context": {"view_id": "unknown_view_123", "revision": 1},
+    })
+    assert response.status_code == 404
+    assert client.get(url(conversation_id), headers=auth_headers).json() == []
+
+
+def test_saved_result_remains_processing_until_view_generation_finishes(client, auth_headers):
+    from app.services.chat_messages import persist_assistant, finalize_assistant
+
+    conversation_id = cid(client, auth_headers)
+    with Session(get_engine()) as db:
+        user = db.exec(select(User)).first()
+        submission, _ = claim_submission(db, user_id=user.id, conversation_id=conversation_id,
+                                         request_id="compose-pending-001", payload_digest="digest")
+        submission_id = submission.id
+    saved = persist_assistant(conversation_id, "已完成查询", submission_id=submission_id, finalize=False)
+    with Session(get_engine()) as db:
+        row = db.get(ChatSubmission, submission_id)
+        assert row.state == "processing" and row.assistant_message_id == saved["id"]
+    finalized = finalize_assistant(conversation_id, saved["id"], submission_id=submission_id)
+    assert finalized["id"] == saved["id"]
+    with Session(get_engine()) as db:
+        assert db.get(ChatSubmission, submission_id).state == "completed"
+
+
+def test_failed_reference_creation_does_not_leave_submission_processing(client, auth_headers, monkeypatch):
+    from app.services.vault import VaultError
+    conversation_id = cid(client, auth_headers)
+    with Session(get_engine()) as db:
+        account_id = db.exec(select(Account)).first().id
+    def fail(*args, **kwargs):
+        raise VaultError()
+    monkeypatch.setattr('app.api.routes.chat.create_account_token', fail)
+    response = client.post(url(conversation_id), headers=auth_headers, json={
+        'content': '查账单', 'references': [{'kind': 'account', 'id': account_id}],
+        'request_id': 'reference-fail-001',
+    })
+    assert response.status_code == 503
+    status = client.get(f'/api/chat/conversations/{conversation_id}/requests/reference-fail-001',
+                        headers=auth_headers).json()
+    assert status['state'] == 'failed' and status['user_message_id'] is None
 
 
 def test_readonly_duplicate_returns_saved_result_without_reexecution(client, auth_headers, monkeypatch):
@@ -46,7 +119,8 @@ def test_readonly_duplicate_returns_saved_result_without_reexecution(client, aut
              "request_id":"req-test-bill-001"}
     first=events(client.post(url(conversation_id),headers=auth_headers,json=payload))
     again=events(client.post(url(conversation_id),headers=auth_headers,json=payload))
-    assert [event["type"] for event in first] == ["bill_result","delta","done"]
+    types = [event["type"] for event in first]
+    assert types[0:2] == ["bill_result", "delta"] and types[-1] == "done"
     assert [event["type"] for event in again] == ["done"]
     assert first[-1]["message"]["id"] == again[-1]["message"]["id"]
     assert fake.calls == 1

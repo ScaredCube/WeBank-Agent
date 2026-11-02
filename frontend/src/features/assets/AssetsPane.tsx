@@ -11,6 +11,7 @@ import { DragGhost } from './drag/DragGhost'
 import { useAssetDrag } from './drag/useAssetDrag'
 import { resolveIntent, type AssetIntent, type AssetKind, type IntentEntity } from './intent'
 import { cn } from '@/lib/utils'
+import type { BankObjectReference } from '@/features/references/bank-object-reference'
 
 type Detail = { kind: 'account'; id: number } | { kind: 'contact'; id: number } | { kind: 'holding'; id: number } | null
 
@@ -28,6 +29,7 @@ type Props = {
   onActionBusy: (busy: boolean) => void
   onActionPrepared: (event: Extract<StreamEvent, { type: 'action_required' }>) => void
   onIntent: (intent: AssetIntent) => void
+  onReference: (reference: BankObjectReference) => void
   onRetry: () => void
   onClose: () => void
 }
@@ -42,7 +44,7 @@ function SectionLabel({ children }: { children: string }) {
 export function AssetsPane({
   token, dashboard, cards, loading, dashboardError, cardError, actionDisabled,
   cardLossRecovery, onCardLossRecoveryChange, onCardLossResolved, onActionBusy,
-  onActionPrepared, onIntent, onRetry, onClose,
+  onActionPrepared, onIntent, onReference, onRetry, onClose,
 }: Props) {
   const privacy = usePrivacy()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -79,6 +81,10 @@ export function AssetsPane({
   const drag = useAssetDrag({
     scrollRef,
     findTarget: (kind: AssetKind, id: number) => entities.get(`${kind}:${id}`) ?? null,
+    onReferenceDrop: (source) => {
+      onReference({kind: source.kind, id: source.id, label: source.label, detail: source.detail || ''})
+      setNotice('已引用到对话')
+    },
     onDrop: (source, target) => {
       if (!target) { setNotice('未放到可用目标，已返回原位。'); return }
       const intent = resolveIntent(source, target)

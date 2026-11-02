@@ -1,4 +1,4 @@
-from app.agent.registry import RiskLevel, ToolRegistry, ToolSpec
+from app.agent.registry import RiskLevel, ToolExecutionMode, ToolRegistry, ToolSpec
 from app.tools.account_tools import (
     BalanceArguments, TransactionArguments, get_account_balance, list_recent_transactions,
 )
@@ -15,6 +15,7 @@ from app.tools.subscription_tools import (
     SubscriptionArguments, SubscriptionCancelArguments, detect_subscriptions,
     get_subscriptions, prepare_cancel_subscription,
 )
+from app.tools.progress_tools import LatestActionProgressArguments, get_latest_action_progress
 from app.tools.combo_tools import (
     CollectionArguments, ConversionArguments, InternalTransferArguments,
     prepare_collection_tool, prepare_conversion_tool, prepare_internal_transfer_tool,
@@ -27,11 +28,12 @@ def create_readonly_registry() -> ToolRegistry:
     for name, description, args, handler in (
         ("get_account_balance", "查询当前用户的模拟账户余额", BalanceArguments, get_account_balance),
         ("list_recent_transactions", "查询当前用户模拟账户的最近交易", TransactionArguments, list_recent_transactions),
-        ("get_monthly_bill", "分析当前用户模拟账户的月度收支、消费分类及需核对的重复消费；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
+        ("get_monthly_bill", "查询当前用户模拟账户指定月份的月度收支和消费分类，用作进一步比较分析的可信数据；month 格式 YYYY-MM，省略为北京时间当月", MonthlyBillArguments, get_monthly_bill),
         ("get_card_status", "查询本人模拟卡片状态；引用指定卡片时同时传入 account_token 和 card_id", CardStatusArguments, get_card_status),
         ("get_wealth_products", "查询可申购的模拟理财产品及参考年化、风险等级和起购金额", WealthProductArguments, get_wealth_products),
         ("get_wealth_holdings", "查询本人模拟理财持仓和昨日收益", WealthHoldingArguments, get_wealth_holdings),
         ("get_wealth_risk_profile", "查询本人模拟理财风险测评等级", WealthRiskArguments, get_wealth_risk_profile),
+        ("get_latest_action_progress", "只读查询当前会话中最近一项由聊天准备的待确认操作的真实状态。已确认不代表已执行；无法查证即时完成的其他操作。无参数，不可执行操作。", LatestActionProgressArguments, get_latest_action_progress),
         ("get_subscriptions", "查询本人模拟订阅、下次扣费日期和续费提醒", SubscriptionArguments, get_subscriptions),
         ("detect_subscriptions", "从最近模拟消费流水中识别可能的重复订阅", SubscriptionArguments, detect_subscriptions),
     ):
@@ -50,27 +52,27 @@ def create_agent_registry() -> ToolRegistry:
     registry.register(ToolSpec(
         name="prepare_transfer", description="准备模拟转账，等待用户确认或演示验证，不会直接执行或扣款",
         parameters=TransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_transfer_tool,
+        handler=prepare_transfer_tool, execution=ToolExecutionMode.PREPARE,
     ))
     registry.register(ToolSpec(name="prepare_card_loss", description="准备模拟卡片挂失，必须由用户完成红色模拟验证后单独执行",
-        parameters=CardArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_card_loss))
+        parameters=CardArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_card_loss, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_subscribe", description="准备模拟理财申购，必须由用户完成红色模拟验证后单独执行",
-        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_subscribe))
+        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_subscribe, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_redeem", description="准备模拟理财赎回，必须由用户完成红色模拟验证后单独执行",
-        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_redeem))
+        parameters=WealthPrepareArguments.model_json_schema(), risk=RiskLevel.RED, handler=prepare_wealth_redeem, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_cancel_subscription", description="准备取消模拟订阅，等待用户确认后单独执行",
         parameters=SubscriptionCancelArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_cancel_subscription))
+        handler=prepare_cancel_subscription, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_internal_transfer",
         description="本人在同银行账户间内部转账；1000 元以内由服务端直接执行",
         parameters=InternalTransferArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_internal_transfer_tool))
+        handler=prepare_internal_transfer_tool, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_collection",
         description="向联系人发起模拟收款请求，等待用户确认后单独执行",
         parameters=CollectionArguments.model_json_schema(), risk=RiskLevel.YELLOW,
-        handler=prepare_collection_tool))
+        handler=prepare_collection_tool, execution=ToolExecutionMode.PREPARE))
     registry.register(ToolSpec(name="prepare_wealth_convert",
         description="在本人两个持仓之间转换，必须完成红色模拟验证后单独执行",
         parameters=ConversionArguments.model_json_schema(), risk=RiskLevel.RED,
-        handler=prepare_conversion_tool))
+        handler=prepare_conversion_tool, execution=ToolExecutionMode.PREPARE))
     return registry

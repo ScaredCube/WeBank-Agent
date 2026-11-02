@@ -24,6 +24,14 @@ export interface Message {
   bill_result?: unknown | null
   card_result?: unknown | null
   tool_results?: unknown | null
+  /** Untrusted at the rendering boundary until the generative UI parser accepts it. */
+  ui_view?: unknown | null
+  subscription_results?: unknown | null
+}
+
+export interface ChatViewContext {
+  view_id: string
+  revision: number
 }
 
 export interface Health {
@@ -149,7 +157,7 @@ export interface ConversionExecution {
 }
 
 const positiveId = z.number().int().safe().positive()
-const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional(), card_result: z.unknown().optional(), tool_results: z.unknown().optional() })
+const messageSchema = z.object({ id: positiveId, role: z.enum(['user', 'assistant', 'system']), content: z.string(), created_at: z.string(), bill_result: z.unknown().optional(), card_result: z.unknown().optional(), tool_results: z.unknown().optional(), ui_view: z.unknown().nullable().optional(), subscription_results: z.unknown().nullable().optional() })
 const submissionStatusSchema = z.object({
   request_id: z.string().min(8),
   state: z.enum(['processing', 'completed', 'action_pending', 'interrupted', 'failed']),
@@ -318,6 +326,23 @@ export const api = {
     // is needed; the backend caps every page at 100 and uses an indexed ID cursor.
     const batch = await api.messages(token, conversationId, { limit: 51, beforeId })
     return { messages: batch.slice(-50), hasOlder: batch.length > 50 }
+  },
+
+  view(token: string, viewId: string, revision?: number) {
+    const query = revision === undefined ? '' : `?revision=${encodeURIComponent(String(revision))}`
+    return request<unknown>(`/views/${encodeURIComponent(viewId)}${query}`, {}, token)
+  },
+
+  viewInteraction(token: string, viewId: string, baseRevision: number, action: string, value?: unknown) {
+    return request<unknown>(`/views/${encodeURIComponent(viewId)}/interactions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        event_id: crypto.randomUUID(),
+        base_revision: baseRevision,
+        action,
+        ...(value === undefined ? {} : { value }),
+      }),
+    }, token)
   },
 
   async cards(token: string): Promise<BankCard[]> {

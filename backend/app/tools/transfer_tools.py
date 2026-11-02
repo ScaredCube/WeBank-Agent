@@ -11,9 +11,17 @@ from app.services.operation_service import agent_preparation_key
 
 class TransferArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    source_token: str | None = None
-    recipient_name: str = Field(min_length=1, max_length=80)
-    target_token: str | None = None
+    source_token: str | None = Field(
+        default=None, description="付款账户由服务端绑定本轮用户明确选择的账户；未选择时不猜测账户或令牌。"
+    )
+    recipient_name: str = Field(
+        min_length=1, max_length=80,
+        description="只填收款人的姓名或称呼，如「模拟收款人」；绝不能附加手机号、银行卡号或其他数字联系方式。手机号只能用 target_token 传递。",
+    )
+    target_token: str | None = Field(
+        default=None,
+        description="用户输入手机号时，填写服务端在本轮上下文提供的 PHONE_TMP 临时引用；绝不填写明文手机号、猜测号码或拼接到收款人姓名。",
+    )
     recipient_contact_token: str | None = None
     amount_fen: int = Field(gt=0, le=100_000_000_000, description="模拟转账金额，单位为分")
     note: str = Field(default="", max_length=120)

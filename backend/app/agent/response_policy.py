@@ -6,6 +6,7 @@ anything. This request classifier is deliberately conservative and is not a
 universal Chinese intent classifier. A small output filter remains defense
 in depth for conversational requests only.
 """
+from dataclasses import dataclass
 from enum import Enum
 import re
 import unicodedata
@@ -233,3 +234,133 @@ def tool_free_reply(
         ):
             return _NO_VERIFIED_DATA
     return reply
+
+
+
+# A no-Tool action turn may still ask for missing information. Such a question
+# is not an assertion that an operation was created or executed. Keep the
+# acceptance predicate deliberately narrower than general natural-language
+# validation, and never use it to infer bank authorisation.
+_UNVERIFIED_PROGRESS = re.compile(
+    r"(?:已|已经|成功|完成|办好|到账|扣款|扣除|操作成功|系统显示|查到|"
+    r"绕过|跳过|无需确认|不用确认|无需验证|免验证|无需核对|直接执行|"
+    r"无需授权|不必授权|验证码|密码|完整卡号)"
+)
+_SAFE_CLARIFICATION_OPENER = re.compile(
+    r"^(?:可以的|当然可以|好的|没问题|好呀|当然|可以)[，,。！!]\s*"
+)
+_CLARIFICATION_CUES = (
+    "账户", "银行卡", "联系人", "收款人", "金额", "附言",
+    "哪一", "哪个", "哪张", "谁", "多少", "订阅", "理财产品",
+    "持仓", "什么", "业务",
+)
+
+
+def safe_action_clarification(candidate: str) -> bool:
+    """Accept a concise question about missing inputs, never a bank outcome.
+
+    This is a presentation gate only. A successfully authorised write must
+    still be proved by its separate business receipt.
+    """
+    if not isinstance(candidate, str):
+        return False
+    text = candidate.strip()
+    if (len(text) < 6 or len(text) > 180 or chr(10) in text or chr(13) in text
+            or not text.endswith(("？", "?"))
+            or text.count("？") + text.count("?") != 1):
+        return False
+    # Accept a short conversational acknowledgement before an otherwise
+    # valid question. Run every financial-claim and safety check on the WHOLE
+    # text below; the prefix cannot waive those constraints.
+    question = _SAFE_CLARIFICATION_OPENER.sub("", text, count=1)
+    if not question.startswith((
+        "请问", "请告诉我", "请先", "你想", "您想", "你希望", "您希望",
+        "需要", "想用", "哪", "哪个", "哪张", "想从",
+    )):
+        return False
+    if not any(cue in text for cue in _CLARIFICATION_CUES):
+        return False
+    if any(c.isdigit() for c in text) or any(c in text for c in "<>{}￥¥"):
+        return False
+    if (_UNVERIFIED_PROGRESS.search(text) or _INTERNAL.search(text)
+            or _ACTION_COMPLETION.search(text) or _UNVERIFIED_ORDER.search(text)
+            or _UNVERIFIED_LOOKUP.search(text) or _BANK_FACT.search(text)
+            or _AMOUNT_CLAIM.search(text)):
+        return False
+    return True
+
+
+class ReplyRoute(str, Enum):
+    """What a Runtime can do next without accepting an unverified model claim."""
+
+    ACCEPT = "accept"
+    QUERY_REQUIRED = "query_required"
+    VERIFY_STATUS = "verify_status"
+    CLARIFY_ACTION = "clarify_action"
+    REJECT_CANDIDATE = "reject_candidate"
+
+
+@dataclass(frozen=True)
+class ReplyDecision:
+    """Explain the existing no-tool gate without changing its verdict.
+
+    safe_text reproduces the current reply exactly. Runtime may request a
+    bounded Tool lookup or a tool-free question-only rephrase. Neither grants
+    banking authority or changes a confirmed business result.
+    """
+
+    route: ReplyRoute
+    scope: NoToolScope
+    safe_text: str
+    reason: str
+    recovery_topic: str | None = None
+
+
+def decide_no_tool_reply(
+    candidate: str, *, user_request: str = "", financial_context: bool = False,
+) -> ReplyDecision:
+    """Expose deterministic reply safety as a structured Runtime decision.
+
+    Follows the legacy fallback except safe action clarification questions. Never
+    invokes an LLM or dispatches a banking operation.
+    """
+    scope = classify_no_tool_request(user_request)
+    if financial_context and scope == NoToolScope.CONVERSATION:
+        if user_request.strip().casefold() not in {
+            "hi", "hello", "你好", "您好", "嗨", "谢谢", "在吗",
+        }:
+            scope = NoToolScope.PRIVATE_READ
+    fallback = tool_free_reply(
+        candidate, user_request=user_request, financial_context=financial_context,
+    )
+    if scope == NoToolScope.PRIVATE_READ:
+        return ReplyDecision(
+            ReplyRoute.QUERY_REQUIRED, scope, fallback, "no_verified_read",
+            recovery_topic="account_query",
+        )
+    if scope == NoToolScope.ACTION_STATUS:
+        return ReplyDecision(
+            ReplyRoute.VERIFY_STATUS, scope, fallback, "no_verified_operation_status",
+            recovery_topic="operation_status",
+        )
+    if scope == NoToolScope.ACTION:
+        if safe_action_clarification(candidate):
+            return ReplyDecision(
+                ReplyRoute.ACCEPT, scope, candidate.strip(), "safe_action_clarification",
+            )
+        topics = {
+            _NO_TRANSFER: "transfer",
+            _NO_CARD_ACTION: "card_action",
+            _NO_WEALTH_ACTION: "wealth_action",
+            _NO_SUBSCRIPTION_ACTION: "subscription_action",
+            _NO_UNSUPPORTED_ACTION: "other_action",
+        }
+        return ReplyDecision(
+            ReplyRoute.CLARIFY_ACTION, scope, fallback, "action_not_prepared",
+            recovery_topic=topics.get(_action_clarification(user_request), "other_action"),
+        )
+    if candidate.strip() and fallback == candidate.strip():
+        return ReplyDecision(ReplyRoute.ACCEPT, scope, fallback, "candidate_accepted")
+    return ReplyDecision(
+        ReplyRoute.REJECT_CANDIDATE, scope, fallback, "unverified_or_invalid_candidate",
+    )

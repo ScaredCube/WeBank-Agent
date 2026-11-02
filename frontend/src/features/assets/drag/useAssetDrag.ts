@@ -24,6 +24,7 @@ type StartInput = {
 type Options = {
   findTarget: (kind: AssetKind, id: number) => IntentEntity | null
   onDrop: (source: IntentEntity, target: IntentEntity | null) => void
+  onReferenceDrop?: (source: IntentEntity) => void
   onCancel?: () => void
   scrollRef?: RefObject<HTMLElement | null>
 }
@@ -41,11 +42,12 @@ type Session = {
   offsetX: number
   offsetY: number
   target: IntentEntity | null
+  overComposer: boolean
   timer: ReturnType<typeof setTimeout> | null
   scrollFrame: number | null
 }
 
-export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Options) {
+export function useAssetDrag({ findTarget, onDrop, onReferenceDrop, onCancel, scrollRef }: Options) {
   const session = useRef<Session | null>(null)
   const [ghost, setGhost] = useState<DragGhostState | null>(null)
   const [activeTargetKey, setActiveTargetKey] = useState<string | null>(null)
@@ -74,6 +76,7 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
     const wasActive = current.active
     const source = current.item
     const target = current.target
+    const overComposer = current.overComposer
     session.current = null
     setGhost(null)
     setActiveTargetKey(null)
@@ -88,10 +91,11 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
           if (settleTimer.current) clearTimeout(settleTimer.current)
           settleTimer.current = setTimeout(() => setSettledKey(null), 320)
         }
-        onDrop(source, target)
+        if (overComposer && onReferenceDrop) onReferenceDrop(source)
+        else onDrop(source, target)
       }
     }
-  }, [onCancel, onDrop])
+  }, [onCancel, onDrop, onReferenceDrop])
 
   const activate = useCallback(() => {
     const current = session.current
@@ -163,8 +167,11 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
       ...previous, x: event.clientX, y: event.clientY,
     } : previous)
     const target = targetAt(event.clientX, event.clientY)
-    current.target = target
-    setActiveTargetKey(target ? `${target.kind}:${target.id}` : null)
+    current.overComposer = document.elementsFromPoint(event.clientX, event.clientY).some(
+      node => node instanceof HTMLElement && !!node.closest('[data-object-dropzone]')
+    )
+    current.target = current.overComposer ? null : target
+    setActiveTargetKey(current.overComposer ? null : target ? `${target.kind}:${target.id}` : null)
   }
 
   function up(event: PointerEvent) {
@@ -197,7 +204,7 @@ export function useAssetDrag({ findTarget, onDrop, onCancel, scrollRef }: Option
       item, element, pointerId: event.pointerId, pointerType: event.pointerType,
       startX: event.clientX, startY: event.clientY,
       lastX: event.clientX, lastY: event.clientY,
-      active: false, offsetX: 0, offsetY: 0, target: null,
+      active: false, offsetX: 0, offsetY: 0, target: null, overComposer: false,
       timer: null, scrollFrame: null,
     }
     session.current = current
