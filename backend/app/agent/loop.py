@@ -15,6 +15,9 @@ from app.agent.financial_summary import (
     incomplete_bill_comparison, summarize_bill_comparison,
 )
 from app.agent.read_completion import completed_readonly_summary
+from app.agent.read_result_recovery import (
+    CACHEABLE_READ_TOOLS, read_cache_key, verified_partial_read_reply,
+)
 from app.agent.response_policy import (
     NoToolScope, ReplyRoute, classify_no_tool_request,
     decide_no_tool_reply, tool_free_reply,
@@ -76,8 +79,10 @@ class AgentLoop:
             intent_amount_fen=intent_amount_fen,
         )
         tool_results: list[tuple[str, dict]] = []
+        read_cache: dict[tuple[str, str], dict] = {}
         prior_calls: list[str] = []
         continuation_target: str | None = None
+        attempted_nonread = False
 
         try:
             for round_index in range(MAX_TOOL_ROUNDS + 1):
@@ -241,26 +246,55 @@ class AgentLoop:
                     return
                 messages.append({"role": "assistant", "content": mask_text("".join(content)) or None,
                                  "tool_calls": mask_value(tool_calls)})
+                executed_count = 0
                 for call in tool_calls:
-                    outcome = await executor.execute(call, trusted, prior_calls)
-                    for event in outcome.events:
-                        yield AgentEvent(event.type, event.data)
-                    if outcome.stop_reason:
-                        return
-                    # Approval tokens travel only in client events; all other
-                    # Tool observations can safely be supplied to the model.
-                    if outcome.observation is None:
-                        raise RuntimeError("Nonterminal Tool execution had no observation")
                     name = call["function"]["name"]
+                    cache_key = (read_cache_key(name, call["function"]["arguments"])
+                                 if not attempted_nonread else None)
+                    if cache_key is not None and cache_key in read_cache:
+                        # Satisfy the model tool_call_id without re-executing or
+                        # duplicating SSE cards, audits or trusted result rows.
+                        observation = read_cache[cache_key]
+                    else:
+                        if name not in CACHEABLE_READ_TOOLS:
+                            attempted_nonread = True
+                            # A write or dynamic Tool may change state. Never
+                            # serve earlier read snapshots after it is attempted.
+                            read_cache.clear()
+                        outcome = await executor.execute(call, trusted, prior_calls)
+                        executed_count += 1
+                        for event in outcome.events:
+                            yield AgentEvent(event.type, event.data)
+                        if outcome.stop_reason:
+                            return
+                        # Approval tokens travel only in client events.
+                        if outcome.observation is None:
+                            raise RuntimeError("Nonterminal Tool execution had no observation")
+                        observation = outcome.observation
+                        tool_results.append((name, observation))
+                        prior_calls.append(
+                            f"{name}:{'success' if observation.get('ok') else 'denied'}"
+                        )
+                        if cache_key is not None and observation.get("ok") is True:
+                            read_cache[cache_key] = observation
                     messages.append({
                         "role": "tool",
                         "tool_call_id": mask_text(call["id"]),
-                        "content": json.dumps(outcome.observation, ensure_ascii=False),
+                        "content": json.dumps(observation, ensure_ascii=False),
                     })
-                    tool_results.append((name, outcome.observation))
-                    prior_calls.append(
-                        f"{name}:{'success' if outcome.observation.get('ok') else 'denied'}"
+                if executed_count == 0:
+                    # Model repeated only already verified read calls. Do not
+                    # spend the remaining rounds on a no-progress loop.
+                    partial = verified_partial_read_reply(
+                        tool_results, user_request=original_request or "",
                     )
+                    if partial is not None:
+                        yield AgentEvent("delta", {"text": partial})
+                    else:
+                        yield AgentEvent("error", {
+                            "message": "查询没有取得新的可信结果，请简化请求后重试。",
+                        })
+                    return
                 # When the requested verified read-only results are already complete,
                 # the server can finish deterministically. A further model round may
                 # otherwise produce redundant/unsafe tool calls without new value.
@@ -271,5 +305,14 @@ class AgentLoop:
                     yield AgentEvent("delta", {"text": final_readonly_text})
                     return
         except Exception:
-            yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
+            # The provider or a later READ tool can fail after earlier tools
+            # succeeded. Preserve those verified observations; never invent
+            # the missing step or claim that a PREPARE operation succeeded.
+            partial = (verified_partial_read_reply(
+                tool_results, user_request=original_request or "",
+            ) if not attempted_nonread else None)
+            if partial is not None:
+                yield AgentEvent("delta", {"text": partial})
+            else:
+                yield AgentEvent("error", {"message": "模型服务暂时不可用，请稍后再试。"})
             return

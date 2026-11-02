@@ -1,5 +1,5 @@
 {
-  "source_revision": "2eb7454d349354592064c1a6859756230d4ea0a8",
+  "source_revision": "03426ceefa32e425452108195ea2ea9eb872c876",
   "static_prompts": {
     "SYSTEM_PROMPT": "976ac34290cb8a39",
     "GUARD_SYSTEM_PROMPT": "3637e17f6d8f8e21",
@@ -21,7 +21,8 @@
     "read_completion": "read_completion:6e2412d31ecbbedc",
     "grounded_summary": "grounded_summary:914aba9adc782878",
     "compound_read_summary": "compound_read_summary:4a8ba5eebfd1587f",
-    "agent_loop": "agent_loop:4a08dfc3d318c6fb",
+    "read_result_recovery": "read_result_recovery:74e3bc01f24acef4",
+    "agent_loop": "agent_loop:bd9b3523b46c09a5",
     "scope_contract": "scope_contract:d5d1151bd5920a21"
   }
 }
